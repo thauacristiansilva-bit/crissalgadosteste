@@ -6,6 +6,7 @@ export type GoogleAddress = {
   state: string
   zipCode: string
   formattedAddress: string
+  locationType?: string
 }
 
 declare global {
@@ -165,7 +166,7 @@ export async function geocodeGoogleAddress(address: string) {
   }
 }
 
-export async function reverseGeocodeGoogle(latitude: number, longitude: number) {
+export async function reverseGeocodeGoogle(latitude: number, longitude: number): Promise<GoogleAddress | null> {
   const geocoder = await createGeocoder()
   const response = await geocoder.geocode({ location: { lat: latitude, lng: longitude } })
   const results = response.results || []
