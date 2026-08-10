@@ -2,13 +2,13 @@ import path from "node:path"
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
   images: {
-    unoptimized: true
+    unoptimized: true,
   },
+
   turbopack: {
-    root: path.resolve(process.cwd())
-  }
+    root: path.resolve(process.cwd()),
+  },
 }
 
 export default nextConfig
