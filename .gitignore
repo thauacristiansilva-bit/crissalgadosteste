@@ -1,4 +1,4 @@
-# v0 sandbox internal files
+# v0 / Vercel
 __v0_runtime_loader.js
 __v0_devtools.tsx
 __v0_jsx-dev-runtime.ts
@@ -6,34 +6,26 @@ __v0_jsx-dev-runtime.ts
 .v0-trash/
 .vercel/
 
-# Dependências
-node_modules/
-
-# Next.js
-.next/
-out/
-
-# Variáveis de ambiente / senhas
+# Environment variables / segredos
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 
-# Permitir arquivo de exemplo
-!.env.example
+# Dependências e build
+node_modules/
+.next/
+out/
+*.tsbuildinfo
 
-# Banco local do Cris Salgados
+# Dados operacionais locais (o seed fica versionado em data/store.seed.json)
 data/store.json
 
-# Imagens enviadas pelo sistema
+# Uploads operacionais
 public/uploads/*
-
-# Manter a pasta uploads no Git
 !public/uploads/.gitkeep
-
-# TypeScript
-*.tsbuildinfo
 
 # Logs
 npm-debug.log*
@@ -41,11 +33,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Sistema operacional
+# Sistema / IDE
 .DS_Store
 Thumbs.db
-
-# IDE
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json

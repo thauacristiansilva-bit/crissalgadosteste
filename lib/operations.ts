@@ -1,4 +1,5 @@
 import type { BusinessHour, DeliveryZone, StoreSettings } from "@/lib/types"
+import { compareDeliveryZoneSpecificity, pointInPolygonInclusive } from "@/lib/delivery-zone-geometry"
 
 export const FORTALEZA_TIME_ZONE = "America/Fortaleza"
 
@@ -60,10 +61,23 @@ export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: 
   return 2 * earth * Math.asin(Math.sqrt(a))
 }
 
+export function pointInPolygon(latitude: number, longitude: number, points: Array<{ lat: number; lng: number }>) {
+  return pointInPolygonInclusive({ lat: latitude, lng: longitude }, points)
+}
+
 export function findDeliveryZone(zones: DeliveryZone[], latitude: number, longitude: number) {
-  return zones
+  const matches = zones
     .filter((zone) => zone.active)
-    .map((zone) => ({ zone, distance: haversineMeters(zone.centerLat, zone.centerLng, latitude, longitude) }))
-    .filter((entry) => entry.distance <= entry.zone.radiusMeters)
-    .sort((a, b) => a.zone.radiusMeters - b.zone.radiusMeters || a.zone.fee - b.zone.fee)[0] || null
+    .map((zone) => {
+      if (zone.shape === "polygon" && zone.points.length >= 3) {
+        return pointInPolygon(latitude, longitude, zone.points) ? { zone, distance: 0 } : null
+      }
+      const distance = haversineMeters(zone.centerLat, zone.centerLng, latitude, longitude)
+      return distance <= zone.radiusMeters ? { zone, distance } : null
+    })
+    .filter((entry): entry is { zone: DeliveryZone; distance: number } => Boolean(entry))
+  // Quando duas áreas encostam ou uma cobertura externa passa sobre uma interna,
+  // a área geograficamente menor é a mais específica e recebe o ponto.
+  // Isso elimina faixas sem cobertura e também evita duas taxas concorrendo pelo mesmo endereço.
+  return matches.sort((a, b) => compareDeliveryZoneSpecificity(a.zone, b.zone))[0] || null
 }

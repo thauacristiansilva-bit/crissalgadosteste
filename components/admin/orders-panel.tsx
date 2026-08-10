@@ -9,6 +9,9 @@ import {
   CreditCard,
   MapPin,
   MessageCircle,
+  Printer,
+  FileText,
+  Download,
   PackageCheck,
   QrCode,
   Search,
@@ -16,7 +19,8 @@ import {
   Truck,
   XCircle,
 } from "lucide-react"
-import type { Courier, Order, OrderStatus, PaymentStatus } from "@/lib/types"
+import type { Courier, Order, OrderStatus, PaymentStatus, StoreSettings } from "@/lib/types"
+import { printOrder } from "@/lib/print-order"
 
 const statusLabels: Record<OrderStatus, string> = {
   pending: "Pendente legado",
@@ -74,10 +78,12 @@ export function OrdersPanel({
   orders,
   couriers,
   onOrderUpdated,
+  settings,
 }: {
   orders: Order[]
   couriers: Courier[]
   onOrderUpdated: (order: Order) => void
+  settings: StoreSettings
 }) {
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<"all" | OrderStatus>("all")
@@ -275,6 +281,40 @@ export function OrdersPanel({
                     >
                       <CheckCircle2 className="h-4 w-4" /> Marcar pago
                     </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => printOrder(order, settings, "kitchen")}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  >
+                    <Printer className="h-4 w-4" /> Ticket cozinha
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => printOrder(order, settings, "customer")}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <FileText className="h-4 w-4" /> Ticket cliente
+                  </button>
+
+                  <a
+                    href={`/api/orders/${order.id}/ticket-pdf?mode=customer`}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <Download className="h-4 w-4" /> Baixar ticket PDF
+                  </a>
+
+                  {settings.fiscalEnabled && settings.fiscalProviderUrl && (
+                    <a
+                      href={settings.fiscalProviderUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700"
+                    >
+                      <FileText className="h-4 w-4" /> Emitir nota fiscal
+                    </a>
                   )}
 
                   {!(["completed", "cancelled"] as OrderStatus[]).includes(order.status) && (

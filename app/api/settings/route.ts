@@ -12,6 +12,6 @@ export async function PATCH(request: Request) {
   if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
   const body = (await request.json().catch(() => null)) as Partial<StoreSettings> | null
   if (!body) return NextResponse.json({ error: "Dados inválidos." }, { status: 400 })
-  const settings = await updateSettings(body)
+  const settings = await updateSettings({ ...body, systemName: "SaborFlow" })
   return NextResponse.json({ settings })
 }

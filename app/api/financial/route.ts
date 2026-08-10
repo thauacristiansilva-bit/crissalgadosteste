@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server"
+import { isAdminAuthenticated } from "@/lib/auth"
+import { createFinancialEntry, getFinancialEntries } from "@/lib/db"
+export async function GET() { if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 }); return NextResponse.json({ entries: await getFinancialEntries() }) }
+export async function POST(request: Request) { if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 }); const body = await request.json().catch(() => null) as any; try { const entry = await createFinancialEntry({ type: body?.type === "expense" ? "expense" : "income", category: String(body?.category || "Geral"), description: String(body?.description || ""), amount: Number(body?.amount || 0) }); return NextResponse.json({ entry }, { status: 201 }) } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Erro no lançamento." }, { status: 400 }) } }

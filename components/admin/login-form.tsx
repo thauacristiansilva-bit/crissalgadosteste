@@ -4,9 +4,9 @@ import { FormEvent, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react"
 
-export function LoginForm({ defaultEmail }: { defaultEmail: string }) {
+export function LoginForm() {
   const router = useRouter()
-  const [email, setEmail] = useState(defaultEmail)
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -40,20 +40,20 @@ export function LoginForm({ defaultEmail }: { defaultEmail: string }) {
         <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">E-mail</span>
         <div className="relative">
           <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input required type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+          <input required type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" />
         </div>
       </label>
       <label className="block">
         <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Senha</span>
         <div className="relative">
           <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input required type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-11 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" placeholder="Digite sua senha" />
+          <input required type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-11 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" placeholder="Digite sua senha" />
           <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>
             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
       </label>
-      <button disabled={busy} type="submit" className="h-12 w-full rounded-xl bg-blue-700 text-sm font-black text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50">
+      <button disabled={busy} type="submit" className="h-12 w-full rounded-xl text-sm font-black text-white shadow-sm transition hover:brightness-105 disabled:opacity-50" style={{ background: "linear-gradient(135deg, #d96d00 0%, #f59e0b 100%)" }}>
         {busy ? "Entrando..." : "Entrar no painel"}
       </button>
     </form>

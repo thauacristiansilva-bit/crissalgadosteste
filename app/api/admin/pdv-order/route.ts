@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server"
+import { isAdminAuthenticated } from "@/lib/auth"
+import { createPdvOrder } from "@/lib/db"
+import type { Order } from "@/lib/types"
+export async function POST(request: Request) { if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 }); const body = await request.json().catch(() => null) as any; if (!body?.items?.length) return NextResponse.json({ error: "Adicione produtos." }, { status: 400 }); try { const order = await createPdvOrder({ type: body.type === "delivery" ? "delivery" : "pickup", paymentMethod: (["pix","cash","card"].includes(body.paymentMethod) ? body.paymentMethod : "cash") as Order["paymentMethod"], customer: body.customer || { name: "Balcão", phone: "", address: "" }, items: body.items, requestedFor: body.requestedFor || new Date().toISOString(), notes: body.notes, changeFor: body.changeFor, couponCode: body.couponCode }); return NextResponse.json({ order }, { status: 201 }) } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao criar pedido." }, { status: 400 }) } }

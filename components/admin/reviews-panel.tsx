@@ -1,0 +1,17 @@
+"use client"
+
+import { useMemo } from "react"
+import { ExternalLink, Star } from "lucide-react"
+import type { Feedback, StoreSettings } from "@/lib/types"
+
+const date = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value))
+
+export function ReviewsPanel({ feedbacks, settings }: { feedbacks: Feedback[]; settings: StoreSettings }) {
+  const average = useMemo(() => feedbacks.length ? feedbacks.reduce((sum, item) => sum + item.rating, 0) / feedbacks.length : 0, [feedbacks])
+  const counts = useMemo(() => [1,2,3,4,5].map((rating) => feedbacks.filter((item) => item.rating === rating).length), [feedbacks])
+  return <div className="space-y-5">
+    <section className="grid gap-3 sm:grid-cols-3"><article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">Nota média interna</p><p className="mt-2 text-4xl font-black">{average ? average.toFixed(1) : "—"}<span className="text-lg text-gray-400">/5</span></p></article><article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">Avaliações recebidas</p><p className="mt-2 text-4xl font-black">{feedbacks.length}</p></article><article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">Google</p>{settings.googleReviewUrl ? <a href={settings.googleReviewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-black text-white">Abrir avaliações <ExternalLink className="h-4 w-4"/></a> : <p className="mt-3 text-sm text-amber-700">Configure o link do Google em Configurações.</p>}</article></section>
+    <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-black">Distribuição das notas</h2><div className="mt-4 space-y-2">{counts.map((count,index) => { const rating = index + 1; const percent = feedbacks.length ? count / feedbacks.length * 100 : 0; return <div key={rating} className="grid grid-cols-[50px_1fr_40px] items-center gap-3"><span className="flex items-center gap-1 text-sm font-bold">{rating}<Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400"/></span><div className="h-2 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-amber-400" style={{ width: `${percent}%` }}/></div><span className="text-right text-xs text-gray-500">{count}</span></div> })}</div></section>
+    <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"><div className="border-b border-gray-100 px-5 py-4"><h2 className="font-black">Feedback dos clientes</h2><p className="text-sm text-gray-500">Notas enviadas após a conclusão do pedido.</p></div><div className="divide-y divide-gray-100">{feedbacks.map((item) => <article key={item.id} className="p-5"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{item.reaction} {item.customerName}</p><p className="mt-1 text-xs text-gray-400">{item.orderReference} · {date(item.createdAt)}</p></div><span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-black text-amber-700">{item.rating}/5</span></div>{item.comment && <p className="mt-3 rounded-xl bg-gray-50 p-3 text-sm text-gray-700">{item.comment}</p>}</article>)}{!feedbacks.length && <div className="p-12 text-center text-sm text-gray-400">Ainda não há avaliações.</div>}</div></section>
+  </div>
+}

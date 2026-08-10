@@ -15,9 +15,10 @@ type ProductDraft = {
   featured: boolean
   trackStock: boolean
   stock: string
+  minStock: string
 }
 
-const emptyDraft: ProductDraft = { name: "", description: "", category: "Salgados", price: "", image: "", featured: false, trackStock: false, stock: "0" }
+const emptyDraft: ProductDraft = { name: "", description: "", category: "Salgados", price: "", image: "", featured: false, trackStock: false, stock: "0", minStock: "0" }
 
 export function ProductsPanel({ products, categories, onProductsChanged }: { products: Product[]; categories: Category[]; onProductsChanged: (products: Product[]) => void }) {
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft)
@@ -29,7 +30,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
 
   function beginEdit(product: Product) {
     setEditingId(product.id)
-    setDraft({ name: product.name, description: product.description, category: product.category, price: String(product.price).replace(".", ","), image: product.image || "", featured: product.featured, trackStock: product.trackStock, stock: String(product.stock) })
+    setDraft({ name: product.name, description: product.description, category: product.category, price: String(product.price).replace(".", ","), image: product.image || "", featured: product.featured, trackStock: product.trackStock, stock: String(product.stock), minStock: String(product.minStock) })
     setError("")
   }
 
@@ -74,7 +75,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
       const response = await fetch(editingId ? `/api/products/${editingId}` : "/api/products", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: draft.name, description: draft.description, category: draft.category, price, image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0) }),
+        body: JSON.stringify({ name: draft.name, description: draft.description, category: draft.category, price, image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível salvar o produto.")
@@ -140,7 +141,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
 
           <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><strong className="block text-sm text-gray-800">Produto em destaque</strong><small className="text-xs text-gray-500">Aparece primeiro no cardápio.</small></span><input type="checkbox" checked={draft.featured} onChange={(e) => setDraft({ ...draft, featured: e.target.checked })} className="h-5 w-5" /></label>
           <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><strong className="block text-sm text-gray-800">Controlar estoque</strong><small className="text-xs text-gray-500">Impede venda acima do saldo.</small></span><input type="checkbox" checked={draft.trackStock} onChange={(e) => setDraft({ ...draft, trackStock: e.target.checked })} className="h-5 w-5" /></label>
-          {draft.trackStock && <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Quantidade em estoque</span><input type="number" min="0" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>}
+          {draft.trackStock && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Quantidade em estoque</span><input type="number" min="0" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Estoque mínimo / alerta</span><input type="number" min="0" value={draft.minStock} onChange={(e) => setDraft({ ...draft, minStock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label></div>}
         </div>
         <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
       </form>

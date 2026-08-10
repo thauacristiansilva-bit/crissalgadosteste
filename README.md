@@ -1,114 +1,187 @@
-# Cris Salgados — Sistema completo
+# CrisFlow / Cris Salgados — plataforma de pedidos e operação
 
-Projeto Next.js com site de pedidos, cozinha e painel administrativo no mesmo servidor.
+Sistema Next.js 16 que reúne **site do cliente, delivery, retirada, PDV, cozinha/KDS, estoque, clientes, caixa, marketing e administração** no mesmo servidor.
 
-## Novidades desta versão
+> Nome padrão nesta versão: **CrisFlow**. Em Admin → Configurações você pode trocar o nome do sistema, cores, logo e capa sem editar código.
 
-### Agendamento e horário de funcionamento
-- Pedidos enviados durante o expediente entram como **aceitos automaticamente**.
-- O cliente escolhe **dia e horário de recebimento** para retirada ou delivery.
-- O servidor valida o horário escolhido contra a agenda semanal cadastrada no admin.
-- Delivery usa janela operacional configurável (por padrão **30 a 50 minutos**).
-- Retirada possui antecedência mínima configurável.
-- É possível definir intervalo dos horários (por exemplo, a cada 15 minutos) e quantos dias à frente podem ser agendados.
+## O que já está incluído
 
-### Cozinha / KDS
-- Relógio em tempo real no ambiente da cozinha.
-- Pedidos ordenados pelo **horário de recebimento**, não pelo horário de criação.
-- Verde: prazo confortável.
-- Amarelo: entrando na janela de atenção.
-- Vermelho: prioridade imediata ou atraso.
-- Exibe horário em que o pedido entrou e horário que o cliente escolheu para receber.
-- O admin consulta novos pedidos automaticamente a cada 5 segundos.
+### Site do cliente
+- Capa horizontal configurável (estilo banner/capa), logo, cores e textos editáveis pelo admin.
+- Cardápio, categorias, busca, destaques, fotos, carrinho e cupom.
+- Retirada ou delivery.
+- Agendamento por dia e horário, respeitando o expediente.
+- Delivery com Google Maps, GPS de alta precisão, pino arrastável e clique/toque para ajustar o ponto.
+- CEP **opcional**: quando usado, ViaCEP preenche rua, bairro, cidade e estado; o cliente informa o número.
+- Geocodificação/reversa pelo Google Maps para refinar o endereço quando o pino muda.
+- Taxa calculada pela área de entrega cadastrada no mapa do admin.
+- PIX, dinheiro, cartão, troco e observações.
+- Login de cliente com CPF + PIN e opção “manter login salvo”. O CPF é usado como identificador; o PIN evita que qualquer pessoa que saiba o CPF consiga entrar.
+- Dados do cliente logado preenchem pedidos futuros.
+- Pontos de fidelidade.
+- Depois do pedido: escolha entre abrir WhatsApp com o resumo pronto ou acompanhar pelo site.
+- Página de acompanhamento por referência.
+- Feedback de 1 a 5 com emojis após conclusão.
+- Chatbot rápido para horário, entrega, pagamento e WhatsApp.
 
-### Imagens dos produtos
-- No cadastro/edição do produto há um botão para escolher imagem do **celular ou computador**.
-- Aceita JPG, PNG e WEBP de até 5 MB.
-- As imagens ficam em `public/uploads`.
+### Admin
+- Dashboard com indicadores e alerta de caixa fechado.
+- Pedidos em tempo real, filtros, pagamento, entregador e status.
+- Impressão manual de ticket de cozinha e cliente.
+- Download do ticket do cliente em PDF.
+- Fila para impressão automática com agente Windows.
+- PDV/balcão com o mesmo cardápio e estoque.
+- Cozinha/KDS com relógio, ordem por horário prometido e prioridade verde/amarela/vermelha.
+- Inventário: disponibilidade, estoque, estoque mínimo e alertas.
+- Cardápio: criar/editar produtos, foto por arquivo local, destaque, disponibilidade e estoque.
+- Categorias.
+- Clientes: busca, segmentação automática, status, pontos, WhatsApp, novo cliente, importação CSV e exportação CSV.
+- Vendas e caixa: abertura/fechamento, lançamentos financeiros, histórico e CSV.
+- Marketing: cupons, fidelidade, segmentos, mensagens de WhatsApp, links do Google e rastreamento.
+- Avaliações internas e atalho para o link oficial de avaliação no Google.
+- QR Codes para página principal e cardápio.
+- Equipe e funções (cadastro de colaboradores e papéis operacionais).
+- Configurações de pagamentos, negócio, horários, login do cliente, impressão, Google, fiscal e totem.
+- Cadastro de entregadores.
+- Áreas/taxas de delivery no Google Maps.
+- Totem/autoatendimento em `/totem` quando habilitado.
 
-### Áreas e taxas de entrega
-- A taxa de delivery não é fixa.
-- Em **Configurações → Áreas e taxas de entrega**, clique no mapa para posicionar uma área circular.
-- Defina nome, raio em metros e valor da taxa.
-- É possível cadastrar várias áreas.
-- Quando áreas se sobrepõem, a menor área compatível é usada primeiro.
-- O cliente calcula a entrega pelo endereço ou GPS.
-- O servidor valida novamente a coordenada e bloqueia pedidos fora das áreas cadastradas.
-- O projeto vem com 3 áreas de exemplo (1,5 km / 3 km / 5 km), que podem ser apagadas.
+## Limites de integrações externas desta versão
 
-### Entregadores
-- Cadastro de nome, telefone e veículo.
-- Ativar/desativar entregadores.
-- Pedidos de delivery podem receber um entregador pelo painel de pedidos.
+Algumas funções dependem de credenciais/serviços de terceiros e por isso ficam preparadas, mas não podem ser “inventadas” dentro do ZIP:
 
-## Site do cliente (`/`)
-- Cardápio conectado ao admin
-- Busca e categorias
-- Fotos dos produtos
-- Carrinho e quantidades
-- Retirada ou delivery
-- Escolha obrigatória de dia e horário
-- CEP automático via ViaCEP
-- Geocodificação do endereço e GPS
-- Taxa calculada pela área de entrega
-- PIX, dinheiro ou cartão
-- Troco e observações
-- Criação do pedido diretamente no servidor
-- Página de acompanhamento em `/pedido/REFERENCIA`
-- Atualização automática do status do pedido
+- **Avaliação Google:** o sistema registra a nota interna e abre o link configurado para o cliente publicar a avaliação no Google. Ele não publica a nota no Google sem a ação do cliente.
+- **WhatsApp em massa:** abre conversas com mensagem pronta. Envio servidor-a-servidor em massa exige sua conta/API oficial do WhatsApp Business e regras próprias da Meta.
+- **NF-e/NFC-e:** há campo para provedor fiscal e atalho por pedido. Emissão fiscal real exige escolher um provedor, certificado/credenciais e dados tributários da empresa.
+- **Equipe:** o módulo cadastra funções e permissões-base. Nesta entrega, o login do painel continua sendo o login administrativo principal; autenticação individual de cada funcionário pode ser ligada depois sem mudar os cadastros.
 
-## Administração (`/admin`)
-- Login protegido
-- Dashboard com indicadores
-- Pedidos e pagamentos
-- Aceite automático de pedidos WEB dentro do expediente
-- Fluxo: aceito → preparação → pronto → em rota/concluído
-- Tela de cozinha por prioridade de horário
-- Produtos com upload de imagem
-- Categorias e estoque
-- Clientes
-- Horário semanal
-- Agendamento e tempos operacionais
-- Áreas de entrega no mapa
-- Cadastro de entregadores
+## Configuração local
 
-## Abrir no VS Code
-
-Abra **esta pasta**, a que contém `package.json`.
+Abra a pasta que contém `package.json` e rode:
 
 ```powershell
 npm install
 npm run dev
 ```
 
-Abra:
-
-- Site do cliente: `http://localhost:3000`
+- Cliente: `http://localhost:3000`
 - Admin: `http://localhost:3000/admin`
+- Totem: `http://localhost:3000/totem`
 
-## Login local inicial
-
-- E-mail: `admin@crissalgados.com`
-- Senha: `cris1234`
-
-## Trocar senha
+### `.env.local`
 
 Crie `.env.local` na raiz:
 
 ```env
 ADMIN_EMAIL=admin@crissalgados.com
-ADMIN_PASSWORD=SUA_SENHA_FORTE
-SESSION_SECRET=UMA_CHAVE_LONGA_E_ALEATORIA
+ADMIN_PASSWORD=troque-por-uma-senha-forte
+SESSION_SECRET=gere-uma-chave-longa-e-aleatoria
+CLIENT_SESSION_SECRET=gere-outra-chave-longa-e-aleatoria
+
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=sua-chave-restrita-do-google
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=seu-map-id
+
+PRINT_AGENT_TOKEN=gere-um-token-forte-para-a-impressora
 ```
 
-Depois reinicie `npm run dev`.
+Nunca envie `.env.local` para o GitHub.
 
-## Observação sobre domingo
+## Google Maps
 
-A configuração inicial preserva o horário antigo do projeto: **segunda a sábado, 08:00–20:00; domingo fechado**. Para testar pedidos no domingo, entre no Admin → Configurações → Horários e habilite domingo.
+No Google Cloud, use seu projeto do Maps e habilite as APIs usadas pelo sistema:
 
-## Dados locais
+- Maps JavaScript API
+- Geocoding API
 
-Pedidos, produtos, áreas, entregadores e configurações ficam em `data/store.json`. Imagens enviadas ficam em `public/uploads`.
+Restrinja a chave aos seus sites, por exemplo:
 
-Para produção pública com vários acessos simultâneos, a evolução recomendada continua sendo PostgreSQL/Supabase no lugar do JSON local.
+```text
+http://localhost:3000/*
+http://127.0.0.1:3000/*
+https://SEU-DOMINIO.up.railway.app/*
+```
+
+O mapa do cliente e o mapa de áreas do admin usam a mesma chave. Um Map ID próprio é recomendado para os marcadores avançados; durante testes o projeto possui fallback de demonstração.
+
+## Dados e privacidade
+
+- Arquivo operacional local: `data/store.json` (ignorado pelo Git).
+- Seed inicial versionado: `data/store.seed.json`.
+- O CPF completo **não é salvo em texto puro**: a conta guarda hash do CPF e somente os 4 últimos dígitos para identificação visual.
+- O PIN é salvo com hash derivado por scrypt.
+- Antes de uso comercial, publique política de privacidade/LGPD, termos e canais para correção/exclusão de dados.
+
+## Railway — persistência recomendada
+
+Para não perder pedidos/fotos em redeploy, crie um **Volume** e monte em:
+
+```text
+/data
+```
+
+No Railway → Variables configure:
+
+```env
+DATA_FILE=/data/store.json
+UPLOAD_DIR=/data/uploads
+```
+
+Na primeira inicialização em um volume vazio, o servidor copia o conteúdo de `data/store.seed.json` para o arquivo operacional.
+
+Também configure no Railway:
+
+```env
+ADMIN_EMAIL=...
+ADMIN_PASSWORD=...
+SESSION_SECRET=...
+CLIENT_SESSION_SECRET=...
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=...
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=...
+PRINT_AGENT_TOKEN=...
+```
+
+Depois faça novo deploy.
+
+> Com armazenamento JSON, mantenha **1 réplica** do serviço. Para crescimento real, múltiplas unidades/alto volume ou integrações complexas, migre a persistência para PostgreSQL/Supabase.
+
+## Impressão automática
+
+O navegador não é usado para impressão silenciosa. O ZIP inclui um agente Windows que consulta pedidos novos e imprime na impressora configurada:
+
+```text
+INICIAR-IMPRESSAO-AUTOMATICA.ps1
+CONFIGURAR-IMPRESSAO-AUTOMATICA.md
+```
+
+Configure o mesmo `PRINT_AGENT_TOKEN` no Railway e no agente. Deixe o computador da loja e a impressora ligados durante o atendimento.
+
+## Importação de clientes
+
+Use `IMPORTAR-CLIENTES-EXEMPLO.csv` como modelo. Colunas obrigatórias:
+
+```text
+Nome;Telefone;CPF;PIN;Email
+```
+
+O PIN precisa ter de 4 a 6 números.
+
+## Atualizar o sistema que já está no GitHub/Railway
+
+Leia `ATUALIZAR-NO-RAILWAY.md` antes de copiar esta versão sobre o projeto atual.
+
+## Sugestões de nomes
+
+- **CrisFlow** — melhor para manter a marca Cris e transmitir operação integrada.
+- **PedidoCris** — mais simples e direto para o cliente final.
+- **CrisHub** — bom se o produto crescer para vários módulos.
+- **SaborFlow** — bom se futuramente quiser vender o sistema para outros negócios.
+- **PedidoFlow** — nome genérico para produto SaaS.
+- **SalgadoHub** — muito ligado ao nicho atual.
+- **CrisPOS** — forte para PDV, mas reduz a percepção do delivery/site.
+- **ComandaFlow** — bom para restaurantes, mesas e atendimento presencial.
+
+Antes de adotar um nome comercial fora da Cris Salgados, confira disponibilidade de domínio, redes sociais e registro de marca.
+
+## Mapa e entrega automatizados
+
+O sistema usa Google Maps Platform para localizar a empresa e os clientes sem cadastro operacional de bairros. O Admin pode escolher preço fixo, entrega grátis, distância percorrida, faixas por distância ou áreas personalizadas desenhadas no mapa. Consulte `MAPA-E-ENTREGA-AUTOMATIZADOS.md`.

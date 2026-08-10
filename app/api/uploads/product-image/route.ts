@@ -19,9 +19,9 @@ export async function POST(request: Request) {
   if (!extension) return NextResponse.json({ error: "Use uma imagem JPG, PNG ou WEBP." }, { status: 400 })
   if (file.size > 5 * 1024 * 1024) return NextResponse.json({ error: "A imagem deve ter no máximo 5 MB." }, { status: 400 })
 
-  const directory = path.join(process.cwd(), "public", "uploads")
+  const directory = process.env.UPLOAD_DIR || path.join(process.cwd(), "public", "uploads")
   await fs.mkdir(directory, { recursive: true })
   const filename = `${Date.now()}-${crypto.randomUUID()}.${extension}`
   await fs.writeFile(path.join(directory, filename), Buffer.from(await file.arrayBuffer()))
-  return NextResponse.json({ url: `/uploads/${filename}` }, { status: 201 })
+  return NextResponse.json({ url: `/api/media/${filename}` }, { status: 201 })
 }

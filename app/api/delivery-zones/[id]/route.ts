@@ -14,6 +14,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     ...(body.centerLng !== undefined ? { centerLng: Number(body.centerLng) } : {}),
     ...(body.radiusMeters !== undefined ? { radiusMeters: Number(body.radiusMeters) } : {}),
     ...(body.fee !== undefined ? { fee: Number(body.fee) } : {}),
+    ...(body.shape !== undefined ? { shape: body.shape === "polygon" ? "polygon" as const : "circle" as const } : {}),
+    ...(Array.isArray(body.points) ? { points: body.points as Array<{ lat: number; lng: number }> } : {}),
     ...(body.active !== undefined ? { active: Boolean(body.active) } : {}),
   })
   if (!deliveryZone) return NextResponse.json({ error: "Área não encontrada." }, { status: 404 })

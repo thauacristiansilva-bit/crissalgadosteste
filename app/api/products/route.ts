@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     featured: Boolean(body.featured),
     trackStock: Boolean(body.trackStock),
     stock: Number(body.stock || 0),
+    minStock: Number(body.minStock || 0),
   })
   return NextResponse.json({ product }, { status: 201 })
 }

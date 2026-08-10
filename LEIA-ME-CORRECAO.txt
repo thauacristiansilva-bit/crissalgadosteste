@@ -1,0 +1,15 @@
+CRISFLOW v11.2 - CORRECAO REDES SOCIAIS / LUCIDE
+
+Corrige imports de ícones de marca que não existem na versão instalada de lucide-react:
+- Facebook
+- Instagram
+- YouTube
+
+Os três ícones agora são componentes SVG locais em:
+components/icons/social-brand-icons.tsx
+
+Instalação:
+1. Pare o servidor com Ctrl+C.
+2. Copie o conteúdo deste pacote para a raiz do projeto e aceite substituir.
+3. Remova o cache: Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue
+4. Rode: npm run dev

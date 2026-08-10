@@ -21,6 +21,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     ...(body.featured !== undefined ? { featured: Boolean(body.featured) } : {}),
     ...(body.trackStock !== undefined ? { trackStock: Boolean(body.trackStock) } : {}),
     ...(body.stock !== undefined ? { stock: Number(body.stock) } : {}),
+    ...(body.minStock !== undefined ? { minStock: Number(body.minStock) } : {}),
   })
   if (!product) return NextResponse.json({ error: "Produto não encontrado." }, { status: 404 })
   return NextResponse.json({ product })

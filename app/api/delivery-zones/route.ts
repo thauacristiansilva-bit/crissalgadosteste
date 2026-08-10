@@ -16,8 +16,10 @@ export async function POST(request: Request) {
       name: String(body.name || ""),
       centerLat: Number(body.centerLat),
       centerLng: Number(body.centerLng),
-      radiusMeters: Number(body.radiusMeters),
+      radiusMeters: Number(body.radiusMeters || 1500),
       fee: Number(body.fee),
+      shape: body.shape === "polygon" ? "polygon" : "circle",
+      points: Array.isArray(body.points) ? body.points as Array<{ lat: number; lng: number }> : [],
     })
     return NextResponse.json({ deliveryZone }, { status: 201 })
   } catch (error) {

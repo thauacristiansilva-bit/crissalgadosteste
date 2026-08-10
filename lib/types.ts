@@ -9,6 +9,23 @@ export type OrderStatus =
   | "completed"
   | "cancelled"
 export type PaymentStatus = "paid" | "unpaid"
+export type CustomerSegment = "new" | "repeat" | "frequent" | "elite"
+export type CustomerLifecycle = "never" | "active" | "sleeping" | "inactive"
+export type StaffRole = "admin" | "manager" | "cashier" | "kitchen" | "courier"
+export type DeliveryPricingMode = "free" | "fixed" | "distance" | "customAreas" | "distanceBands"
+
+export interface GeoPoint {
+  lat: number
+  lng: number
+}
+
+export interface DeliveryDistanceBand {
+  id: string
+  minKm: number
+  maxKm: number
+  fee: number
+  active: boolean
+}
 
 export interface BusinessHour {
   day: number
@@ -38,6 +55,7 @@ export interface Product {
   image?: string
   trackStock: boolean
   stock: number
+  minStock: number
   createdAt: string
   updatedAt: string
 }
@@ -45,11 +63,14 @@ export interface Product {
 export interface DeliveryZone {
   id: number
   name: string
+  color: string
+  fee: number
+  active: boolean
+  shape: "polygon" | "circle"
+  points: GeoPoint[]
   centerLat: number
   centerLng: number
   radiusMeters: number
-  fee: number
-  active: boolean
   createdAt: string
   updatedAt: string
 }
@@ -84,6 +105,7 @@ export interface OrderCustomer {
   complement?: string
   latitude?: number | null
   longitude?: number | null
+  accountId?: number
 }
 
 export interface Order {
@@ -94,6 +116,8 @@ export interface Order {
   status: OrderStatus
   channel: "WEB" | "PDV" | "APP"
   subtotal: number
+  discount: number
+  couponCode?: string
   deliveryFee: number
   total: number
   paymentStatus: PaymentStatus
@@ -107,17 +131,107 @@ export interface Order {
   deliveryZoneName?: string
   requestedFor: string
   scheduled: boolean
+  printedAt?: string
   items: OrderItem[]
   createdAt: string
   updatedAt: string
 }
 
+export interface CustomerAccount {
+  id: number
+  cpfHash: string
+  cpfLast4: string
+  pinHash: string
+  name: string
+  phone: string
+  email: string
+  defaultAddress: string
+  defaultNumber: string
+  defaultDistrict: string
+  defaultCity: string
+  defaultState: string
+  defaultZipCode: string
+  defaultComplement: string
+  defaultLatitude: number | null
+  defaultLongitude: number | null
+  loyaltyPoints: number
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Feedback {
+  id: number
+  orderId: number
+  orderReference: string
+  customerName: string
+  rating: 1 | 2 | 3 | 4 | 5
+  reaction: string
+  comment: string
+  createdAt: string
+}
+
+export interface Coupon {
+  id: number
+  code: string
+  description: string
+  type: "percent" | "fixed"
+  value: number
+  minimumOrder: number
+  active: boolean
+  expiresAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CashSession {
+  id: number
+  openedAt: string
+  openedBy: string
+  openingAmount: number
+  closedAt?: string
+  closingAmount?: number
+  notes?: string
+}
+
+
+export interface StaffMember {
+  id: number
+  name: string
+  email: string
+  phone: string
+  role: StaffRole
+  active: boolean
+  permissions: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FinancialEntry {
+  id: number
+  type: "income" | "expense"
+  category: string
+  description: string
+  amount: number
+  createdAt: string
+}
+
 export interface StoreSettings {
   storeName: string
+  systemName: string
   slogan: string
+  welcomeTitle: string
+  welcomeText: string
   phone: string
   whatsapp: string
+  whatsappUrl: string
+  instagramUrl: string
+  facebookUrl: string
+  tiktokUrl: string
+  youtubeUrl: string
+  websiteUrl: string
   address: string
+  storeDistrict: string
   city: string
   state: string
   zipCode: string
@@ -126,7 +240,15 @@ export interface StoreSettings {
   acceptingOrders: boolean
   pickupEnabled: boolean
   deliveryEnabled: boolean
+  dineInEnabled: boolean
   deliveryFee: number
+  deliveryPricingMode: DeliveryPricingMode
+  fixedDeliveryFee: number
+  distanceBaseFee: number
+  distanceFeePerKm: number
+  maxDeliveryDistanceKm: number
+  freeDeliveryAbove: number
+  deliveryDistanceBands: DeliveryDistanceBand[]
   minimumOrder: number
   estimatedMinutes: number
   deliveryMinMinutes: number
@@ -134,10 +256,42 @@ export interface StoreSettings {
   pickupLeadMinutes: number
   slotIntervalMinutes: number
   schedulingDaysAhead: number
+  checkoutTimingVersion: number
   pixKey: string
   openingHours: string
   businessHours: BusinessHour[]
   pickupInstructions: string
+  primaryColor: string
+  secondaryColor: string
+  backgroundColor: string
+  logoImage: string
+  coverImage: string
+  googleReviewUrl: string
+  googleBusinessUrl: string
+  checkoutAfterSubmit: "ask" | "whatsapp" | "site"
+  clientAccountsEnabled: boolean
+  rememberClientDays: number
+  loyaltyEnabled: boolean
+  loyaltyPointsPerReal: number
+  loyaltyRewardText: string
+  loyaltyRewardPoints: number
+  autoPrintNewOrders: boolean
+  printerName: string
+  printCopies: number
+  printKitchenTicket: boolean
+  printCustomerTicket: boolean
+  whatsappBulkEnabled: boolean
+  chatbotEnabled: boolean
+  chatbotGreeting: string
+  cashRegisterEnabled: boolean
+  fiscalEnabled: boolean
+  fiscalProviderUrl: string
+  totemEnabled: boolean
+  googleAnalyticsId: string
+  metaPixelId: string
+  cardEnabled: boolean
+  cashEnabled: boolean
+  pixEnabled: boolean
 }
 
 export interface StoreData {
@@ -146,6 +300,12 @@ export interface StoreData {
   orders: Order[]
   deliveryZones: DeliveryZone[]
   couriers: Courier[]
+  customerAccounts: CustomerAccount[]
+  feedbacks: Feedback[]
+  coupons: Coupon[]
+  cashSessions: CashSession[]
+  financialEntries: FinancialEntry[]
+  staffMembers: StaffMember[]
   settings: StoreSettings
   sequence: {
     product: number
@@ -153,6 +313,12 @@ export interface StoreData {
     order: number
     deliveryZone: number
     courier: number
+    customerAccount: number
+    feedback: number
+    coupon: number
+    cashSession: number
+    financialEntry: number
+    staffMember: number
   }
 }
 
@@ -174,4 +340,8 @@ export interface CustomerSummary {
   orders: number
   totalSpent: number
   lastOrderAt: string
+  loyaltyPoints: number
+  segment: CustomerSegment
+  lifecycle: CustomerLifecycle
+  cpfLast4?: string
 }

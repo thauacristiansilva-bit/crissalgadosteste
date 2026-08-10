@@ -1,0 +1,18 @@
+import { NextResponse } from "next/server"
+import { createCustomerAccount, getSettings, safeCustomer } from "@/lib/db"
+import { CLIENT_SESSION_COOKIE, createClientToken } from "@/lib/client-auth"
+
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => null) as { cpf?: string; pin?: string; name?: string; phone?: string; email?: string; remember?: boolean } | null
+  if (!body) return NextResponse.json({ error: "Dados inválidos." }, { status: 400 })
+  try {
+    const account = await createCustomerAccount({ cpf: body.cpf || "", pin: body.pin || "", name: body.name || "", phone: body.phone || "", email: body.email || "" })
+    const settings = await getSettings()
+    const days = body.remember === false ? 1 : settings.rememberClientDays
+    const response = NextResponse.json({ customer: safeCustomer(account) }, { status: 201 })
+    response.cookies.set(CLIENT_SESSION_COOKIE, createClientToken(account.id, days), { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: days * 86400 })
+    return response
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível criar a conta." }, { status: 400 })
+  }
+}
