@@ -4,11 +4,22 @@ import {
 } from "next/server"
 import {
   getDeliveryZones as getLegacyDeliveryZones,
-  getSettings,
+  getSettings as getLegacySettings,
 } from "@/lib/db"
 import {
-  getCurrentDeploymentDeliveryZones,
+  getTenantDeliveryZones,
+  isTenantOperationsReady,
 } from "@/lib/operations-db"
+import {
+  getTenantSettings,
+  isTenantRuntimeReady,
+} from "@/lib/organization-db"
+import {
+  isCurrentDeploymentOrganization,
+} from "@/lib/catalog-db"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
 import {
   calculateDeliveryQuote,
 } from "@/lib/delivery-pricing"
@@ -38,24 +49,60 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [settings, postgresZones] =
-      await Promise.all([
-        getSettings(),
-        getCurrentDeploymentDeliveryZones().catch(
-          () => null,
-        ),
-      ])
+    const organization =
+      await resolvePublicOrganizationForRequest(
+        request,
+      )
+
+    if (!organization) {
+      throw new Error("Empresa não encontrada.")
+    }
+
+    const runtimeReady =
+      await isTenantRuntimeReady(
+        organization.id,
+      ).catch(() => false)
+
+    const operationsReady =
+      await isTenantOperationsReady(
+        organization.id,
+      ).catch(() => false)
+
+    const isCurrent =
+      await isCurrentDeploymentOrganization(
+        organization.id,
+      )
+
+    const settings =
+      runtimeReady
+        ? await getTenantSettings(organization.id)
+        : isCurrent
+          ? await getLegacySettings()
+          : null
 
     const zones =
-      postgresZones ||
-      (await getLegacyDeliveryZones())
+      operationsReady
+        ? await getTenantDeliveryZones(
+            organization.id,
+          )
+        : isCurrent
+          ? await getLegacyDeliveryZones()
+          : null
+
+    if (!settings || !zones) {
+      throw new Error(
+        "Entrega ainda não foi habilitada para esta empresa.",
+      )
+    }
 
     const quote = await calculateDeliveryQuote(
       settings,
       zones,
       latitude,
       longitude,
-      Number.isFinite(subtotal) ? subtotal : 0,
+      Number.isFinite(subtotal)
+        ? subtotal
+        : 0,
     )
 
     return NextResponse.json({ quote })

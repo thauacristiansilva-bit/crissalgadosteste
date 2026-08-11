@@ -15,6 +15,9 @@ import {
   isCurrentDeploymentOrganization,
 } from "@/lib/catalog-db"
 import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
+import {
   CLIENT_SESSION_COOKIE,
   LEGACY_CLIENT_SESSION_COOKIE,
   createClientToken,
@@ -39,8 +42,14 @@ export async function POST(request: Request) {
     )
   }
 
+  const publicOrganization =
+    await resolvePublicOrganizationForRequest(
+      request,
+    )
+
   const organizationId =
-    await getCurrentDeploymentOrganizationId()
+    publicOrganization?.id ||
+    (await getCurrentDeploymentOrganizationId())
 
   if (!organizationId) {
     return NextResponse.json(
@@ -52,6 +61,21 @@ export async function POST(request: Request) {
   try {
     const customersReady =
       await isTenantCustomersReady(organizationId)
+
+    if (
+      !customersReady &&
+      !(await isCurrentDeploymentOrganization(
+        organizationId,
+      ))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Cadastro de clientes ainda não foi habilitado para esta empresa.",
+        },
+        { status: 503 },
+      )
+    }
 
     const settings = await getSettings()
 

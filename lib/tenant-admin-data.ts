@@ -13,6 +13,7 @@ import {
 import { membershipExists } from "@/lib/tenant-context"
 import { getTenantCustomers, isTenantCustomersReady } from "@/lib/customer-db"
 import { getTenantOperationsData, isTenantOperationsReady } from "@/lib/operations-db"
+import { getTenantSettings, getTenantStaffMembers, isTenantRuntimeReady } from "@/lib/organization-db"
 
 export async function getTenantAwareAdminData(session: AdminSession) {
   const data = await getAdminData()
@@ -89,6 +90,29 @@ export async function getTenantAwareAdminData(session: AdminSession) {
   } catch (error) {
     console.error(
       "[SaborFlow] Operação PostgreSQL indisponível; usando legado:",
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  try {
+    if (await isTenantRuntimeReady(session.organizationId)) {
+      const [settings, staffMembers] = await Promise.all([
+        getTenantSettings(session.organizationId),
+        getTenantStaffMembers(
+          session.organizationId,
+          { includeInactive: true },
+        ),
+      ])
+
+      if (settings) {
+        data.settings = settings
+      }
+
+      data.staffMembers = staffMembers
+    }
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Configurações/equipe PostgreSQL indisponíveis; usando legado:",
       error instanceof Error ? error.message : error,
     )
   }

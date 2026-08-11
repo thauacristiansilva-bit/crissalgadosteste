@@ -8,6 +8,12 @@ import {
 } from "@/lib/order-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import type { Order } from "@/lib/types"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
+import {
+  isCurrentDeploymentOrganization,
+} from "@/lib/catalog-db"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -34,6 +40,39 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const publicOrganization =
+    await resolvePublicOrganizationForRequest(
+      request,
+    )
+
+  if (
+    publicOrganization &&
+    !publicOrganization.publicOrderingEnabled
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Pedidos online ainda não foram habilitados para esta empresa.",
+      },
+      { status: 503 },
+    )
+  }
+
+  if (
+    publicOrganization &&
+    !(await isCurrentDeploymentOrganization(
+      publicOrganization.id,
+    ))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Esta loja já está publicada, mas o checkout multiempresa será habilitado na próxima etapa.",
+      },
+      { status: 503 },
+    )
+  }
+
   const body = (await request.json().catch(() => null)) as
     | {
         type?: Order["type"]

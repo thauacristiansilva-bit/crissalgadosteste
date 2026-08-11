@@ -9,7 +9,7 @@ const date = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "s
 const statusLabel: Record<Order["status"], string> = { pending: "Pedido recebido", accepted: "Pedido aceito", preparing: "Em preparação", ready: "Pedido pronto", "in-route": "Saiu para entrega", completed: "Concluído", cancelled: "Cancelado" }
 const reactions = ["😞", "🙁", "😐", "🙂", "😍"]
 
-export function OrderTracker({ initialOrder, settings }: { initialOrder: Order; settings: StoreSettings }) {
+export function OrderTracker({ initialOrder, settings, storePath = "/" }: { initialOrder: Order; settings: StoreSettings; storePath?: string }) {
   const [order, setOrder] = useState(initialOrder)
   const [rating, setRating] = useState(5)
   const [comment, setComment] = useState("")
@@ -35,7 +35,7 @@ export function OrderTracker({ initialOrder, settings }: { initialOrder: Order; 
   return (
     <main className="min-h-screen px-4 py-6 text-gray-950 sm:px-6" style={{ backgroundColor: settings.backgroundColor }}>
       <div className="mx-auto max-w-3xl">
-        <a href="/" className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-orange-600"><Home className="h-4 w-4" />Voltar ao cardápio</a>
+        <a href={storePath} className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-orange-600"><Home className="h-4 w-4" />Voltar ao cardápio</a>
         <section className="overflow-hidden rounded-3xl border border-black/5 bg-white shadow-xl">
           <div className="p-6 text-white sm:p-8" style={{ background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.secondaryColor})` }}>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/80">{settings.storeName}</p>

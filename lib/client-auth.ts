@@ -7,6 +7,9 @@ import {
   getCurrentDeploymentOrganizationId,
 } from "@/lib/catalog-db"
 import {
+  resolveServerPublicOrganization,
+} from "@/lib/public-tenant"
+import {
   getTenantCustomerAccount,
   isTenantCustomersReady,
 } from "@/lib/customer-db"
@@ -142,8 +145,12 @@ export type CurrentCustomerContext = {
 export async function getCurrentCustomerContext():
   Promise<CurrentCustomerContext | null> {
   const cookieStore = await cookies()
+  const publicOrganization =
+    await resolveServerPublicOrganization()
+
   const currentOrganizationId =
-    await getCurrentDeploymentOrganizationId()
+    publicOrganization?.id ||
+    (await getCurrentDeploymentOrganizationId())
 
   if (!currentOrganizationId) return null
 

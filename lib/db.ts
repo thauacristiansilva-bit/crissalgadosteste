@@ -980,3 +980,38 @@ export async function syncLegacyCourierFromTenant(courier: Courier) {
     return copy
   })
 }
+
+
+/**
+ * Ponte temporária da Fase 8.
+ *
+ * Configurações e equipe passam a ser tenant-aware no PostgreSQL.
+ * O staff da empresa atual continua espelhado em /data/store.json até a
+ * retirada completa do legado.
+ */
+export async function syncLegacyStaffMemberFromTenant(
+  member: StaffMember,
+) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(
+      JSON.stringify(member),
+    ) as StaffMember
+
+    const index = data.staffMembers.findIndex(
+      (item) => item.id === member.id,
+    )
+
+    if (index >= 0) {
+      data.staffMembers[index] = copy
+    } else {
+      data.staffMembers.push(copy)
+    }
+
+    data.sequence.staffMember = Math.max(
+      data.sequence.staffMember,
+      member.id,
+    )
+
+    return copy
+  })
+}

@@ -15,6 +15,9 @@ import {
   isCurrentDeploymentOrganization,
 } from "@/lib/catalog-db"
 import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
+import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import {
@@ -76,8 +79,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    const publicOrganization =
+      await resolvePublicOrganizationForRequest(
+        request,
+      )
+
     const organizationId =
-      await getCurrentDeploymentOrganizationId()
+      publicOrganization?.id ||
+      (await getCurrentDeploymentOrganizationId())
 
     const ready =
       organizationId &&
@@ -86,6 +95,17 @@ export async function POST(request: Request) {
       ).catch(() => false))
 
     if (!organizationId || !ready) {
+      if (
+        organizationId &&
+        !(await isCurrentDeploymentOrganization(
+          organizationId,
+        ))
+      ) {
+        throw new Error(
+          "Avaliações ainda não foram habilitadas para esta empresa.",
+        )
+      }
+
       const feedback = await createLegacyFeedback({
         orderReference: body.orderReference,
         rating: body.rating,

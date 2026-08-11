@@ -24,3 +24,16 @@ export function canManageFinance(role: OrganizationRole) {
 export function canManageDeliveryOperation(role: OrganizationRole) {
   return role === "owner" || role === "admin" || role === "manager"
 }
+
+
+export function canManageOrganizationSettings(
+  role: OrganizationRole,
+) {
+  return role === "owner" || role === "admin"
+}
+
+export function canManageTeam(
+  role: OrganizationRole,
+) {
+  return role === "owner" || role === "admin"
+}

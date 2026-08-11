@@ -11,7 +11,11 @@ import {
 } from "@/lib/customer-db"
 import {
   getCurrentDeploymentOrganizationId,
+  isCurrentDeploymentOrganization,
 } from "@/lib/catalog-db"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
 import {
   CLIENT_SESSION_COOKIE,
   LEGACY_CLIENT_SESSION_COOKIE,
@@ -34,8 +38,14 @@ export async function POST(request: Request) {
     )
   }
 
+  const publicOrganization =
+    await resolvePublicOrganizationForRequest(
+      request,
+    )
+
   const organizationId =
-    await getCurrentDeploymentOrganizationId()
+    publicOrganization?.id ||
+    (await getCurrentDeploymentOrganizationId())
 
   if (!organizationId) {
     return NextResponse.json(
@@ -46,6 +56,21 @@ export async function POST(request: Request) {
 
   const customersReady =
     await isTenantCustomersReady(organizationId).catch(() => false)
+
+  if (
+    !customersReady &&
+    !(await isCurrentDeploymentOrganization(
+      organizationId,
+    ))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Contas de clientes ainda não foram habilitadas para esta empresa.",
+      },
+      { status: 503 },
+    )
+  }
 
   const account = customersReady
     ? await authenticateTenantCustomer(
