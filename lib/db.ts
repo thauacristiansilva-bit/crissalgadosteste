@@ -5,6 +5,7 @@ import { defaultBusinessHours, isStoreOpenNow, isWithinBusinessHours } from "@/l
 import { calculateDeliveryQuote } from "@/lib/delivery-pricing"
 import { assertDeliveryZoneValid, deliveryZoneColor, nextDeliveryZoneColor } from "@/lib/delivery-zone-geometry"
 import { IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
+import { syncCurrentDeploymentProductStocks } from "@/lib/catalog-db"
 import type {
   CashSession,
   Category,
@@ -478,7 +479,7 @@ export async function createOrder(input: CreateOrderInput) {
     preparedDeliveryQuote = await calculateDeliveryQuote(snapshot.settings, snapshot.deliveryZones, latitude, longitude, 0)
   }
 
-  return mutateStore((data) => {
+  const order = await mutateStore((data) => {
     const nowDate = new Date(); const now = nowDate.toISOString()
     if (input.channel !== "PDV" && !isStoreOpenNow(data.settings, nowDate)) throw new Error("Pedidos são aceitos somente durante o horário de funcionamento da loja.")
     if (input.type === "delivery" && !data.settings.deliveryEnabled) throw new Error("Delivery indisponível no momento.")
@@ -537,6 +538,26 @@ export async function createOrder(input: CreateOrderInput) {
     }
     data.sequence.order = id; data.orders.push(order); return order
   })
+
+  // Fase 4: enquanto os pedidos ainda ficam no store.json, o estoque do
+  // catálogo PostgreSQL é sincronizado após cada venda da empresa atual.
+  // Falha nessa sincronização nunca cancela um pedido já criado.
+  try {
+    const changedIds = new Set(order.items.map((item) => item.productId))
+    const currentProducts = await getProducts({ includeInactive: true })
+    await syncCurrentDeploymentProductStocks(
+      currentProducts
+        .filter((product) => changedIds.has(product.id))
+        .map((product) => ({ id: product.id, stock: product.stock })),
+    )
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Não foi possível sincronizar o estoque no PostgreSQL:",
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  return order
 }
 
 export async function createPdvOrder(input: Omit<CreateOrderInput, "channel" | "bypassLeadTime">) {
@@ -696,4 +717,60 @@ export async function getPublicStore() {
 export function safeCustomer(account: CustomerAccount) {
   const { cpfHash: _cpfHash, pinHash: _pinHash, ...safe } = account
   return safe
+}
+
+
+/**
+ * Ponte temporária da Fase 4.
+ *
+ * O catálogo administrativo passa a ser multiempresa no PostgreSQL, mas
+ * storefront e pedidos continuam no store.json até a migração dos pedidos.
+ * Estas funções mantêm apenas a empresa atual compatível com o fluxo legado.
+ */
+export async function syncLegacyCategoryFromTenant(
+  category: Category,
+  previousName?: string,
+) {
+  return mutateStore((data) => {
+    const index = data.categories.findIndex((item) => item.id === category.id)
+
+    if (index >= 0) {
+      data.categories[index] = { ...category }
+    } else {
+      data.categories.push({ ...category })
+    }
+
+    data.sequence.category = Math.max(data.sequence.category, category.id)
+
+    if (
+      previousName &&
+      previousName.toLowerCase() !== category.name.toLowerCase()
+    ) {
+      const now = new Date().toISOString()
+
+      data.products.forEach((product) => {
+        if (product.category.toLowerCase() === previousName.toLowerCase()) {
+          product.category = category.name
+          product.updatedAt = now
+        }
+      })
+    }
+
+    return category
+  })
+}
+
+export async function syncLegacyProductFromTenant(product: Product) {
+  return mutateStore((data) => {
+    const index = data.products.findIndex((item) => item.id === product.id)
+
+    if (index >= 0) {
+      data.products[index] = { ...product }
+    } else {
+      data.products.push({ ...product })
+    }
+
+    data.sequence.product = Math.max(data.sequence.product, product.id)
+    return product
+  })
 }
