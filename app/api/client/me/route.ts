@@ -1,4 +1,16 @@
 import { NextResponse } from "next/server"
-import { getCurrentCustomerAccount } from "@/lib/client-auth"
-import { safeCustomer } from "@/lib/db"
-export async function GET() { const account = await getCurrentCustomerAccount(); return NextResponse.json({ customer: account ? safeCustomer(account) : null }) }
+import {
+  getCurrentCustomerContext,
+} from "@/lib/client-auth"
+import { safeTenantCustomer } from "@/lib/customer-db"
+
+export async function GET() {
+  const context = await getCurrentCustomerContext()
+
+  return NextResponse.json({
+    customer: context
+      ? safeTenantCustomer(context.account)
+      : null,
+    sessionMode: context?.sessionMode ?? null,
+  })
+}

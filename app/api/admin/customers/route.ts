@@ -1,34 +1,165 @@
 import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
-import { createCustomerAccount, getCustomers, safeCustomer } from "@/lib/db"
+import {
+  createCustomerAccount as createLegacyCustomerAccount,
+  getCustomers as getLegacyCustomers,
+  safeCustomer,
+  syncLegacyCustomerAccountFromTenant,
+} from "@/lib/db"
+import {
+  createTenantCustomerAccount,
+  getTenantCustomers,
+  isTenantCustomersReady,
+  safeTenantCustomer,
+} from "@/lib/customer-db"
+import {
+  isCurrentDeploymentOrganization,
+} from "@/lib/catalog-db"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import {
+  getSettings,
+} from "@/lib/db"
 
-interface CustomerInput { cpf?: string; pin?: string; name?: string; phone?: string; email?: string }
+interface CustomerInput {
+  cpf?: string
+  pin?: string
+  name?: string
+  phone?: string
+  email?: string
+}
+
+function canManageCustomers(role: string) {
+  return (
+    role === "owner" ||
+    role === "admin" ||
+    role === "manager"
+  )
+}
 
 export async function POST(request: Request) {
-  if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
-  const body = await request.json().catch(() => null) as (CustomerInput & { customers?: CustomerInput[] }) | null
-  if (!body) return NextResponse.json({ error: "Dados inválidos." }, { status: 400 })
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json(
+      { error: "Não autorizado." },
+      { status: 401 },
+    )
+  }
 
-  const entries = Array.isArray(body.customers) ? body.customers : [body]
-  if (!entries.length || entries.length > 300) return NextResponse.json({ error: "Envie entre 1 e 300 clientes por vez." }, { status: 400 })
+  const body = (await request.json().catch(() => null)) as
+    | (CustomerInput & { customers?: CustomerInput[] })
+    | null
 
+  if (!body) {
+    return NextResponse.json(
+      { error: "Dados inválidos." },
+      { status: 400 },
+    )
+  }
+
+  const entries = Array.isArray(body.customers)
+    ? body.customers
+    : [body]
+
+  if (!entries.length || entries.length > 300) {
+    return NextResponse.json(
+      { error: "Envie entre 1 e 300 clientes por vez." },
+      { status: 400 },
+    )
+  }
+
+  const session = await getVerifiedTenantSession()
+  const tenantReady =
+    session &&
+    (await isTenantCustomersReady(
+      session.organizationId,
+    ).catch(() => false))
+
+  if (
+    session &&
+    tenantReady &&
+    !canManageCustomers(session.role)
+  ) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode cadastrar clientes." },
+      { status: 403 },
+    )
+  }
+
+  const settings = await getSettings()
   const created = []
-  const errors: Array<{ row: number; error: string }> = []
+  const errors: Array<{
+    row: number
+    error: string
+  }> = []
+
   for (let index = 0; index < entries.length; index += 1) {
     const item = entries[index]
+
     try {
-      const account = await createCustomerAccount({
-        cpf: item.cpf || "",
-        pin: item.pin || "",
-        name: item.name || "",
-        phone: item.phone || "",
-        email: item.email || "",
-      })
-      created.push(safeCustomer(account))
+      const account =
+        session && tenantReady
+          ? await createTenantCustomerAccount(
+              session.organizationId,
+              {
+                cpf: item.cpf || "",
+                pin: item.pin || "",
+                name: item.name || "",
+                phone: item.phone || "",
+                email: item.email || "",
+                defaultCity: settings.city,
+                defaultState: settings.state,
+              },
+            )
+          : await createLegacyCustomerAccount({
+              cpf: item.cpf || "",
+              pin: item.pin || "",
+              name: item.name || "",
+              phone: item.phone || "",
+              email: item.email || "",
+            })
+
+      if (
+        session &&
+        tenantReady &&
+        (await isCurrentDeploymentOrganization(
+          session.organizationId,
+        ))
+      ) {
+        await syncLegacyCustomerAccountFromTenant(
+          account,
+        )
+      }
+
+      created.push(
+        session && tenantReady
+          ? safeTenantCustomer(account)
+          : safeCustomer(account),
+      )
     } catch (error) {
-      errors.push({ row: index + 1, error: error instanceof Error ? error.message : "Não foi possível cadastrar." })
+      errors.push({
+        row: index + 1,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível cadastrar.",
+      })
     }
   }
 
-  return NextResponse.json({ created, errors, customers: await getCustomers() }, { status: created.length ? 201 : 400 })
+  const customers =
+    session && tenantReady
+      ? await getTenantCustomers(session.organizationId)
+      : await getLegacyCustomers()
+
+  return NextResponse.json(
+    {
+      created,
+      errors,
+      customers,
+    },
+    {
+      status: created.length ? 201 : 400,
+    },
+  )
 }

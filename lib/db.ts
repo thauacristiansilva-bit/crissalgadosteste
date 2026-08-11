@@ -7,6 +7,7 @@ import { assertDeliveryZoneValid, deliveryZoneColor, nextDeliveryZoneColor } fro
 import { IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
 import { syncCurrentDeploymentProductStocks } from "@/lib/catalog-db"
 import { syncCurrentDeploymentOrderFromLegacy } from "@/lib/order-db"
+import { syncCurrentDeploymentCustomerAccountFromLegacy } from "@/lib/customer-db"
 import type {
   CashSession,
   Category,
@@ -569,6 +570,27 @@ export async function createOrder(input: CreateOrderInput) {
     )
   }
 
+  if (order.customer.accountId) {
+    try {
+      const legacyAccount = await getCustomerAccount(
+        order.customer.accountId,
+      )
+
+      if (legacyAccount) {
+        await syncCurrentDeploymentCustomerAccountFromLegacy(
+          legacyAccount,
+        )
+      }
+    } catch (error) {
+      // Os pontos já foram aplicados no fluxo legado. Uma falha de espelho
+      // não pode fazer o cliente reenviar o pedido e gerar duplicidade.
+      console.error(
+        "[SaborFlow] Pontos do cliente não sincronizados no PostgreSQL:",
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
   return order
 }
 
@@ -639,6 +661,7 @@ export async function authenticateCustomer(cpf: string, pin: string) {
   const data = await readStore(); const account = data.customerAccounts.find((item) => item.active && item.cpfHash === cpfHash(cpf)); if (!account || !validPin(pin, account.pinHash)) return null; return account
 }
 export async function getCustomerAccount(id: number) { const data = await readStore(); return data.customerAccounts.find((item) => item.id === id && item.active) || null }
+export async function getCustomerAccounts(options?: { includeInactive?: boolean }) { const data = await readStore(); return options?.includeInactive ? [...data.customerAccounts] : data.customerAccounts.filter((item) => item.active) }
 export async function updateCustomerAccount(id: number, patch: Partial<Pick<CustomerAccount, "name" | "phone" | "email" | "defaultAddress" | "defaultNumber" | "defaultDistrict" | "defaultCity" | "defaultState" | "defaultZipCode" | "defaultComplement" | "defaultLatitude" | "defaultLongitude">>) {
   return mutateStore((data) => { const account = data.customerAccounts.find((item) => item.id === id); if (!account) return null; Object.assign(account, patch, { updatedAt: new Date().toISOString() }); return account })
 }
@@ -808,5 +831,40 @@ export async function syncLegacyOrderFromTenant(order: Order) {
 
     data.sequence.order = Math.max(data.sequence.order, order.id)
     return order
+  })
+}
+
+
+/**
+ * Ponte temporária da Fase 6.
+ *
+ * Contas de clientes passam a pertencer ao organization_id no PostgreSQL.
+ * A empresa atual ainda mantém o mesmo registro no store.json enquanto o
+ * checkout/loyalty legado não foi totalmente retirado.
+ */
+export async function syncLegacyCustomerAccountFromTenant(
+  account: CustomerAccount,
+) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(
+      JSON.stringify(account),
+    ) as CustomerAccount
+
+    const index = data.customerAccounts.findIndex(
+      (item) => item.id === account.id,
+    )
+
+    if (index >= 0) {
+      data.customerAccounts[index] = copy
+    } else {
+      data.customerAccounts.push(copy)
+    }
+
+    data.sequence.customerAccount = Math.max(
+      data.sequence.customerAccount,
+      account.id,
+    )
+
+    return copy
   })
 }
