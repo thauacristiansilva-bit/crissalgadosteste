@@ -543,7 +543,7 @@ export async function createOrganizationForUser(
           $3,
           'organization.create',
           'organization',
-          $2::text,
+          $2::uuid::text,
           $4::jsonb
         )
       `,
