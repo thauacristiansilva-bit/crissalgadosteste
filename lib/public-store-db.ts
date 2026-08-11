@@ -48,8 +48,13 @@ export async function getPublicStoreForOrganization(
     )
   }
 
-  let products = []
-  let categories = []
+  let products: Awaited<
+    ReturnType<typeof getTenantProducts>
+  > = []
+
+  let categories: Awaited<
+    ReturnType<typeof getTenantCategories>
+  > = []
 
   if (
     await isTenantCatalogReady(
@@ -66,7 +71,9 @@ export async function getPublicStoreForOrganization(
     categories = legacy.categories
   }
 
-  let deliveryZones = []
+  let deliveryZones: Awaited<
+    ReturnType<typeof getTenantDeliveryZones>
+  > = []
 
   if (
     await isTenantOperationsReady(
