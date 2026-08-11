@@ -10,7 +10,7 @@ import {
   createTenantCoupon,
   getTenantCoupons,
   isTenantOperationsReady,
-  validateCurrentDeploymentCoupon,
+  validateTenantCoupon,
 } from "@/lib/operations-db"
 import {
   isCurrentDeploymentOrganization,
@@ -21,6 +21,9 @@ import {
 import {
   canManageMarketing,
 } from "@/lib/tenant-permissions"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -31,15 +34,43 @@ export async function GET(request: Request) {
 
   if (code) {
     try {
+      const publicOrganization =
+        await resolvePublicOrganizationForRequest(
+          request,
+        )
+
       const postgresResult =
-        await validateCurrentDeploymentCoupon(
-          code,
-          subtotal,
-        ).catch(() => null)
+        publicOrganization &&
+        (await isTenantOperationsReady(
+          publicOrganization.id,
+        ).catch(() => false))
+          ? await validateTenantCoupon(
+              publicOrganization.id,
+              code,
+              subtotal,
+            )
+          : null
+
+      const canFallbackLegacy =
+        !publicOrganization ||
+        (await isCurrentDeploymentOrganization(
+          publicOrganization.id,
+        ))
 
       const result =
         postgresResult ||
-        (await validateLegacyCoupon(code, subtotal))
+        (canFallbackLegacy
+          ? await validateLegacyCoupon(
+              code,
+              subtotal,
+            )
+          : null)
+
+      if (!result) {
+        throw new Error(
+          "Cupons ainda não foram habilitados para esta empresa.",
+        )
+      }
 
       return NextResponse.json({
         valid: true,
