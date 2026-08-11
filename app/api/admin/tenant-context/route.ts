@@ -1,38 +1,67 @@
 import { NextResponse } from "next/server"
-import { getAdminSession } from "@/lib/auth"
-import { membershipExists } from "@/lib/tenant-context"
+import {
+  getAdminSession,
+} from "@/lib/auth"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import {
+  listOrganizationMembershipsForUserId,
+} from "@/lib/tenant-context"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-  const session = await getAdminSession()
+  const rawSession =
+    await getAdminSession()
 
-  if (!session) {
+  if (!rawSession) {
     return NextResponse.json(
-      { ok: false, error: "Não autorizado." },
+      {
+        ok: false,
+        error:
+          "Não autorizado.",
+      },
       { status: 401 },
     )
   }
 
-  if (session.mode === "legacy") {
+  if (
+    rawSession.mode === "legacy"
+  ) {
     return NextResponse.json({
       ok: true,
       sessionMode: "legacy",
-      email: session.email,
+      email: rawSession.email,
       organization: null,
+      organizations: [],
       message:
-        "Login ainda está em modo legado. Execute o bootstrap da primeira organização e faça login novamente.",
+        "Login ainda está em modo legado.",
     })
   }
 
-  const activeMembership = await membershipExists(
-    session.userId,
-    session.organizationId,
-  )
+  const session =
+    await getVerifiedTenantSession()
+
+  if (!session) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "A membership ativa não existe mais.",
+      },
+      { status: 403 },
+    )
+  }
+
+  const organizations =
+    await listOrganizationMembershipsForUserId(
+      session.userId,
+    )
 
   return NextResponse.json({
-    ok: activeMembership,
+    ok: true,
     sessionMode: "tenant",
     user: {
       id: session.userId,
@@ -40,10 +69,28 @@ export async function GET() {
       role: session.role,
     },
     organization: {
-      id: session.organizationId,
-      name: session.organizationName,
-      slug: session.organizationSlug,
+      id:
+        session.organizationId,
+      name:
+        session.organizationName,
+      slug:
+        session.organizationSlug,
     },
-    activeMembership,
+    activeMembership: true,
+    organizations:
+      organizations.map(
+        (organization) => ({
+          id:
+            organization.organizationId,
+          name:
+            organization.organizationName,
+          slug:
+            organization.organizationSlug,
+          role:
+            organization.role,
+          publicOrderingEnabled:
+            organization.publicOrderingEnabled,
+        }),
+      ),
   })
 }

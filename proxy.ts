@@ -17,7 +17,7 @@ export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   const match = pathname.match(
-    /^\/loja\/([^/]+)\/?$/,
+    /^\/loja\/([^/]+)(?:\/|$)/,
   )
 
   if (match?.[1]) {

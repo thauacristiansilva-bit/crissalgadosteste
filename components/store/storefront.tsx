@@ -33,14 +33,43 @@ function timeToMinutes(value: string) { const [h, m] = value.split(":").map(Numb
 function formatCep(value: string) { const digits = value.replace(/\D/g, "").slice(0, 8); return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits }
 function externalUrl(value: string) { const clean = value.trim(); if (!clean) return ""; return /^https?:\/\//i.test(clean) ? clean : `https://${clean}` }
 
-export function Storefront({ products, categories, settings, deliveryZones, openNow }: { products: Product[]; categories: Category[]; settings: StoreSettings; deliveryZones: DeliveryZone[]; openNow: boolean }) {
+export function Storefront({
+  products,
+  categories,
+  settings,
+  deliveryZones,
+  openNow,
+  organization,
+}: {
+  products: Product[]
+  categories: Category[]
+  settings: StoreSettings
+  deliveryZones: DeliveryZone[]
+  openNow: boolean
+  organization?: {
+    id: string
+    name: string
+    slug: string
+    publicOrderingEnabled?: boolean
+  }
+}) {
   const router = useRouter()
+  const cartStorageKey = organization?.slug
+    ? `saborflow_cart_v2:${organization.slug}`
+    : "saborflow_cart_v2:default"
+
+  const orderPath = (reference: string) =>
+    organization?.slug
+      ? `/loja/${encodeURIComponent(
+          organization.slug,
+        )}/pedido/${encodeURIComponent(reference)}`
+      : `/pedido/${encodeURIComponent(reference)}`
   const [isOpen, setIsOpen] = useState(openNow)
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState("Todos")
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartHydrated, setCartHydrated] = useState(false)
-  const cartLoadedRef = useRef(false)
+  const cartLoadedKeyRef = useRef("")
   const [cartOpen, setCartOpen] = useState(false)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
@@ -69,10 +98,13 @@ export function Storefront({ products, categories, settings, deliveryZones, open
   useEffect(() => { fetch("/api/client/me", { cache: "no-store" }).then((r) => r.json()).then((data) => { if (data.customer) setCustomer(data.customer) }).catch(() => undefined) }, [])
 
   useEffect(() => {
-    if (cartLoadedRef.current) return
-    cartLoadedRef.current = true
+    if (cartLoadedKeyRef.current === cartStorageKey) return
+    cartLoadedKeyRef.current = cartStorageKey
+    setCart([])
+    setCartHydrated(false)
+
     try {
-      const saved = window.localStorage.getItem("crisflow_cart_v1")
+      const saved = window.localStorage.getItem(cartStorageKey)
       if (saved) {
         const parsed = JSON.parse(saved) as Array<{ productId?: number; quantity?: number }>
         if (Array.isArray(parsed)) {
@@ -87,20 +119,20 @@ export function Storefront({ products, categories, settings, deliveryZones, open
         }
       }
     } catch {
-      window.localStorage.removeItem("crisflow_cart_v1")
+      window.localStorage.removeItem(cartStorageKey)
     } finally {
       setCartHydrated(true)
     }
-  }, [products])
+  }, [products, cartStorageKey])
 
   useEffect(() => {
     if (!cartHydrated) return
     if (!cart.length) {
-      window.localStorage.removeItem("crisflow_cart_v1")
+      window.localStorage.removeItem(cartStorageKey)
       return
     }
-    window.localStorage.setItem("crisflow_cart_v1", JSON.stringify(cart.map((item) => ({ productId: item.product.id, quantity: item.quantity }))))
-  }, [cart, cartHydrated])
+    window.localStorage.setItem(cartStorageKey, JSON.stringify(cart.map((item) => ({ productId: item.product.id, quantity: item.quantity }))))
+  }, [cart, cartHydrated, cartStorageKey])
   useEffect(() => {
     if (settings.googleAnalyticsId) {
       const id = settings.googleAnalyticsId.trim()
@@ -414,7 +446,7 @@ export function Storefront({ products, categories, settings, deliveryZones, open
       if (customer) await fetch("/api/client/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: checkout.name, phone: checkout.phone, defaultAddress: checkout.address, defaultNumber: checkout.number, defaultDistrict: checkout.district, defaultCity: checkout.city, defaultState: checkout.state, defaultZipCode: checkout.zipCode, defaultComplement: checkout.complement, defaultLatitude: checkout.latitude, defaultLongitude: checkout.longitude }) }).catch(() => null)
       localStorage.setItem("cris_last_order", data.order.reference); localStorage.removeItem("crisflow_cart_v1"); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order)
       if (settings.checkoutAfterSubmit === "whatsapp") window.location.href = whatsappOrderUrl(data.order)
-      else if (settings.checkoutAfterSubmit === "site") router.push(`/pedido/${encodeURIComponent(data.order.reference)}`)
+      else if (settings.checkoutAfterSubmit === "site") router.push(orderPath(data.order.reference))
     } catch (err) { setError(err instanceof Error ? err.message : "Erro ao enviar pedido.") } finally { setSending(false) }
   }
 
@@ -593,7 +625,7 @@ export function Storefront({ products, categories, settings, deliveryZones, open
 
       <StoreChatbot settings={settings} />
 
-      {createdOrder && settings.checkoutAfterSubmit === "ask" && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido confirmado!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · escolha como quer continuar.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(`/pedido/${encodeURIComponent(createdOrder.reference)}`)} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar pedido no site</button></div></div></div>}
+      {createdOrder && settings.checkoutAfterSubmit === "ask" && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido confirmado!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · escolha como quer continuar.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(orderPath(createdOrder.reference))} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar pedido no site</button></div></div></div>}
     </div>
   )
 }

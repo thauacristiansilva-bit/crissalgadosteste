@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   createCustomerAccount as createLegacyCustomerAccount,
-  getSettings,
+  getSettings as getLegacySettings,
   safeCustomer,
   syncLegacyCustomerAccountFromTenant,
 } from "@/lib/db"
@@ -17,6 +17,10 @@ import {
 import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
+import {
+  getTenantSettings,
+  isTenantRuntimeReady,
+} from "@/lib/organization-db"
 import {
   CLIENT_SESSION_COOKIE,
   LEGACY_CLIENT_SESSION_COOKIE,
@@ -77,7 +81,34 @@ export async function POST(request: Request) {
       )
     }
 
-    const settings = await getSettings()
+    const runtimeReady =
+      await isTenantRuntimeReady(
+        organizationId,
+      ).catch(() => false)
+
+    const isCurrent =
+      await isCurrentDeploymentOrganization(
+        organizationId,
+      )
+
+    const settings =
+      runtimeReady
+        ? await getTenantSettings(
+            organizationId,
+          )
+        : isCurrent
+          ? await getLegacySettings()
+          : null
+
+    if (!settings) {
+      return NextResponse.json(
+        {
+          error:
+            "Configurações da empresa ainda não estão disponíveis.",
+        },
+        { status: 503 },
+      )
+    }
 
     const account = customersReady
       ? await createTenantCustomerAccount(

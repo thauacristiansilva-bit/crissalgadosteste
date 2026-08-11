@@ -57,6 +57,7 @@ import { LinksPanel } from "@/components/admin/links-panel"
 import { ChatbotPanel } from "@/components/admin/chatbot-panel"
 import { TeamPanel } from "@/components/admin/team-panel"
 import { isStoreOpenNow } from "@/lib/operations"
+import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
 
 interface DashboardData {
   summary: DashboardSummary
@@ -209,15 +210,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
             </div>
           </div>
 
-          <div className="mt-4 flex items-center gap-3 rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,.08)", backgroundColor: "rgba(255,255,255,.05)" }}>
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white">
-              {settings.logoImage ? <img src={settings.logoImage} alt={`Logo ${settings.storeName}`} className="h-full w-full object-cover" /> : <Store className="h-5 w-5" style={{ color: saborFlowBrand.orangeStrong }} />}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black text-white">{settings.storeName}</p>
-              <p className="truncate text-[11px]" style={{ color: "#e8c6a0" }}>Empresa ativa</p>
-            </div>
-          </div>
+          <OrganizationSwitcher fallbackName={settings.storeName} />
         </div>
       </div>
 
@@ -244,7 +237,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
       </nav>
 
       <div className="border-t p-4" style={{ borderColor: "rgba(255,255,255,.10)" }}>
-        <a href="/" target="_blank" className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black text-white shadow-sm transition hover:brightness-105" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.orangeStrong}, ${saborFlowBrand.orange})` }}><Store className="h-4 w-4" />Abrir site do cliente</a>
+        <a href="/minha-loja" target="_blank" className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black text-white shadow-sm transition hover:brightness-105" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.orangeStrong}, ${saborFlowBrand.orange})` }}><Store className="h-4 w-4" />Abrir site do cliente</a>
         <div className="mb-3 flex items-center gap-3 rounded-2xl p-3" style={{ backgroundColor: "rgba(255,255,255,.06)" }}>
           <div className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-black text-white" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.orangeStrong}, ${saborFlowBrand.orange})` }}>SF</div>
           <div className="min-w-0 flex-1"><p className="text-xs font-bold text-white">Administrador</p><p className="truncate text-[11px]" style={{ color: "#e8c6a0" }}>{adminEmail}</p></div>
@@ -290,7 +283,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
               <OrdersPanel orders={orders.slice(0, 5)} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} />
               <aside className="space-y-4">
                 <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-gray-900">Atalhos</h2><div className="mt-4 grid gap-2"><button onClick={() => changeSection("pdv")} className="flex items-center gap-3 rounded-xl bg-blue-50 px-4 py-3 text-left text-sm font-bold text-blue-800 hover:bg-blue-100"><ShoppingCart className="h-5 w-5" />Novo pedido no balcão</button><button onClick={() => changeSection("kitchen")} className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-left text-sm font-bold text-amber-800 hover:bg-amber-100"><ChefHat className="h-5 w-5" />Abrir cozinha</button><button onClick={() => changeSection("inventory")} className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left text-sm font-bold text-emerald-800 hover:bg-emerald-100"><PackageSearch className="h-5 w-5" />Ver inventário</button><button onClick={() => changeSection("products")} className="flex items-center gap-3 rounded-xl bg-violet-50 px-4 py-3 text-left text-sm font-bold text-violet-800 hover:bg-violet-100"><BookOpen className="h-5 w-5" />Editar cardápio</button></div></div>
-                <div className="rounded-2xl p-5 text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.orangeStrong} 100%)` }}><p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#ffd39f" }}>Loja online</p><h2 className="mt-2 text-lg font-black">Site conectado ao admin</h2><p className="mt-2 text-sm leading-relaxed text-blue-100">Cardápio, disponibilidade, estoque, branding, taxas e pedidos usam a mesma base.</p><a href="/" target="_blank" className="mt-4 inline-flex rounded-xl bg-white px-3 py-2 text-xs font-black text-blue-900">Abrir cardápio</a></div>
+                <div className="rounded-2xl p-5 text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.orangeStrong} 100%)` }}><p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#ffd39f" }}>Loja online</p><h2 className="mt-2 text-lg font-black">Site conectado ao admin</h2><p className="mt-2 text-sm leading-relaxed text-blue-100">Cardápio, disponibilidade, estoque, branding, taxas e pedidos usam a mesma base.</p><a href="/minha-loja" target="_blank" className="mt-4 inline-flex rounded-xl bg-white px-3 py-2 text-xs font-black text-blue-900">Abrir loja</a></div>
               </aside>
             </div>
           </div>}

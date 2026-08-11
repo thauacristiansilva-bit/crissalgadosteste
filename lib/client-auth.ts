@@ -5,6 +5,7 @@ import {
 import { cookies } from "next/headers"
 import {
   getCurrentDeploymentOrganizationId,
+  isCurrentDeploymentOrganization,
 } from "@/lib/catalog-db"
 import {
   resolveServerPublicOrganization,
@@ -26,6 +27,14 @@ function secret() {
     process.env.CLIENT_SESSION_SECRET ||
     process.env.SESSION_SECRET ||
     "saborflow-client-dev-secret-change-me"
+  )
+}
+
+function legacySecret() {
+  return (
+    process.env.CLIENT_SESSION_SECRET ||
+    process.env.SESSION_SECRET ||
+    "cris-client-dev-secret-change-me"
   )
 }
 
@@ -124,7 +133,7 @@ function parseLegacyToken(token?: string | null) {
   }
 
   const payload = `${accountId}.${expires}`
-  const expected = createHmac("sha256", secret())
+  const expected = createHmac("sha256", legacySecret())
     .update(payload)
     .digest("hex")
 
@@ -177,9 +186,19 @@ export async function getCurrentCustomerContext():
     }
   }
 
+  // Sessões legadas não carregavam organization_id. Por segurança, elas
+  // só são aceitas para a empresa original do deployment. Em outra empresa,
+  // o cliente precisa autenticar novamente e recebe o cookie v2 tenant-aware.
+  if (
+    !(await isCurrentDeploymentOrganization(
+      currentOrganizationId,
+    ))
+  ) {
+    return null
+  }
+
   // Compatibilidade: um cliente que já estava logado antes da Fase 6 não
-  // perde a sessão. Se a fase já estiver pronta, resolvemos o mesmo ID no
-  // PostgreSQL; caso contrário, continuamos no legado.
+  // perde a sessão na empresa original do deployment.
   const legacy = parseLegacyToken(
     cookieStore.get(LEGACY_CLIENT_SESSION_COOKIE)?.value ||
       cookieStore.get(CLIENT_SESSION_COOKIE)?.value,

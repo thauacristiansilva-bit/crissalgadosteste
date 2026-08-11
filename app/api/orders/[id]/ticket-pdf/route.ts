@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
-import { getOrderById as getLegacyOrderById, getSettings } from "@/lib/db"
+import { getOrderById as getLegacyOrderById, getSettings as getLegacySettings } from "@/lib/db"
 import { getTenantOrderById, isTenantOrdersReady } from "@/lib/order-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { getTenantSettings, isTenantRuntimeReady } from "@/lib/organization-db"
+import { isCurrentDeploymentOrganization } from "@/lib/catalog-db"
 
 const money = (value: number) => `R$ ${Number(value).toFixed(2).replace(".", ",")}`
 const stamp = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Fortaleza" }).format(new Date(value))
@@ -50,13 +52,58 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     session &&
     (await isTenantOrdersReady(session.organizationId).catch(() => false))
 
+  const currentDeployment =
+    session
+      ? await isCurrentDeploymentOrganization(
+          session.organizationId,
+        )
+      : true
+
+  if (session && !ready && !currentDeployment) {
+    return NextResponse.json(
+      {
+        error:
+          "Pedidos PostgreSQL desta empresa não estão disponíveis.",
+      },
+      { status: 503 },
+    )
+  }
+
   const order =
     session && ready
       ? await getTenantOrderById(session.organizationId, numericId)
       : await getLegacyOrderById(numericId)
 
   if (!order) return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 })
-  const settings = await getSettings()
+  const runtimeReady =
+    session &&
+    (await isTenantRuntimeReady(
+      session.organizationId,
+    ).catch(() => false))
+
+  if (session && !runtimeReady && !currentDeployment) {
+    return NextResponse.json(
+      {
+        error:
+          "Configurações PostgreSQL desta empresa não estão disponíveis.",
+      },
+      { status: 503 },
+    )
+  }
+
+  const settings =
+    session && runtimeReady
+      ? await getTenantSettings(
+          session.organizationId,
+        )
+      : await getLegacySettings()
+
+  if (!settings) {
+    return NextResponse.json(
+      { error: "Configurações da empresa indisponíveis." },
+      { status: 503 },
+    )
+  }
   const mode = new URL(request.url).searchParams.get("mode") === "kitchen" ? "kitchen" : "customer"
   const lines: Array<{ text: string; bold?: boolean; size?: number }> = [
     { text: settings.storeName.toUpperCase(), bold: true, size: 12 },

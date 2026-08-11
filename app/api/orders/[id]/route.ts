@@ -83,13 +83,13 @@ export async function PATCH(
 
   if (body.courierId !== undefined) {
     const courierId = Number(body.courierId)
-
-    if (
+    const operationsReady =
       session &&
       (await isTenantOperationsReady(
         session.organizationId,
       ).catch(() => false))
-    ) {
+
+    if (session && operationsReady) {
       if (Number.isInteger(courierId) && courierId > 0) {
         const courier = await getTenantCourier(
           session.organizationId,
@@ -113,6 +113,19 @@ export async function PATCH(
           courierName: "",
         }
       }
+    } else if (
+      session &&
+      !(await isCurrentDeploymentOrganization(
+        session.organizationId,
+      ))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Entregadores PostgreSQL desta empresa não estão disponíveis.",
+        },
+        { status: 503 },
+      )
     } else {
       courierPatch = {
         courierId:
@@ -135,6 +148,22 @@ export async function PATCH(
   const ready =
     session &&
     (await isTenantOrdersReady(session.organizationId).catch(() => false))
+
+  if (session && !ready) {
+    if (
+      !(await isCurrentDeploymentOrganization(
+        session.organizationId,
+      ))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Pedidos PostgreSQL desta empresa não estão disponíveis.",
+        },
+        { status: 503 },
+      )
+    }
+  }
 
   if (!session || !ready) {
     const order = await updateLegacyOrder(numericId, patch)

@@ -11,6 +11,14 @@ export const getAdminEmail = () =>
 const getAdminPassword = () =>
   process.env.ADMIN_PASSWORD || "cris1234"
 
+export const getAdminLoginMode = () =>
+  process.env.ADMIN_LOGIN_MODE === "postgres"
+    ? "postgres"
+    : "transition"
+
+export const legacyAdminLoginAllowed = () =>
+  getAdminLoginMode() === "transition"
+
 const getSessionSecret = () =>
   process.env.SESSION_SECRET ||
   `${getAdminPassword()}::cris-salgados-dev-secret`

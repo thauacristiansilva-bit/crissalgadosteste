@@ -18,7 +18,22 @@ export interface AdminTenantContext {
   role: OrganizationRole
 }
 
-const rolePriority: Record<OrganizationRole, number> = {
+export interface OrganizationMembershipSummary
+  extends AdminTenantContext {
+  organizationStatus:
+    | "active"
+    | "trial"
+    | "suspended"
+    | "cancelled"
+  onboardingStatus: "pending" | "complete"
+  publicStoreEnabled: boolean
+  publicOrderingEnabled: boolean
+}
+
+const rolePriority: Record<
+  OrganizationRole,
+  number
+> = {
   owner: 1,
   admin: 2,
   manager: 3,
@@ -28,71 +43,217 @@ const rolePriority: Record<OrganizationRole, number> = {
   member: 7,
 }
 
-export async function listOrganizationsForUser(email: string): Promise<AdminTenantContext[]> {
-  const result = await getPostgresPool().query<{
-    user_id: string
-    email: string
-    organization_id: string
-    organization_name: string
-    organization_slug: string
-    role: OrganizationRole
-  }>(
-    `
-      SELECT
-        u.id AS user_id,
-        u.email,
-        o.id AS organization_id,
-        o.trade_name AS organization_name,
-        o.slug AS organization_slug,
-        m.role
-      FROM sf_users u
-      INNER JOIN sf_memberships m
-        ON m.user_id = u.id
-       AND m.status = 'active'
-      INNER JOIN sf_organizations o
-        ON o.id = m.organization_id
-       AND o.status IN ('active', 'trial')
-      WHERE lower(u.email) = lower($1)
-        AND u.status = 'active'
-      ORDER BY m.created_at ASC
-    `,
-    [email.trim()],
-  )
+type OrganizationMembershipRow = {
+  user_id: string
+  email: string
+  organization_id: string
+  organization_name: string
+  organization_slug: string
+  organization_status:
+    | "active"
+    | "trial"
+    | "suspended"
+    | "cancelled"
+  onboarding_status:
+    | "pending"
+    | "complete"
+  public_store_enabled: boolean
+  public_ordering_enabled: boolean
+  role: OrganizationRole
+}
 
-  return result.rows
-    .map((row) => ({
-      userId: row.user_id,
-      email: row.email,
-      organizationId: row.organization_id,
-      organizationName: row.organization_name,
-      organizationSlug: row.organization_slug,
-      role: row.role,
-    }))
-    .sort((a, b) => rolePriority[a.role] - rolePriority[b.role])
+function mapSummary(
+  row: OrganizationMembershipRow,
+): OrganizationMembershipSummary {
+  return {
+    userId: row.user_id,
+    email: row.email,
+    organizationId:
+      row.organization_id,
+    organizationName:
+      row.organization_name,
+    organizationSlug:
+      row.organization_slug,
+    organizationStatus:
+      row.organization_status,
+    onboardingStatus:
+      row.onboarding_status,
+    publicStoreEnabled:
+      Boolean(row.public_store_enabled),
+    publicOrderingEnabled:
+      Boolean(
+        row.public_ordering_enabled,
+      ),
+    role: row.role,
+  }
+}
+
+function activeSummaryQuery(
+  where: string,
+) {
+  return `
+    SELECT
+      u.id AS user_id,
+      u.email,
+      o.id AS organization_id,
+      o.trade_name AS organization_name,
+      o.slug AS organization_slug,
+      o.status AS organization_status,
+      o.onboarding_status,
+      o.public_store_enabled,
+      o.public_ordering_enabled,
+      m.role
+    FROM sf_users u
+    INNER JOIN sf_memberships m
+      ON m.user_id = u.id
+     AND m.status = 'active'
+    INNER JOIN sf_organizations o
+      ON o.id = m.organization_id
+     AND o.status IN ('active', 'trial')
+    WHERE ${where}
+      AND u.status = 'active'
+    ORDER BY m.created_at ASC
+  `
+}
+
+function sortSummaries(
+  values: OrganizationMembershipSummary[],
+) {
+  return values.sort(
+    (a, b) =>
+      rolePriority[a.role] -
+        rolePriority[b.role] ||
+      a.organizationName.localeCompare(
+        b.organizationName,
+        "pt-BR",
+      ),
+  )
+}
+
+export async function listOrganizationMembershipsForUser(
+  email: string,
+): Promise<OrganizationMembershipSummary[]> {
+  const result =
+    await getPostgresPool().query<OrganizationMembershipRow>(
+      activeSummaryQuery(
+        "lower(u.email) = lower($1)",
+      ),
+      [email.trim()],
+    )
+
+  return sortSummaries(
+    result.rows.map(mapSummary),
+  )
+}
+
+export async function listOrganizationMembershipsForUserId(
+  userId: string,
+): Promise<OrganizationMembershipSummary[]> {
+  const result =
+    await getPostgresPool().query<OrganizationMembershipRow>(
+      activeSummaryQuery("u.id = $1"),
+      [userId],
+    )
+
+  return sortSummaries(
+    result.rows.map(mapSummary),
+  )
+}
+
+export async function listOrganizationsForUser(
+  email: string,
+): Promise<AdminTenantContext[]> {
+  const organizations =
+    await listOrganizationMembershipsForUser(
+      email,
+    )
+
+  return organizations.map(
+    ({
+      organizationStatus: _status,
+      onboardingStatus: _onboarding,
+      publicStoreEnabled: _store,
+      publicOrderingEnabled: _ordering,
+      ...context
+    }) => context,
+  )
+}
+
+export async function listOrganizationsForUserId(
+  userId: string,
+): Promise<AdminTenantContext[]> {
+  const organizations =
+    await listOrganizationMembershipsForUserId(
+      userId,
+    )
+
+  return organizations.map(
+    ({
+      organizationStatus: _status,
+      onboardingStatus: _onboarding,
+      publicStoreEnabled: _store,
+      publicOrderingEnabled: _ordering,
+      ...context
+    }) => context,
+  )
 }
 
 export async function getDefaultAdminTenantContext(
   email: string,
 ): Promise<AdminTenantContext | null> {
-  const organizations = await listOrganizationsForUser(email)
+  const organizations =
+    await listOrganizationsForUser(email)
+
   return organizations[0] ?? null
+}
+
+export async function getDefaultAdminTenantContextForUserId(
+  userId: string,
+): Promise<AdminTenantContext | null> {
+  const organizations =
+    await listOrganizationsForUserId(
+      userId,
+    )
+
+  return organizations[0] ?? null
+}
+
+export async function getOrganizationContextForUser(
+  userId: string,
+  organizationId: string,
+): Promise<AdminTenantContext | null> {
+  const result =
+    await getPostgresPool().query<OrganizationMembershipRow>(
+      `
+        ${activeSummaryQuery(
+          "u.id = $1 AND o.id = $2",
+        )}
+      `,
+      [userId, organizationId],
+    )
+
+  const row = result.rows[0]
+  if (!row) return null
+
+  const {
+    organizationStatus: _status,
+    onboardingStatus: _onboarding,
+    publicStoreEnabled: _store,
+    publicOrderingEnabled: _ordering,
+    ...context
+  } = mapSummary(row)
+
+  return context
 }
 
 export async function membershipExists(
   userId: string,
   organizationId: string,
 ): Promise<boolean> {
-  const result = await getPostgresPool().query(
-    `
-      SELECT 1
-      FROM sf_memberships
-      WHERE user_id = $1
-        AND organization_id = $2
-        AND status = 'active'
-      LIMIT 1
-    `,
-    [userId, organizationId],
+  return Boolean(
+    await getOrganizationContextForUser(
+      userId,
+      organizationId,
+    ),
   )
-
-  return Boolean(result.rowCount)
 }
