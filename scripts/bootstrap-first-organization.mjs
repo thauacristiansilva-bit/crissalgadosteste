@@ -283,14 +283,15 @@ async function main() {
           $3,
           'organization.bootstrap',
           'organization',
-          $2::text,
-          $4::jsonb
+          $4,
+          $5::jsonb
         )
       `,
       [
         randomUUID(),
         organizationId,
         userId,
+        organizationId,
         JSON.stringify({
           source: file,
           storeName,
