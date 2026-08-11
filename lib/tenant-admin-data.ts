@@ -12,6 +12,7 @@ import {
 } from "@/lib/order-db"
 import { membershipExists } from "@/lib/tenant-context"
 import { getTenantCustomers, isTenantCustomersReady } from "@/lib/customer-db"
+import { getTenantOperationsData, isTenantOperationsReady } from "@/lib/operations-db"
 
 export async function getTenantAwareAdminData(session: AdminSession) {
   const data = await getAdminData()
@@ -68,6 +69,26 @@ export async function getTenantAwareAdminData(session: AdminSession) {
   } catch (error) {
     console.error(
       "[SaborFlow] Clientes PostgreSQL indisponíveis; usando legado:",
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  try {
+    if (await isTenantOperationsReady(session.organizationId)) {
+      const operations = await getTenantOperationsData(
+        session.organizationId,
+      )
+
+      data.coupons = operations.coupons
+      data.feedbacks = operations.feedbacks
+      data.cashSessions = operations.cashSessions
+      data.financialEntries = operations.financialEntries
+      data.deliveryZones = operations.deliveryZones
+      data.couriers = operations.couriers
+    }
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Operação PostgreSQL indisponível; usando legado:",
       error instanceof Error ? error.message : error,
     )
   }

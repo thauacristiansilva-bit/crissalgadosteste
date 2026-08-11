@@ -868,3 +868,115 @@ export async function syncLegacyCustomerAccountFromTenant(
     return copy
   })
 }
+
+
+/**
+ * Ponte temporária da Fase 7.
+ *
+ * Os módulos operacionais passam a ser isolados no PostgreSQL. A empresa
+ * atual do deployment continua espelhada no store.json enquanto configurações
+ * e alguns fluxos públicos ainda dependem do legado.
+ */
+export async function syncLegacyCouponFromTenant(coupon: Coupon) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(JSON.stringify(coupon)) as Coupon
+    const index = data.coupons.findIndex((item) => item.id === coupon.id)
+
+    if (index >= 0) data.coupons[index] = copy
+    else data.coupons.push(copy)
+
+    data.sequence.coupon = Math.max(data.sequence.coupon, coupon.id)
+    return copy
+  })
+}
+
+export async function syncLegacyFeedbackFromTenant(feedback: Feedback) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(JSON.stringify(feedback)) as Feedback
+    const index = data.feedbacks.findIndex((item) => item.id === feedback.id)
+
+    if (index >= 0) data.feedbacks[index] = copy
+    else data.feedbacks.push(copy)
+
+    data.sequence.feedback = Math.max(data.sequence.feedback, feedback.id)
+    return copy
+  })
+}
+
+export async function syncLegacyCashSessionFromTenant(session: CashSession) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(JSON.stringify(session)) as CashSession
+    const index = data.cashSessions.findIndex((item) => item.id === session.id)
+
+    if (index >= 0) data.cashSessions[index] = copy
+    else data.cashSessions.push(copy)
+
+    data.sequence.cashSession = Math.max(
+      data.sequence.cashSession,
+      session.id,
+    )
+
+    return copy
+  })
+}
+
+export async function syncLegacyFinancialEntryFromTenant(
+  entry: FinancialEntry,
+) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(JSON.stringify(entry)) as FinancialEntry
+    const index = data.financialEntries.findIndex(
+      (item) => item.id === entry.id,
+    )
+
+    if (index >= 0) data.financialEntries[index] = copy
+    else data.financialEntries.push(copy)
+
+    data.sequence.financialEntry = Math.max(
+      data.sequence.financialEntry,
+      entry.id,
+    )
+
+    return copy
+  })
+}
+
+export async function syncLegacyDeliveryZoneFromTenant(
+  zone: DeliveryZone,
+) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(JSON.stringify(zone)) as DeliveryZone
+    const index = data.deliveryZones.findIndex((item) => item.id === zone.id)
+
+    if (index >= 0) data.deliveryZones[index] = copy
+    else data.deliveryZones.push(copy)
+
+    data.sequence.deliveryZone = Math.max(
+      data.sequence.deliveryZone,
+      zone.id,
+    )
+
+    return copy
+  })
+}
+
+export async function removeLegacyDeliveryZoneMirror(id: number) {
+  return mutateStore((data) => {
+    const index = data.deliveryZones.findIndex((item) => item.id === id)
+    if (index >= 0) data.deliveryZones.splice(index, 1)
+    return index >= 0
+  })
+}
+
+export async function syncLegacyCourierFromTenant(courier: Courier) {
+  return mutateStore((data) => {
+    const copy = JSON.parse(JSON.stringify(courier)) as Courier
+    const index = data.couriers.findIndex((item) => item.id === courier.id)
+
+    if (index >= 0) data.couriers[index] = copy
+    else data.couriers.push(copy)
+
+    data.sequence.courier = Math.max(data.sequence.courier, courier.id)
+    return copy
+  })
+}

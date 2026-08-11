@@ -15,6 +15,7 @@ import {
   isCurrentDeploymentOrganization,
 } from "@/lib/catalog-db"
 import type { OrderStatus, PaymentStatus } from "@/lib/types"
+import { getTenantCourier, isTenantOperationsReady } from "@/lib/operations-db"
 
 const validStatuses: OrderStatus[] = [
   "pending",
@@ -74,20 +75,63 @@ export async function PATCH(
     )
   }
 
+  const session = await getVerifiedTenantSession()
+
+  let courierPatch:
+    | { courierId?: number; courierName?: string }
+    | undefined
+
+  if (body.courierId !== undefined) {
+    const courierId = Number(body.courierId)
+
+    if (
+      session &&
+      (await isTenantOperationsReady(
+        session.organizationId,
+      ).catch(() => false))
+    ) {
+      if (Number.isInteger(courierId) && courierId > 0) {
+        const courier = await getTenantCourier(
+          session.organizationId,
+          courierId,
+        )
+
+        if (!courier || !courier.active) {
+          return NextResponse.json(
+            { error: "Entregador inválido para esta empresa." },
+            { status: 400 },
+          )
+        }
+
+        courierPatch = {
+          courierId: courier.id,
+          courierName: courier.name,
+        }
+      } else {
+        courierPatch = {
+          courierId: undefined,
+          courierName: "",
+        }
+      }
+    } else {
+      courierPatch = {
+        courierId:
+          Number.isInteger(courierId) && courierId > 0
+            ? courierId
+            : undefined,
+        courierName: body.courierName?.trim() || "",
+      }
+    }
+  }
+
   const patch = {
     ...(body.status ? { status: body.status } : {}),
     ...(body.paymentStatus
       ? { paymentStatus: body.paymentStatus }
       : {}),
-    ...(body.courierId !== undefined
-      ? { courierId: Number(body.courierId) || undefined }
-      : {}),
-    ...(body.courierName !== undefined
-      ? { courierName: body.courierName.trim() }
-      : {}),
+    ...(courierPatch || {}),
   }
 
-  const session = await getVerifiedTenantSession()
   const ready =
     session &&
     (await isTenantOrdersReady(session.organizationId).catch(() => false))
