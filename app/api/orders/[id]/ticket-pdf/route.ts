@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
-import { getOrderById, getSettings } from "@/lib/db"
+import { getOrderById as getLegacyOrderById, getSettings } from "@/lib/db"
+import { getTenantOrderById, isTenantOrdersReady } from "@/lib/order-db"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
 
 const money = (value: number) => `R$ ${Number(value).toFixed(2).replace(".", ",")}`
 const stamp = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Fortaleza" }).format(new Date(value))
@@ -42,7 +44,17 @@ function pdfDocument(lines: Array<{ text: string; bold?: boolean; size?: number 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
   const { id } = await context.params
-  const order = await getOrderById(Number(id))
+  const numericId = Number(id)
+  const session = await getVerifiedTenantSession()
+  const ready =
+    session &&
+    (await isTenantOrdersReady(session.organizationId).catch(() => false))
+
+  const order =
+    session && ready
+      ? await getTenantOrderById(session.organizationId, numericId)
+      : await getLegacyOrderById(numericId)
+
   if (!order) return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 })
   const settings = await getSettings()
   const mode = new URL(request.url).searchParams.get("mode") === "kitchen" ? "kitchen" : "customer"

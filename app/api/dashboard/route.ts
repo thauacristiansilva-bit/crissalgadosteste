@@ -1,5 +1,20 @@
 import { NextResponse } from "next/server"
-import { isAdminAuthenticated } from "@/lib/auth"
-import { getAdminData } from "@/lib/db"
+import { getAdminSession } from "@/lib/auth"
+import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
+
 export const dynamic = "force-dynamic"
-export async function GET() { if (!(await isAdminAuthenticated())) return NextResponse.json({ error: "Não autorizado." }, { status: 401 }); return NextResponse.json(await getAdminData()) }
+
+export async function GET() {
+  const session = await getAdminSession()
+
+  if (!session) {
+    return NextResponse.json(
+      { error: "Não autorizado." },
+      { status: 401 },
+    )
+  }
+
+  return NextResponse.json(
+    await getTenantAwareAdminData(session),
+  )
+}

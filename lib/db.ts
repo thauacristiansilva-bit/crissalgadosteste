@@ -6,6 +6,7 @@ import { calculateDeliveryQuote } from "@/lib/delivery-pricing"
 import { assertDeliveryZoneValid, deliveryZoneColor, nextDeliveryZoneColor } from "@/lib/delivery-zone-geometry"
 import { IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
 import { syncCurrentDeploymentProductStocks } from "@/lib/catalog-db"
+import { syncCurrentDeploymentOrderFromLegacy } from "@/lib/order-db"
 import type {
   CashSession,
   Category,
@@ -557,6 +558,17 @@ export async function createOrder(input: CreateOrderInput) {
     )
   }
 
+  try {
+    await syncCurrentDeploymentOrderFromLegacy(order, "checkout")
+  } catch (error) {
+    // O pedido já existe no fluxo legado. Não devolvemos erro ao cliente
+    // para evitar que uma nova tentativa gere pedido duplicado.
+    console.error(
+      "[SaborFlow] Pedido criado, mas a cópia PostgreSQL falhou:",
+      error instanceof Error ? error.message : error,
+    )
+  }
+
   return order
 }
 
@@ -772,5 +784,29 @@ export async function syncLegacyProductFromTenant(product: Product) {
 
     data.sequence.product = Math.max(data.sequence.product, product.id)
     return product
+  })
+}
+
+
+/**
+ * Ponte temporária da Fase 5.
+ *
+ * Status e demais alterações administrativas passam a ser salvos no
+ * PostgreSQL por organization_id. Para a empresa atual do deployment,
+ * mantemos o mesmo pedido refletido no store.json enquanto clientes,
+ * caixa, feedback e outros módulos ainda dependem do legado.
+ */
+export async function syncLegacyOrderFromTenant(order: Order) {
+  return mutateStore((data) => {
+    const index = data.orders.findIndex((item) => item.id === order.id)
+
+    if (index >= 0) {
+      data.orders[index] = JSON.parse(JSON.stringify(order)) as Order
+    } else {
+      data.orders.push(JSON.parse(JSON.stringify(order)) as Order)
+    }
+
+    data.sequence.order = Math.max(data.sequence.order, order.id)
+    return order
   })
 }
