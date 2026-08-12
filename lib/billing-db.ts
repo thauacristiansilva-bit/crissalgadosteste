@@ -46,6 +46,8 @@ type BillingRow = {
   plan_internal: boolean | null
   current_period_end: Date | string | null
   trial_ends_at: Date | string | null
+  billing_cycle: "monthly" | "annual" | "manual" | null
+  provider: string | null
 }
 
 function toIso(value: Date | string | null) {
@@ -103,7 +105,9 @@ async function accountRowForUser(client: PoolClient, userId: string, lock = fals
         p.name AS plan_name,
         p.internal AS plan_internal,
         s.current_period_end,
-        s.trial_ends_at
+        s.trial_ends_at,
+        s.billing_cycle,
+        s.provider
       FROM sf_billing_accounts ba
       LEFT JOIN LATERAL (
         SELECT current_subscription.*
@@ -147,7 +151,9 @@ async function accountRowForOrganization(client: PoolClient, organizationId: str
         p.name AS plan_name,
         p.internal AS plan_internal,
         s.current_period_end,
-        s.trial_ends_at
+        s.trial_ends_at,
+        s.billing_cycle,
+        s.provider
       FROM sf_organizations o
       INNER JOIN sf_billing_accounts ba ON ba.id = o.billing_account_id
       LEFT JOIN LATERAL (
@@ -294,6 +300,8 @@ export async function getBillingSnapshotForOrganization(
             planCode: row.plan_code,
             planName: row.plan_name,
             internal: Boolean(row.plan_internal),
+            billingCycle: row.billing_cycle,
+            provider: row.provider,
             currentPeriodEnd: toIso(row.current_period_end),
             trialEndsAt: toIso(row.trial_ends_at),
           }
@@ -342,6 +350,8 @@ export async function getBillingSnapshotForUser(
             planCode: row.plan_code,
             planName: row.plan_name,
             internal: Boolean(row.plan_internal),
+            billingCycle: row.billing_cycle,
+            provider: row.provider,
             currentPeriodEnd: toIso(row.current_period_end),
             trialEndsAt: toIso(row.trial_ends_at),
           }

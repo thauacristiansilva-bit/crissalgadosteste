@@ -23,6 +23,8 @@ export type SubscriptionStatus =
   | "suspended"
   | "canceled"
 
+export type BillingCycle = "monthly" | "annual"
+
 export type PlanEntitlements = {
   maxOrganizations: number | null
   maxUsers: number | null
@@ -43,6 +45,17 @@ export type BillingUsage = {
   products: number
 }
 
+export type CommercialPlan = {
+  id: string
+  code: string
+  name: string
+  description: string
+  currency: string
+  monthlyPriceCents: number | null
+  annualPriceCents: number | null
+  entitlements: PlanEntitlements
+}
+
 export type BillingSnapshot = {
   ready: boolean
   account: {
@@ -57,6 +70,8 @@ export type BillingSnapshot = {
     planCode: string
     planName: string
     internal: boolean
+    billingCycle?: BillingCycle | "manual" | null
+    provider?: string | null
     currentPeriodEnd: string | null
     trialEndsAt: string | null
   } | null
@@ -67,4 +82,21 @@ export type BillingSnapshot = {
     canAddUser: boolean
     canCreateProduct: boolean
   }
+}
+
+export type CommercialBillingStatus = {
+  authenticated: boolean
+  email: string | null
+  hasOrganization: boolean
+  onboardingUnlocked: boolean
+  billing: BillingSnapshot | null
+  latestCheckout: {
+    id: string
+    status: "creating" | "pending" | "completed" | "failed" | "canceled" | "expired"
+    checkoutUrl: string | null
+    planCode: string
+    planName: string
+    billingCycle: BillingCycle
+    subscriptionStatus: SubscriptionStatus
+  } | null
 }
