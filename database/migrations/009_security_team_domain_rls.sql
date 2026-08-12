@@ -105,7 +105,7 @@ $$;
 
 DO $$
 DECLARE
-  table_name text;
+  target_table text;
   tenant_tables text[] := ARRAY[
     'sf_categories',
     'sf_products',
@@ -130,25 +130,25 @@ DECLARE
     'sf_print_agents'
   ];
 BEGIN
-  FOREACH table_name IN ARRAY tenant_tables
+  FOREACH target_table IN ARRAY tenant_tables
   LOOP
-    IF to_regclass('public.' || table_name) IS NOT NULL THEN
+    IF to_regclass('public.' || target_table) IS NOT NULL THEN
       IF NOT EXISTS (
         SELECT 1
         FROM pg_policies
         WHERE schemaname = 'public'
-          AND tablename = table_name
+          AND tablename = target_table
           AND policyname = 'sf_tenant_guard'
       ) THEN
         EXECUTE format(
           'CREATE POLICY sf_tenant_guard ON %I USING (organization_id = sf_current_organization_id()) WITH CHECK (organization_id = sf_current_organization_id())',
-          table_name
+          target_table
         );
       END IF;
 
       -- Fase 10 prepara as políticas, mas NÃO ativa enforcement no mesmo deploy.
       -- Isso evita interromper rotas antigas antes de todas usarem contexto RLS.
-      EXECUTE format('ALTER TABLE %I DISABLE ROW LEVEL SECURITY', table_name);
+      EXECUTE format('ALTER TABLE %I DISABLE ROW LEVEL SECURITY', target_table);
 
       INSERT INTO sf_rls_rollout (
         table_name,
@@ -158,7 +158,7 @@ BEGIN
         updated_at
       )
       VALUES (
-        table_name,
+        target_table,
         'sf_tenant_guard',
         true,
         'prepared',
