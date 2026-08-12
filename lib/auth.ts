@@ -178,7 +178,7 @@ export async function getAdminSession(): Promise<AdminSession | null> {
 
   const tenantToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value
   const tenantSession = parseTenantSessionToken(tenantToken)
-  if (tenantSession) {
+  if (tenantSession?.mode === "tenant") {
     if (await demoOrganizationIsUsable(tenantSession.organizationId)) {
       return tenantSession
     }
