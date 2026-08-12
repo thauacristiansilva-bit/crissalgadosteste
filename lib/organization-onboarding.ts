@@ -6,6 +6,7 @@ import {
   defaultBusinessHours,
 } from "@/lib/operations"
 import { getPostgresPool } from "@/lib/postgres"
+import { reserveOrganizationSlot } from "@/lib/billing-db"
 import type {
   StoreSettings,
 } from "@/lib/types"
@@ -305,6 +306,8 @@ export async function createOrganizationForUser(
   try {
     await client.query("BEGIN")
 
+    const billing = await reserveOrganizationSlot(client, userId)
+
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       [
@@ -358,13 +361,14 @@ export async function createOrganizationForUser(
           public_store_enabled,
           public_ordering_enabled,
           created_by_user_id,
+          billing_account_id,
           onboarding_version
         )
         VALUES (
           $1, $2, $3, $4, $5, $6,
           $7, $8, $9, 'trial',
           'complete', now(),
-          true, false, $10, 2
+          true, false, $10, $11, 2
         )
       `,
       [
@@ -382,6 +386,7 @@ export async function createOrganizationForUser(
         input.email?.trim() ||
           null,
         userId,
+        billing.billingAccountId,
       ],
     )
 

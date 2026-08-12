@@ -3,6 +3,7 @@
 import {
   type ChangeEvent,
   type FormEvent,
+  useEffect,
   useState,
 } from "react"
 import {
@@ -14,6 +15,7 @@ import {
   Building2,
   LoaderCircle,
 } from "lucide-react"
+import type { BillingSnapshot } from "@/lib/billing-types"
 
 export function OrganizationOnboardingForm() {
   const router = useRouter()
@@ -39,6 +41,23 @@ export function OrganizationOnboardingForm() {
     useState(false)
   const [error, setError] =
     useState("")
+  const [billing, setBilling] =
+    useState<BillingSnapshot | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    fetch("/api/admin/billing", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error || "Não foi possível validar o plano.")
+        return payload.billing as BillingSnapshot
+      })
+      .then((value) => { if (mounted) setBilling(value) })
+      .catch((reason) => {
+        if (mounted) setError(reason instanceof Error ? reason.message : "Não foi possível validar o plano.")
+      })
+    return () => { mounted = false }
+  }, [])
 
   async function submit(
     event: FormEvent,
@@ -116,10 +135,10 @@ export function OrganizationOnboardingForm() {
               SaborFlow
             </p>
             <h1 className="mt-1 text-2xl font-black text-gray-950">
-              Cadastrar nova empresa
+              Adicionar loja ao plano
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-gray-600">
-              A nova empresa terá dados, catálogo, clientes, pedidos e configurações isolados no PostgreSQL. Você será o proprietário inicial.
+              A nova loja terá dados, catálogo, clientes, pedidos e configurações isolados. A criação depende de assinatura ativa e de uma vaga disponível no seu plano.
             </p>
           </div>
         </div>
@@ -127,6 +146,13 @@ export function OrganizationOnboardingForm() {
         {error && (
           <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
             {error}
+          </div>
+        )}
+
+        {billing && (
+          <div className={`mt-5 rounded-xl border px-4 py-3 text-sm font-semibold ${billing.capacity.canCreateOrganization ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+            Lojas utilizadas: {billing.usage.organizations} / {billing.entitlements.maxOrganizations === null ? "∞" : billing.entitlements.maxOrganizations}.
+            {!billing.capacity.canCreateOrganization && " O limite atual foi atingido. Faça upgrade do plano antes de adicionar outra loja."}
           </div>
         )}
 
@@ -297,7 +323,7 @@ export function OrganizationOnboardingForm() {
 
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || (billing ? !billing.capacity.canCreateOrganization : false)}
               className="mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 text-sm font-black text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
             >
               {busy && (
@@ -305,7 +331,9 @@ export function OrganizationOnboardingForm() {
               )}
               {busy
                 ? "Criando empresa..."
-                : "Criar empresa e entrar"}
+                : billing && !billing.capacity.canCreateOrganization
+                  ? "Limite de lojas atingido"
+                  : "Criar loja e entrar"}
             </button>
           </div>
         </form>

@@ -24,6 +24,7 @@ import {
   Star,
   Users,
   WalletCards,
+  CreditCard,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -52,6 +53,7 @@ import { PdvPanel } from "@/components/admin/pdv-panel"
 import { InventoryPanel } from "@/components/admin/inventory-panel"
 import { SalesPanel } from "@/components/admin/sales-panel"
 import { DrePanel } from "@/components/admin/dre-panel"
+import { BillingPanel } from "@/components/admin/billing-panel"
 import { MarketingPanel } from "@/components/admin/marketing-panel"
 import { ReviewsPanel } from "@/components/admin/reviews-panel"
 import { LinksPanel } from "@/components/admin/links-panel"
@@ -99,6 +101,7 @@ const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
   { key: "team", label: "Equipe e funções", icon: Users },
   { key: "settings", label: "Configurações", icon: Settings },
   { key: "security", label: "Conta e segurança", icon: ShieldCheck },
+  { key: "billing", label: "Plano e assinatura", icon: CreditCard },
 ]
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -301,6 +304,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
           {section === "team" && <TeamPanel staffMembers={staffMembers} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "security" && <SecurityPanel role={adminRole} />}
+          {section === "billing" && <BillingPanel />}
 
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

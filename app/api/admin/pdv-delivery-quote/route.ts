@@ -5,6 +5,7 @@ import { calculateDeliveryQuote } from "@/lib/delivery-pricing"
 import { getTenantDeliveryZones, isTenantOperationsReady } from "@/lib/operations-db"
 import { getTenantSettings, isTenantRuntimeReady } from "@/lib/organization-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 import { canUsePdv } from "@/lib/admin-access"
 
 export async function GET(request: NextRequest) {
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
     const session = await getVerifiedTenantSession()
 
     if (session) {
+      await assertOrganizationEntitlement(session.organizationId, "delivery")
       if (!canUsePdv(session.role)) {
         return NextResponse.json({ error: "Seu perfil não pode usar o PDV." }, { status: 403 })
       }
@@ -68,7 +70,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Não foi possível calcular a entrega do PDV." },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

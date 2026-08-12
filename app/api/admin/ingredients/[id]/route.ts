@@ -3,6 +3,7 @@ import { isAdminAuthenticated } from "@/lib/auth"
 import { updateTenantIngredient } from "@/lib/food-composition-db"
 import { canManageCatalog, getVerifiedTenantSession } from "@/lib/tenant-access"
 import type { IngredientUnit } from "@/lib/types"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -30,6 +31,8 @@ export async function PATCH(
   }
 
   try {
+    await assertOrganizationEntitlement(session.organizationId, "inventory")
+
     const ingredient = await updateTenantIngredient(session.organizationId, ingredientId, {
       ...(body.name !== undefined ? { name: String(body.name) } : {}),
       ...(body.unit !== undefined ? { unit: String(body.unit) as IngredientUnit } : {}),
@@ -46,7 +49,7 @@ export async function PATCH(
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Não foi possível alterar o ingrediente." },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

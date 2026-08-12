@@ -25,6 +25,7 @@ import {
 import {
   canUseCashRegister,
 } from "@/lib/tenant-permissions"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -52,11 +53,19 @@ export async function GET() {
       )
     }
 
-    return NextResponse.json({
-      sessions: await getTenantCashSessions(
-        session.organizationId,
-      ),
-    })
+    try {
+      await assertOrganizationEntitlement(session.organizationId, "financial")
+      return NextResponse.json({
+        sessions: await getTenantCashSessions(
+          session.organizationId,
+        ),
+      })
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Caixa indisponível no plano." },
+        { status: billingErrorStatus(error) },
+      )
+    }
   }
 
   return NextResponse.json({
@@ -119,6 +128,8 @@ export async function POST(request: Request) {
       )
     }
 
+    await assertOrganizationEntitlement(tenant.organizationId, "financial")
+
     const session =
       body?.action === "close"
         ? await closeTenantCashSession(
@@ -157,7 +168,7 @@ export async function POST(request: Request) {
             ? error.message
             : "Erro no caixa.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

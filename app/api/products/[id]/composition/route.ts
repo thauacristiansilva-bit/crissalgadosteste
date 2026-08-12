@@ -10,6 +10,7 @@ import {
   canManageCatalog,
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -89,6 +90,18 @@ export async function PUT(
   }
 
   try {
+    if (Array.isArray(body.modifierGroups) && body.modifierGroups.length > 0) {
+      await assertOrganizationEntitlement(session.organizationId, "modifiers")
+    }
+    const usesInventory =
+      (Array.isArray(body.recipe) && body.recipe.length > 0) ||
+      (Array.isArray(body.modifierGroups) && body.modifierGroups.some((group) =>
+        Array.isArray(group.options) && group.options.some((option) => Array.isArray(option.ingredients) && option.ingredients.length > 0)
+      ))
+    if (usesInventory) {
+      await assertOrganizationEntitlement(session.organizationId, "inventory")
+    }
+
     const composition = await replaceProductComposition(
       session.organizationId,
       productId,
@@ -103,7 +116,7 @@ export async function PUT(
             ? error.message
             : "Não foi possível salvar a composição do produto.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

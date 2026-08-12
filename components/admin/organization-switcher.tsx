@@ -335,13 +335,15 @@ export function OrganizationSwitcher({
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <Link
-          href="/admin/nova-empresa"
-          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-white/10 px-2 text-[11px] font-black text-white hover:bg-white/15"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Nova empresa
-        </Link>
+        {active?.role === "owner" ? (
+          <Link
+            href="/admin/nova-empresa"
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-white/10 px-2 text-[11px] font-black text-white hover:bg-white/15"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Nova empresa
+          </Link>
+        ) : <span />}
 
         <Link
           href="/minha-loja"

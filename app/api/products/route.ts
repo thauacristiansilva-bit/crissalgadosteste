@@ -16,6 +16,7 @@ import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import { isAdminAuthenticated } from "@/lib/auth"
+import { assertCanCreateProduct, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   const session = await getVerifiedTenantSession().catch(() => null)
@@ -95,6 +96,8 @@ export async function POST(request: Request) {
       )
     }
 
+    await assertCanCreateProduct(session.organizationId)
+
     const result = await createTenantProduct(
       session.organizationId,
       input,
@@ -119,7 +122,7 @@ export async function POST(request: Request) {
             ? error.message
             : "Não foi possível criar o produto.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

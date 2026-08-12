@@ -23,6 +23,7 @@ import {
 import {
   calculateDeliveryQuote,
 } from "@/lib/delivery-pricing"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET(request: NextRequest) {
   const latitude = Number(
@@ -57,6 +58,8 @@ export async function GET(request: NextRequest) {
     if (!organization) {
       throw new Error("Empresa não encontrada.")
     }
+
+    await assertOrganizationEntitlement(organization.id, "delivery")
 
     const runtimeReady =
       await isTenantRuntimeReady(
@@ -114,7 +117,7 @@ export async function GET(request: NextRequest) {
             ? error.message
             : "Não foi possível calcular a entrega.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

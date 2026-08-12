@@ -12,6 +12,7 @@ import {
 import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
+import { billingErrorStatus } from "@/lib/billing-db"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -19,10 +20,7 @@ export const dynamic = "force-dynamic"
 function canCreateOrganization(
   role: string,
 ) {
-  return (
-    role === "owner" ||
-    role === "admin"
-  )
+  return role === "owner"
 }
 
 export async function GET() {
@@ -75,7 +73,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          "Seu perfil não pode criar outra empresa.",
+          "Somente o proprietário da conta contratante pode adicionar outra loja.",
       },
       { status: 403 },
     )
@@ -178,7 +176,7 @@ export async function POST(
             ? error.message
             : "Não foi possível criar a empresa.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

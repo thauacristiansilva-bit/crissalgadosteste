@@ -20,6 +20,7 @@ export type AdminSection =
   | "team"
   | "settings"
   | "security"
+  | "billing"
 
 const allSections: AdminSection[] = [
   "overview",
@@ -39,6 +40,7 @@ const allSections: AdminSection[] = [
   "team",
   "settings",
   "security",
+  "billing",
 ]
 
 const sectionsByRole: Record<
@@ -46,7 +48,7 @@ const sectionsByRole: Record<
   AdminSection[]
 > = {
   owner: allSections,
-  admin: allSections,
+  admin: allSections.filter((section) => section !== "billing"),
   manager: [
     "overview",
     "pdv",

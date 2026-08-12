@@ -20,6 +20,7 @@ import {
 import {
   canManageDeliveryOperation,
 } from "@/lib/tenant-permissions"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function PATCH(
   request: Request,
@@ -115,6 +116,8 @@ export async function PATCH(
       )
     }
 
+    await assertOrganizationEntitlement(session.organizationId, "delivery")
+
     const deliveryZone =
       await updateTenantDeliveryZone(
         session.organizationId,
@@ -148,7 +151,7 @@ export async function PATCH(
             ? error.message
             : "Não foi possível atualizar a área.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }
@@ -193,6 +196,15 @@ export async function DELETE(
           "Seu perfil não pode excluir áreas de entrega.",
       },
       { status: 403 },
+    )
+  }
+
+  try {
+    await assertOrganizationEntitlement(session.organizationId, "delivery")
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Delivery indisponível no plano." },
+      { status: billingErrorStatus(error) },
     )
   }
 

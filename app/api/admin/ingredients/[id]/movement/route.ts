@@ -5,6 +5,7 @@ import {
   type IngredientMovementInput,
 } from "@/lib/food-composition-db"
 import { canManageCatalog, getVerifiedTenantSession } from "@/lib/tenant-access"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -40,6 +41,8 @@ export async function POST(
   }
 
   try {
+    await assertOrganizationEntitlement(session.organizationId, "inventory")
+
     const ingredient = await moveTenantIngredientStock(session.organizationId, ingredientId, {
       kind,
       quantity: Number(body.quantity),
@@ -52,7 +55,7 @@ export async function POST(
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Não foi possível movimentar o estoque." },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

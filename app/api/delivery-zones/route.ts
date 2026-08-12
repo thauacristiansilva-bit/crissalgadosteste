@@ -19,6 +19,7 @@ import {
 import {
   canManageDeliveryOperation,
 } from "@/lib/tenant-permissions"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -36,12 +37,20 @@ export async function GET() {
       session.organizationId,
     ).catch(() => false))
   ) {
-    return NextResponse.json({
-      deliveryZones: await getTenantDeliveryZones(
-        session.organizationId,
-        { includeInactive: true },
-      ),
-    })
+    try {
+      await assertOrganizationEntitlement(session.organizationId, "delivery")
+      return NextResponse.json({
+        deliveryZones: await getTenantDeliveryZones(
+          session.organizationId,
+          { includeInactive: true },
+        ),
+      })
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Delivery indisponível no plano." },
+        { status: billingErrorStatus(error) },
+      )
+    }
   }
 
   return NextResponse.json({
@@ -116,6 +125,8 @@ export async function POST(request: Request) {
       )
     }
 
+    await assertOrganizationEntitlement(session.organizationId, "delivery")
+
     const deliveryZone =
       await createTenantDeliveryZone(
         session.organizationId,
@@ -144,7 +155,7 @@ export async function POST(request: Request) {
             ? error.message
             : "Não foi possível cadastrar a área.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

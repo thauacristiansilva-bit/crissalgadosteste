@@ -20,10 +20,7 @@ export default async function NewOrganizationPage() {
     redirect("/admin")
   }
 
-  if (
-    session.role !== "owner" &&
-    session.role !== "admin"
-  ) {
+  if (session.role !== "owner") {
     redirect("/admin")
   }
 

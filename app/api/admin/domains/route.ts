@@ -10,6 +10,7 @@ import {
   listOrganizationDomains,
   removeOrganizationDomain,
 } from "@/lib/organization-security-db"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export const dynamic = "force-dynamic"
 
@@ -58,6 +59,8 @@ export async function POST(
     | null
 
   try {
+    await assertOrganizationEntitlement(session.organizationId, "customDomain")
+
     const verification =
       await createDomainVerification({
         organizationId:
@@ -77,7 +80,7 @@ export async function POST(
             ? error.message
             : "Não foi possível cadastrar o domínio.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

@@ -21,6 +21,7 @@ import type {
   Order,
 } from "@/lib/types"
 import { canUsePdv } from "@/lib/admin-access"
+import { assertActiveSubscriptionForOrganization, assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function POST(
   request: Request,
@@ -141,6 +142,15 @@ export async function POST(
         )
       }
 
+      await assertActiveSubscriptionForOrganization(session.organizationId)
+
+      if (input.type === "delivery") {
+        await assertOrganizationEntitlement(session.organizationId, "delivery")
+      }
+      if (input.items.some((item) => Array.isArray(item.modifierOptionIds) && item.modifierOptionIds.length > 0)) {
+        await assertOrganizationEntitlement(session.organizationId, "modifiers")
+      }
+
       const result =
         await createTenantCheckoutOrder(
           session.organizationId,
@@ -221,7 +231,7 @@ export async function POST(
             ? error.message
             : "Erro ao criar pedido.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

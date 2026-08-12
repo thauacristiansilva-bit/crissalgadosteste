@@ -36,6 +36,7 @@ import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
 import { canReadOrders } from "@/lib/admin-access"
+import { assertActiveSubscriptionForOrganization, assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   if (
@@ -289,6 +290,14 @@ export async function POST(
 
   try {
     if (publicOrganization) {
+      await assertActiveSubscriptionForOrganization(publicOrganization.id)
+      if (type === "delivery") {
+        await assertOrganizationEntitlement(publicOrganization.id, "delivery")
+      }
+      if (body.items.some((item) => Array.isArray(item.modifierOptionIds) && item.modifierOptionIds.length > 0)) {
+        await assertOrganizationEntitlement(publicOrganization.id, "modifiers")
+      }
+
       const result =
         await createTenantCheckoutOrder(
           publicOrganization.id,
@@ -367,7 +376,7 @@ export async function POST(
             ? error.message
             : "Não foi possível criar o pedido.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

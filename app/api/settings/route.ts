@@ -19,6 +19,7 @@ import {
   canManageOrganizationSettings,
 } from "@/lib/tenant-permissions"
 import type { StoreSettings } from "@/lib/types"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -100,6 +101,13 @@ export async function PATCH(request: Request) {
       )
     }
 
+    if (body.deliveryEnabled === true) {
+      await assertOrganizationEntitlement(session.organizationId, "delivery")
+    }
+    if (body.loyaltyEnabled === true) {
+      await assertOrganizationEntitlement(session.organizationId, "loyalty")
+    }
+
     const settings = await updateTenantSettings(
       session.organizationId,
       {
@@ -125,7 +133,7 @@ export async function PATCH(request: Request) {
             ? error.message
             : "Não foi possível salvar as configurações.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

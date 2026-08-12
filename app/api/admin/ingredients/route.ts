@@ -7,6 +7,7 @@ import {
 } from "@/lib/food-composition-db"
 import { canManageCatalog, getVerifiedTenantSession } from "@/lib/tenant-access"
 import type { IngredientUnit } from "@/lib/types"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -22,6 +23,12 @@ export async function GET() {
       { error: "O estoque de ingredientes exige a sessão multiempresa PostgreSQL." },
       { status: 409 },
     )
+  }
+
+  try {
+    await assertOrganizationEntitlement(session.organizationId, "inventory")
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Recurso não disponível no plano." }, { status: billingErrorStatus(error) })
   }
 
   if (!(await isTenantFoodCompositionReady(session.organizationId))) {
@@ -70,6 +77,8 @@ export async function POST(request: Request) {
   }
 
   try {
+    await assertOrganizationEntitlement(session.organizationId, "inventory")
+
     const ingredient = await createTenantIngredient(session.organizationId, {
       name: String(body.name || ""),
       unit: String(body.unit || "g") as IngredientUnit,
@@ -81,7 +90,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Não foi possível cadastrar o ingrediente." },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

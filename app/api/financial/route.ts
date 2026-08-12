@@ -19,6 +19,7 @@ import {
 import {
   canManageFinance,
 } from "@/lib/tenant-permissions"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -46,11 +47,19 @@ export async function GET() {
       )
     }
 
-    return NextResponse.json({
-      entries: await getTenantFinancialEntries(
-        session.organizationId,
-      ),
-    })
+    try {
+      await assertOrganizationEntitlement(session.organizationId, "financial")
+      return NextResponse.json({
+        entries: await getTenantFinancialEntries(
+          session.organizationId,
+        ),
+      })
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Financeiro indisponível no plano." },
+        { status: billingErrorStatus(error) },
+      )
+    }
   }
 
   return NextResponse.json({
@@ -108,6 +117,8 @@ export async function POST(request: Request) {
       )
     }
 
+    await assertOrganizationEntitlement(session.organizationId, "financial")
+
     const entry = await createTenantFinancialEntry(
       session.organizationId,
       input,
@@ -133,7 +144,7 @@ export async function POST(request: Request) {
             ? error.message
             : "Erro no lançamento.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }

@@ -11,6 +11,7 @@ import {
   disableTeamAccess,
   listTeamAccess,
 } from "@/lib/team-access-db"
+import { assertCanAddUser, billingErrorStatus } from "@/lib/billing-db"
 
 export const dynamic = "force-dynamic"
 
@@ -120,6 +121,12 @@ export async function POST(
       )
     }
 
+    const currentAccess = await listTeamAccess(session.organizationId)
+    const targetAccess = currentAccess.find((item) => item.staffMemberId === staffMemberId)
+    if (!targetAccess || !["active", "invited"].includes(String(targetAccess.membershipStatus))) {
+      await assertCanAddUser(session.organizationId)
+    }
+
     const invitation =
       await createTeamInvitation({
         organizationId:
@@ -149,7 +156,7 @@ export async function POST(
             ? error.message
             : "Não foi possível criar o acesso.",
       },
-      { status: 400 },
+      { status: billingErrorStatus(error) },
     )
   }
 }
