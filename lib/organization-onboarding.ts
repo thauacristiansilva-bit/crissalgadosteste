@@ -367,8 +367,8 @@ export async function createOrganizationForUser(
         VALUES (
           $1, $2, $3, $4, $5, $6,
           $7, $8, $9, 'trial',
-          'complete', now(),
-          true, false, $10, $11, 2
+          'pending', NULL,
+          false, false, $10, $11, 3
         )
       `,
       [
@@ -388,6 +388,21 @@ export async function createOrganizationForUser(
         userId,
         billing.billingAccountId,
       ],
+    )
+
+    await client.query(
+      `
+        INSERT INTO sf_organization_onboarding (
+          organization_id,
+          version,
+          current_step,
+          completed_steps,
+          started_at,
+          updated_at
+        )
+        VALUES ($1, 3, 'business', '[]'::jsonb, now(), now())
+      `,
+      [organizationId],
     )
 
     await client.query(
@@ -595,7 +610,7 @@ export async function createOrganizationForUser(
             input.industry?.trim() ||
             null,
           source:
-            "admin-onboarding",
+            "commercial-onboarding-v3",
         }),
       ],
     )
@@ -636,6 +651,12 @@ export async function createOrganizationForUser(
     if (pgError?.code === "23505") {
       throw new Error(
         "Já existe um cadastro com esses dados.",
+      )
+    }
+
+    if (pgError?.code === "42P01") {
+      throw new Error(
+        "A migration 014_commercial_onboarding ainda precisa ser aplicada antes de criar uma nova loja.",
       )
     }
 

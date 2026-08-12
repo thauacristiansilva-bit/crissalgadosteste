@@ -11,7 +11,8 @@ export default async function NewOrganizationPage() {
 
   if (session?.mode === "tenant") {
     if (session.role !== "owner") redirect("/admin")
-    return <OrganizationOnboardingForm />
+    const billing = await getBillingSnapshotForUser(session.userId, session.organizationId)
+    return <OrganizationOnboardingForm mode="additional" initialBilling={billing} />
   }
 
   const commercial = await getCommercialBillingSession()
@@ -26,5 +27,10 @@ export default async function NewOrganizationPage() {
     redirect("/contratar/retorno")
   }
 
-  return <OrganizationOnboardingForm />
+  return (
+    <OrganizationOnboardingForm
+      mode={billing.usage.organizations === 0 ? "first" : "additional"}
+      initialBilling={billing}
+    />
+  )
 }

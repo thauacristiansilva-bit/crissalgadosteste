@@ -105,6 +105,8 @@ export async function POST(request: Request) {
         publicOrderingEnabled: false,
       },
       switched: true,
+      onboardingRequired: true,
+      onboardingUrl: "/onboarding",
     }, { status: 201 })
 
     response.cookies.set(

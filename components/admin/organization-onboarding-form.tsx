@@ -17,7 +17,13 @@ import {
 } from "lucide-react"
 import type { BillingSnapshot } from "@/lib/billing-types"
 
-export function OrganizationOnboardingForm() {
+export function OrganizationOnboardingForm({
+  mode = "additional",
+  initialBilling = null,
+}: {
+  mode?: "first" | "additional"
+  initialBilling?: BillingSnapshot | null
+}) {
   const router = useRouter()
   const [personType, setPersonType] =
     useState<"PF" | "PJ">("PJ")
@@ -42,9 +48,10 @@ export function OrganizationOnboardingForm() {
   const [error, setError] =
     useState("")
   const [billing, setBilling] =
-    useState<BillingSnapshot | null>(null)
+    useState<BillingSnapshot | null>(initialBilling)
 
   useEffect(() => {
+    if (initialBilling) return
     let mounted = true
     fetch("/api/admin/billing", { cache: "no-store" })
       .then(async (response) => {
@@ -57,7 +64,7 @@ export function OrganizationOnboardingForm() {
         if (mounted) setError(reason instanceof Error ? reason.message : "Não foi possível validar o plano.")
       })
     return () => { mounted = false }
-  }, [])
+  }, [initialBilling])
 
   async function submit(
     event: FormEvent,
@@ -99,7 +106,7 @@ export function OrganizationOnboardingForm() {
         )
       }
 
-      router.replace("/admin")
+      router.replace(String(payload.onboardingUrl || "/onboarding"))
       router.refresh()
     } catch (reason) {
       setError(
@@ -118,11 +125,11 @@ export function OrganizationOnboardingForm() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <Link
-        href="/admin"
+        href={mode === "first" ? "/contratar/retorno" : "/admin"}
         className="inline-flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-amber-700"
       >
         <ArrowLeft className="h-4 w-4" />
-        Voltar ao painel
+        {mode === "first" ? "Voltar à contratação" : "Voltar ao painel"}
       </Link>
 
       <div className="mt-5 rounded-3xl border border-amber-200 bg-white p-6 shadow-sm sm:p-8">
@@ -135,10 +142,12 @@ export function OrganizationOnboardingForm() {
               SaborFlow
             </p>
             <h1 className="mt-1 text-2xl font-black text-gray-950">
-              Adicionar loja ao plano
+              {mode === "first" ? "Configure sua primeira loja" : "Adicionar loja ao plano"}
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-gray-600">
-              A nova loja terá dados, catálogo, clientes, pedidos e configurações isolados. A criação depende de assinatura ativa e de uma vaga disponível no seu plano.
+              {mode === "first"
+                ? "Seu pagamento já foi confirmado. Crie a estrutura da primeira loja para iniciar a configuração comercial guiada."
+                : "A nova loja terá dados, catálogo, clientes, pedidos e configurações isolados. A criação depende de assinatura ativa e de uma vaga disponível no seu plano."}
             </p>
           </div>
         </div>
@@ -318,7 +327,7 @@ export function OrganizationOnboardingForm() {
 
           <div className="sm:col-span-2">
             <div className="rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950">
-              Pedidos online começam desativados. Depois de cadastrar pelo menos um produto, configurar retirada/entrega e ativar “Aceitar pedidos”, use o seletor de empresa no painel para habilitar os pedidos online.
+              Depois da criação, o SaborFlow abrirá um assistente para configurar dados comerciais, identidade visual, horários, retirada/entrega, produtos e publicação. A loja permanece privada até a etapa final.
             </div>
 
             <button
@@ -330,10 +339,10 @@ export function OrganizationOnboardingForm() {
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               )}
               {busy
-                ? "Criando empresa..."
+                ? "Criando loja..."
                 : billing && !billing.capacity.canCreateOrganization
                   ? "Limite de lojas atingido"
-                  : "Criar loja e entrar"}
+                  : mode === "first" ? "Criar primeira loja e configurar" : "Criar loja e configurar"}
             </button>
           </div>
         </form>
