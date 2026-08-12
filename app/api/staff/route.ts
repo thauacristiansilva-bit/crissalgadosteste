@@ -33,6 +33,19 @@ export async function GET() {
 
   if (
     session &&
+    !canManageTeam(session.role)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Seu perfil não pode visualizar a equipe.",
+      },
+      { status: 403 },
+    )
+  }
+
+  if (
+    session &&
     (await isTenantRuntimeReady(
       session.organizationId,
     ).catch(() => false))

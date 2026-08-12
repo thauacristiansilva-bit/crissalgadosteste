@@ -19,6 +19,7 @@ import {
   PackageSearch,
   ReceiptText,
   Settings,
+  ShieldCheck,
   ShoppingCart,
   Star,
   Store,
@@ -56,8 +57,11 @@ import { ReviewsPanel } from "@/components/admin/reviews-panel"
 import { LinksPanel } from "@/components/admin/links-panel"
 import { ChatbotPanel } from "@/components/admin/chatbot-panel"
 import { TeamPanel } from "@/components/admin/team-panel"
-import { isStoreOpenNow } from "@/lib/operations"
+import { isStoreOpenNow, zonedDateString } from "@/lib/operations"
 import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
+import { SecurityPanel } from "@/components/admin/security-panel"
+import { getAllowedAdminSections, type AdminSection } from "@/lib/admin-access"
+import type { OrganizationRole } from "@/lib/tenant-context"
 
 interface DashboardData {
   summary: DashboardSummary
@@ -75,22 +79,7 @@ interface DashboardData {
   staffMembers: StaffMember[]
 }
 
-type Section =
-  | "overview"
-  | "pdv"
-  | "sales"
-  | "orders"
-  | "kitchen"
-  | "inventory"
-  | "products"
-  | "categories"
-  | "customers"
-  | "marketing"
-  | "reviews"
-  | "links"
-  | "chatbot"
-  | "team"
-  | "settings"
+type Section = AdminSection
 
 const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
   { key: "overview", label: "Visão geral", icon: LayoutDashboard },
@@ -108,6 +97,7 @@ const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
   { key: "chatbot", label: "Chatbot", icon: Bot },
   { key: "team", label: "Equipe e funções", icon: Users },
   { key: "settings", label: "Configurações", icon: Settings },
+  { key: "security", label: "Conta e segurança", icon: ShieldCheck },
 ]
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -122,9 +112,13 @@ const saborFlowBrand = {
   border: "#f0d0aa",
 }
 
-export function AdminDashboard({ initialData, adminEmail }: { initialData: DashboardData; adminEmail: string }) {
+export function AdminDashboard({ initialData, adminEmail, adminRole }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole }) {
   const router = useRouter()
-  const [section, setSection] = useState<Section>("overview")
+  const [section, setSection] = useState<Section>(
+    () =>
+      (getAllowedAdminSections(adminRole)[0] as Section) ||
+      "security",
+  )
   const [mobileNav, setMobileNav] = useState(false)
   const [orders, setOrders] = useState(initialData.orders)
   const [products, setProducts] = useState(initialData.products)
@@ -139,6 +133,14 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
   const [financialEntries, setFinancialEntries] = useState(initialData.financialEntries)
   const [staffMembers] = useState(initialData.staffMembers)
   const [loggingOut, setLoggingOut] = useState(false)
+  const allowedSections = useMemo(
+    () => new Set(getAllowedAdminSections(adminRole)),
+    [adminRole],
+  )
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => allowedSections.has(item.key)),
+    [allowedSections],
+  )
 
   useEffect(() => {
     const refresh = async () => {
@@ -158,8 +160,11 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
 
   const summary = useMemo<DashboardSummary>(() => {
     const valid = orders.filter((order) => order.status !== "cancelled")
-    const today = new Date().toLocaleDateString("en-CA")
-    const todayOrders = valid.filter((order) => new Date(order.createdAt).toLocaleDateString("en-CA") === today)
+    const timeZone = settings.timeZone || "America/Sao_Paulo"
+    const today = zonedDateString(new Date(), timeZone)
+    const todayOrders = valid.filter(
+      (order) => zonedDateString(new Date(order.createdAt), timeZone) === today,
+    )
     return {
       totalOrders: orders.length,
       openOrders: orders.filter((order) => ["pending", "accepted", "preparing", "in-route"].includes(order.status)).length,
@@ -170,7 +175,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
       todayOrders: todayOrders.length,
       todayRevenue: Number(todayOrders.reduce((sum, order) => sum + order.total, 0).toFixed(2)),
     }
-  }, [orders])
+  }, [orders, settings.timeZone])
 
   function changeSection(next: Section) {
     setSection(next)
@@ -193,7 +198,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
     router.refresh()
   }
 
-  const title = navItems.find((item) => item.key === section)?.label || "Admin"
+  const title = visibleNavItems.find((item) => item.key === section)?.label || "Admin"
   const operatingNow = isStoreOpenNow(settings)
   const openCash = cashSessions.find((session) => !session.closedAt)
 
@@ -216,7 +221,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
         <p className="px-3 pb-2 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Operação</p>
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const Icon = item.icon
           const active = section === item.key
           return (
@@ -301,6 +306,7 @@ export function AdminDashboard({ initialData, adminEmail }: { initialData: Dashb
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
           {section === "team" && <TeamPanel staffMembers={staffMembers} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
+          {section === "security" && <SecurityPanel role={adminRole} />}
 
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

@@ -6,6 +6,9 @@ import {
   isTenantCatalogReady,
 } from "@/lib/catalog-db"
 import { getAdminData } from "@/lib/db"
+import type { OrganizationRole } from "@/lib/tenant-context"
+import { getOrganizationTimeZone } from "@/lib/organization-security-db"
+import { canReadCatalog, canReadCustomers, canReadFinance, canReadMarketing, canReadOrders, canReadTeam } from "@/lib/admin-access"
 import {
   getTenantOrders,
   isTenantOrdersReady,
@@ -27,6 +30,98 @@ import {
   getTenantStaffMembers,
   isTenantRuntimeReady,
 } from "@/lib/organization-db"
+
+
+type TenantAdminData =
+  Awaited<
+    ReturnType<typeof getAdminData>
+  >
+
+function emptySummary() {
+  return {
+    totalOrders: 0,
+    openOrders: 0,
+    readyOrders: 0,
+    completedOrders: 0,
+    revenue: 0,
+    unpaid: 0,
+    todayOrders: 0,
+    todayRevenue: 0,
+  }
+}
+
+function restrictTenantDataForRole(
+  data: TenantAdminData,
+  role: OrganizationRole,
+): TenantAdminData {
+  const canOrders =
+    canReadOrders(role)
+  const canCatalog =
+    canReadCatalog(role)
+  const canCustomers =
+    canReadCustomers(role)
+  const canFinance =
+    canReadFinance(role)
+  const canMarketing =
+    canReadMarketing(role)
+  const canTeam =
+    canReadTeam(role)
+
+  return {
+    ...data,
+    summary:
+      canOrders
+        ? data.summary
+        : emptySummary(),
+    orders:
+      canOrders
+        ? data.orders
+        : [],
+    products:
+      canCatalog
+        ? data.products
+        : [],
+    categories:
+      canCatalog
+        ? data.categories
+        : [],
+    customers:
+      canCustomers
+        ? data.customers
+        : [],
+    deliveryZones:
+      canCatalog ||
+      canOrders
+        ? data.deliveryZones
+        : [],
+    couriers:
+      canOrders
+        ? data.couriers
+        : [],
+    feedbacks:
+      canMarketing
+        ? data.feedbacks
+        : [],
+    coupons:
+      canMarketing
+        ? data.coupons
+        : [],
+    cashSessions:
+      canFinance
+        ? data.cashSessions
+        : [],
+    financialEntries:
+      role === "owner" ||
+      role === "admin" ||
+      role === "manager"
+        ? data.financialEntries
+        : [],
+    staffMembers:
+      canTeam
+        ? data.staffMembers
+        : [],
+  }
+}
 
 async function getStrictTenantAdminData(
   organizationId: string,
@@ -75,6 +170,7 @@ async function getStrictTenantAdminData(
     operations,
     settings,
     staffMembers,
+    timeZone,
   ] = await Promise.all([
     getTenantProducts(
       organizationId,
@@ -106,6 +202,11 @@ async function getStrictTenantAdminData(
         includeInactive: true,
       },
     ),
+    getOrganizationTimeZone(
+      organizationId,
+    ).catch(
+      () => "America/Sao_Paulo",
+    ),
   ])
 
   if (!settings) {
@@ -116,7 +217,10 @@ async function getStrictTenantAdminData(
 
   return {
     summary:
-      summarizeOrders(orders),
+      summarizeOrders(
+        orders,
+        timeZone,
+      ),
     orders,
     products,
     categories,
@@ -166,8 +270,11 @@ export async function getTenantAwareAdminData(
   // estritamente PostgreSQL. Nunca usamos store.json como fallback, porque
   // isso poderia exibir dados de outra organização.
   if (!currentDeployment) {
-    return getStrictTenantAdminData(
-      session.organizationId,
+    return restrictTenantDataForRole(
+      await getStrictTenantAdminData(
+        session.organizationId,
+      ),
+      session.role,
     )
   }
 
@@ -222,8 +329,18 @@ export async function getTenantAwareAdminData(
         )
 
       data.orders = orders
+      const timeZone =
+        await getOrganizationTimeZone(
+          session.organizationId,
+        ).catch(
+          () => "America/Sao_Paulo",
+        )
+
       data.summary =
-        summarizeOrders(orders)
+        summarizeOrders(
+          orders,
+          timeZone,
+        )
     }
   } catch (error) {
     console.error(
@@ -324,5 +441,8 @@ export async function getTenantAwareAdminData(
     )
   }
 
-  return data
+  return restrictTenantDataForRole(
+    data,
+    session.role,
+  )
 }

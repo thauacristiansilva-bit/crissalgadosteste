@@ -19,9 +19,22 @@ export const getAdminLoginMode = () =>
 export const legacyAdminLoginAllowed = () =>
   getAdminLoginMode() === "transition"
 
-const getSessionSecret = () =>
-  process.env.SESSION_SECRET ||
-  `${getAdminPassword()}::cris-salgados-dev-secret`
+export const isSessionSecretConfigured = () =>
+  Boolean(process.env.SESSION_SECRET?.trim())
+
+const getSessionSecret = () => {
+  const configured = process.env.SESSION_SECRET?.trim()
+
+  if (configured) return configured
+
+  if (getAdminLoginMode() === "postgres") {
+    throw new Error(
+      "SESSION_SECRET é obrigatório com ADMIN_LOGIN_MODE=postgres.",
+    )
+  }
+
+  return `${getAdminPassword()}::cris-salgados-dev-secret`
+}
 
 export type AdminSession =
   | {
@@ -32,6 +45,7 @@ export type AdminSession =
       organizationName: string
       organizationSlug: string
       role: OrganizationRole
+      sessionVersion: number
       expiresAt: number
     }
   | {
@@ -81,22 +95,23 @@ export function createSessionToken(
   }
 
   const payload = {
-    v: 2,
+    v: 3,
     userId: context.userId,
     email: context.email,
     organizationId: context.organizationId,
     organizationName: context.organizationName,
     organizationSlug: context.organizationSlug,
     role: context.role,
+    sessionVersion: context.sessionVersion,
     expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
   }
 
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return `v2.${encoded}.${sign(encoded)}`
+  return `v3.${encoded}.${sign(encoded)}`
 }
 
 function parseTenantSessionToken(token?: string | null): AdminSession | null {
-  if (!token?.startsWith("v2.")) return null
+  if (!token || (!token.startsWith("v2.") && !token.startsWith("v3."))) return null
 
   const parts = token.split(".")
   if (parts.length !== 3) return null
@@ -116,11 +131,12 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
       organizationName?: string
       organizationSlug?: string
       role?: OrganizationRole
+      sessionVersion?: number
       expiresAt?: number
     }
 
     if (
-      payload.v !== 2 ||
+      ![2, 3].includes(Number(payload.v)) ||
       !payload.userId ||
       !payload.email ||
       !payload.organizationId ||
@@ -141,6 +157,7 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
       organizationName: payload.organizationName,
       organizationSlug: payload.organizationSlug,
       role: payload.role,
+      sessionVersion: Number(payload.sessionVersion || 1),
       expiresAt: payload.expiresAt,
     }
   } catch {

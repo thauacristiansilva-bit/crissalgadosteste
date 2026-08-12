@@ -232,10 +232,11 @@ export async function getTenantSettings(
   organizationId: string,
 ): Promise<StoreSettings | null> {
   const result = await getPostgresPool().query<{
+    timezone: string
     settings: StoreSettings
   }>(
     `
-      SELECT settings
+      SELECT timezone, settings
       FROM sf_organization_settings
       WHERE organization_id = $1
       LIMIT 1
@@ -243,12 +244,14 @@ export async function getTenantSettings(
     [organizationId],
   )
 
-  const settings = result.rows[0]?.settings
+  const row = result.rows[0]
+  const settings = row?.settings
   if (!settings || typeof settings !== "object") return null
 
   return {
     ...settings,
     systemName: "SaborFlow",
+    timeZone: row.timezone || "America/Sao_Paulo",
   }
 }
 
@@ -663,6 +666,31 @@ export async function updateTenantStaffMember(
       JSON.stringify(next.permissions),
     ],
   )
+
+  if (
+    result.rows[0] &&
+    patch.active === false
+  ) {
+    await getPostgresPool().query(
+      `
+        UPDATE sf_memberships
+        SET
+          status = 'disabled',
+          updated_at = now()
+        WHERE organization_id = $1
+          AND user_id = (
+            SELECT user_id
+            FROM sf_staff_members
+            WHERE organization_id = $1
+              AND id = $2
+              AND user_id IS NOT NULL
+            LIMIT 1
+          )
+          AND role <> 'owner'
+      `,
+      [organizationId, id],
+    )
+  }
 
   return result.rows[0]
     ? mapStaff(result.rows[0])

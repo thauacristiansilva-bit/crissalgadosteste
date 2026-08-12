@@ -12,6 +12,7 @@ export default async function AdminPage() {
   return (
     <AdminDashboard
       adminEmail={session.email || getAdminEmail()}
+      adminRole={session.mode === "tenant" ? session.role : "owner"}
       initialData={await getTenantAwareAdminData(session)}
     />
   )

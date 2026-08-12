@@ -29,6 +29,13 @@ export async function getVerifiedTenantSession():
 
   if (!current) return null
 
+  if (
+    current.sessionVersion !==
+    session.sessionVersion
+  ) {
+    return null
+  }
+
   return {
     mode: "tenant",
     ...current,

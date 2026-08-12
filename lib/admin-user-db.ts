@@ -4,6 +4,7 @@ import {
   timingSafeEqual,
 } from "node:crypto"
 import { getPostgresPool } from "@/lib/postgres"
+import { consumeAuthToken, getValidAuthToken, revokeOutstandingAuthTokens } from "@/lib/security-tokens"
 
 const PREFIX = "scrypt$v1"
 
@@ -192,4 +193,211 @@ export async function upgradeLegacyAdminPassword(
   )
 
   return Boolean(result.rowCount)
+}
+
+
+export async function changeAdminUserPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+) {
+  const result =
+    await getPostgresPool().query<{
+      password_hash: string | null
+      status: string
+    }>(
+      `
+        SELECT
+          password_hash,
+          status
+        FROM sf_users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId],
+    )
+
+  const row = result.rows[0]
+
+  if (
+    !row ||
+    row.status !== "active" ||
+    !row.password_hash ||
+    !verifyAdminPassword(
+      currentPassword,
+      row.password_hash,
+    )
+  ) {
+    throw new Error(
+      "Senha atual incorreta.",
+    )
+  }
+
+  if (
+    currentPassword === newPassword
+  ) {
+    throw new Error(
+      "A nova senha precisa ser diferente da atual.",
+    )
+  }
+
+  const passwordHash =
+    hashAdminPassword(newPassword)
+
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        password_hash = $2,
+        password_updated_at = now(),
+        session_version = session_version + 1,
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [userId, passwordHash],
+  )
+
+  await revokeOutstandingAuthTokens(
+    userId,
+    "password_reset",
+  )
+
+  return true
+}
+
+export async function getPasswordResetPreview(
+  token: string,
+) {
+  const valid =
+    await getValidAuthToken(
+      token,
+      "password_reset",
+    )
+
+  if (!valid) return null
+
+  const result =
+    await getPostgresPool().query<{
+      name: string
+      email: string
+      status: string
+    }>(
+      `
+        SELECT
+          name,
+          email,
+          status
+        FROM sf_users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [valid.userId],
+    )
+
+  const user = result.rows[0]
+
+  if (
+    !user ||
+    user.status === "blocked"
+  ) {
+    return null
+  }
+
+  return {
+    tokenId: valid.id,
+    userId: valid.userId,
+    organizationId:
+      valid.organizationId,
+    name: user.name,
+    email: user.email,
+    expiresAt: valid.expiresAt,
+  }
+}
+
+export async function resetAdminUserPassword(
+  token: string,
+  newPassword: string,
+) {
+  const preview =
+    await getPasswordResetPreview(token)
+
+  if (!preview) {
+    throw new Error(
+      "Link de recuperação inválido ou expirado.",
+    )
+  }
+
+  const passwordHash =
+    hashAdminPassword(newPassword)
+
+  const client =
+    await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+
+    const consumed =
+      await client.query(
+        `
+          UPDATE sf_auth_tokens
+          SET used_at = now()
+          WHERE id = $1
+            AND used_at IS NULL
+            AND expires_at > now()
+          RETURNING id
+        `,
+        [preview.tokenId],
+      )
+
+    if (!consumed.rowCount) {
+      throw new Error(
+        "Este link já foi usado ou expirou.",
+      )
+    }
+
+    await client.query(
+      `
+        UPDATE sf_users
+        SET
+          password_hash = $2,
+          password_updated_at = now(),
+          session_version = session_version + 1,
+          status = CASE
+            WHEN status = 'blocked' THEN status
+            ELSE 'active'
+          END,
+          updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        preview.userId,
+        passwordHash,
+      ],
+    )
+
+    await client.query(
+      `
+        UPDATE sf_auth_tokens
+        SET used_at = COALESCE(used_at, now())
+        WHERE user_id = $1
+          AND id <> $2
+          AND used_at IS NULL
+      `,
+      [
+        preview.userId,
+        preview.tokenId,
+      ],
+    )
+
+    await client.query("COMMIT")
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw error
+  } finally {
+    client.release()
+  }
+
+  return {
+    email: preview.email,
+  }
 }
