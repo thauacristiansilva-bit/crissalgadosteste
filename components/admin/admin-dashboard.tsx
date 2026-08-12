@@ -116,7 +116,7 @@ const saborFlowBrand = {
   border: "#f0d0aa",
 }
 
-export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnvironment }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string } | null }) {
+export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnvironment, organizationSlug }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string } | null; organizationSlug?: string | null }) {
   const router = useRouter()
   const [section, setSection] = useState<Section>(
     () =>
@@ -275,8 +275,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             </div>
           )}
           <div className="mb-5 flex flex-col gap-3 rounded-3xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: saborFlowBrand.border }}>
-            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>SaborFlow</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>Empresa ativa · {settings.storeName}</p></div>
-            <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>Painel oficial</span>
+            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment ? `Ambiente DEMO ativo · ${settings.storeName}` : `Empresa ativa · ${settings.storeName}`}</p></div>
+            <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>{demoEnvironment ? "PAINEL DEMO" : "Painel oficial"}</span>
           </div>
           {settings.cashRegisterEnabled && !openCash && (
             <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -312,7 +312,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
           {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} />}
           {section === "marketing" && <MarketingPanel coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
-          {section === "links" && <LinksPanel settings={settings} />}
+          {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment)} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
           {section === "team" && <TeamPanel staffMembers={staffMembers} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
@@ -322,7 +322,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div><p className="text-sm font-black" style={{ color: saborFlowBrand.brown }}>Plataforma</p><p className="text-xs text-gray-500">Painel administrativo do SaborFlow.</p></div>
-              <p className="text-xs font-semibold text-gray-500">Empresa ativa: <span style={{ color: saborFlowBrand.orangeStrong }}>{settings.storeName}</span></p>
+              <p className="text-xs font-semibold text-gray-500">{demoEnvironment ? "Ambiente DEMO:" : "Empresa ativa:"} <span style={{ color: saborFlowBrand.orangeStrong }}>{settings.storeName}</span></p>
             </div>
           </footer>
         </main>

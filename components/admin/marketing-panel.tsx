@@ -8,7 +8,7 @@ export function MarketingPanel({ coupons: initialCoupons, customers, settings, o
   const [coupons, setCoupons] = useState(initialCoupons)
   const [draft, setDraft] = useState({ code: "", description: "", type: "percent" as "percent" | "fixed", value: "10", minimumOrder: "0" })
   const [segment, setSegment] = useState("all")
-  const [bulkText, setBulkText] = useState("Olá! Temos novidades no cardápio da Cris Salgados 😋")
+  const [bulkText, setBulkText] = useState(() => `Olá! Temos novidades no cardápio da ${settings.storeName} 😋`)
   const [message, setMessage] = useState("")
   const [loyalty, setLoyalty] = useState({ enabled: settings.loyaltyEnabled, points: settings.loyaltyPointsPerReal, rewardPoints: settings.loyaltyRewardPoints, rewardText: settings.loyaltyRewardText })
   const audience = useMemo(() => customers.filter((c) => segment === "all" || c.segment === segment || c.lifecycle === segment), [customers, segment])

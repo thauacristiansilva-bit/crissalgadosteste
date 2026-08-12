@@ -493,7 +493,7 @@ export async function createDemoEnvironment(input: {
     const subscriptionId = randomUUID()
     const membershipId = randomUUID()
     const slug = `demo-${environmentId.replace(/-/g, "").slice(0, 12)}`
-    const storeName = input.kind === "public" ? "SaborFlow Demo" : "Meu Restaurante · Trial"
+    const storeName = input.kind === "public" ? "SaborFlow Demo" : "SaborFlow Trial Demo"
     const email = `demo+${environmentId.replace(/-/g, "")}@example.invalid`
     const durationMs = input.kind === "public"
       ? publicMinutes() * 60_000

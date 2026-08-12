@@ -3,8 +3,8 @@ import type { ReactNode } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Cris Salgados — Pedidos Online",
-  description: "Cardápio online, pedidos e administração da Cris Salgados.",
+  title: "SaborFlow — Gestão para alimentação",
+  description: "Pedidos, PDV, cozinha, delivery, estoque e gestão comercial no SaborFlow.",
   icons: { icon: "/icon.svg", apple: "/apple-icon.png" },
 }
 

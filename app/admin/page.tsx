@@ -32,6 +32,7 @@ export default async function AdminPage() {
         kind: demoEnvironment.kind,
         expiresAt: demoEnvironment.expiresAt,
       } : null}
+      organizationSlug={session.mode === "tenant" ? session.organizationSlug : null}
       initialData={await getTenantAwareAdminData(session)}
     />
   )
