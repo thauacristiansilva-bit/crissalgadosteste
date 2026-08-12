@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { ChefHat, Clock3, PackageCheck, ShoppingBag, Truck } from "lucide-react"
 import type { Order, OrderStatus, StoreSettings } from "@/lib/types"
+import { HelpTip } from "@/components/admin/help-tip"
 
 const time = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { timeZone, hour: "2-digit", minute: "2-digit" }).format(new Date(value))
 const dateTime = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { timeZone, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
@@ -56,7 +57,7 @@ export function KitchenPanel({ orders, settings, onOrderUpdated }: { orders: Ord
       <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-amber-50 p-2.5 text-amber-700"><ChefHat className="h-5 w-5" /></div>
-          <div><h2 className="text-lg font-bold text-gray-900">Cozinha · fila por horário</h2><p className="text-sm text-gray-500">Os pedidos com recebimento mais próximo aparecem primeiro.</p></div>
+          <div><div className="flex items-center gap-1.5"><h2 className="text-lg font-bold text-gray-900">Cozinha · fila por horário</h2><HelpTip helpKey="kitchen.flow" /></div><p className="text-sm text-gray-500">Os pedidos com recebimento mais próximo aparecem primeiro.</p></div>
         </div>
         <div className="rounded-2xl bg-slate-950 px-5 py-3 text-white shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Relógio da cozinha</p>

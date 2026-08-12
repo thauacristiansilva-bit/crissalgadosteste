@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useMemo, useState } from "react"
 import { CircleDollarSign, Image as ImageIcon, PackagePlus, Pencil, Power, Save, Trash2, Upload, X } from "lucide-react"
 import type { Category, Product } from "@/lib/types"
 import { ProductCompositionEditor } from "@/components/admin/product-composition-editor"
+import { HelpTip } from "@/components/admin/help-tip"
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
@@ -142,7 +143,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
           </div>
 
           <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><strong className="block text-sm text-gray-800">Produto em destaque</strong><small className="text-xs text-gray-500">Aparece primeiro no cardápio.</small></span><input type="checkbox" checked={draft.featured} onChange={(e) => setDraft({ ...draft, featured: e.target.checked })} className="h-5 w-5" /></label>
-          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><strong className="block text-sm text-gray-800">Controlar estoque</strong><small className="text-xs text-gray-500">Impede venda acima do saldo.</small></span><input type="checkbox" checked={draft.trackStock} onChange={(e) => setDraft({ ...draft, trackStock: e.target.checked })} className="h-5 w-5" /></label>
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><span className="flex items-center gap-1.5"><strong className="block text-sm text-gray-800">Controlar estoque</strong><HelpTip helpKey="products.readyStock" /></span><small className="text-xs text-gray-500">Impede venda acima do saldo.</small></span><input type="checkbox" checked={draft.trackStock} onChange={(e) => setDraft({ ...draft, trackStock: e.target.checked })} className="h-5 w-5" /></label>
           {draft.trackStock && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Quantidade em estoque</span><input type="number" min="0" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Estoque mínimo / alerta</span><input type="number" min="0" value={draft.minStock} onChange={(e) => setDraft({ ...draft, minStock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label></div>}
         </div>
         <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>

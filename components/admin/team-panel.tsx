@@ -19,6 +19,7 @@ import type {
   StaffMember,
   StaffRole,
 } from "@/lib/types"
+import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
 type TeamAccess = {
   staffMemberId: number
@@ -472,7 +473,7 @@ export function TeamPanel({
           </div>
           <div>
             <h2 className="text-lg font-black">
-              Equipe e acessos
+              <HelpLabel helpKey="team.access">Equipe e acessos</HelpLabel>
             </h2>
             <p className="text-sm text-gray-500">
               Cadastre o perfil operacional e
@@ -576,7 +577,7 @@ export function TeamPanel({
                   Colaborador
                 </th>
                 <th className="px-4 py-3">
-                  Função
+                  <HelpLabel helpKey="team.role">Função</HelpLabel>
                 </th>
                 <th className="px-4 py-3">
                   Status operacional
@@ -751,9 +752,9 @@ export function TeamPanel({
         )}
 
         <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          <strong>
+          <span className="inline-flex items-center gap-1.5"><strong>
             Convites:
-          </strong>{" "}
+          </strong><HelpTip helpKey="team.invite" /></span>{" "}
           o link é exibido e copiado somente
           quando você o gera. Compartilhe
           diretamente com o colaborador. O

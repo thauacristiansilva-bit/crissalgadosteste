@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Download, RefreshCw, TrendingDown, TrendingUp } from "lucide-react"
 import type { DreReport } from "@/lib/dre-types"
+import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
+import type { AdminHelpKey } from "@/lib/admin-help"
 
 const money = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -145,7 +147,7 @@ export function DrePanel({ timeZone }: { timeZone: string }) {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-700">Financeiro</p>
-            <h2 className="mt-1 text-xl font-black text-gray-950">DRE gerencial</h2>
+            <div className="mt-1 flex items-center gap-1.5"><h2 className="text-xl font-black text-gray-950">DRE gerencial</h2><HelpTip helpKey="dre.overview" /></div>
             <p className="mt-1 max-w-3xl text-sm text-gray-500">
               Resultado por competência: vendas não canceladas entram automaticamente, o CMV vem das baixas de ingredientes e os lançamentos manuais alimentam outras receitas e despesas.
             </p>
@@ -178,10 +180,10 @@ export function DrePanel({ timeZone }: { timeZone: string }) {
           )}
 
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">Receita líquida</p><p className="mt-2 text-2xl font-black text-gray-950">{money(report.revenue.netRevenue)}</p><div className="mt-2"><Delta value={report.comparison?.deltas.netRevenuePercent ?? null} /></div></article>
-            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">CMV</p><p className="mt-2 text-2xl font-black text-red-700">{money(report.costs.cmv)}</p><p className="mt-2 text-xs font-bold text-gray-500">{report.result.cmvPercent.toFixed(1)}% da receita</p></article>
-            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">Lucro bruto</p><p className="mt-2 text-2xl font-black text-emerald-700">{money(report.result.grossProfit)}</p><div className="mt-2"><Delta value={report.comparison?.deltas.grossProfitPercent ?? null} /></div></article>
-            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500">Resultado líquido</p><p className={`mt-2 text-2xl font-black ${report.result.netResult >= 0 ? "text-violet-700" : "text-red-700"}`}>{money(report.result.netResult)}</p><div className="mt-2"><Delta value={report.comparison?.deltas.netResultPercent ?? null} /></div></article>
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500"><HelpLabel helpKey="dre.netRevenue">Receita líquida</HelpLabel></p><p className="mt-2 text-2xl font-black text-gray-950">{money(report.revenue.netRevenue)}</p><div className="mt-2"><Delta value={report.comparison?.deltas.netRevenuePercent ?? null} /></div></article>
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500"><HelpLabel helpKey="dre.cmv">CMV</HelpLabel></p><p className="mt-2 text-2xl font-black text-red-700">{money(report.costs.cmv)}</p><p className="mt-2 text-xs font-bold text-gray-500">{report.result.cmvPercent.toFixed(1)}% da receita</p></article>
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500"><HelpLabel helpKey="dre.grossProfit">Lucro bruto</HelpLabel></p><p className="mt-2 text-2xl font-black text-emerald-700">{money(report.result.grossProfit)}</p><div className="mt-2"><Delta value={report.comparison?.deltas.grossProfitPercent ?? null} /></div></article>
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-gray-500"><HelpLabel helpKey="dre.netResult">Resultado líquido</HelpLabel></p><p className={`mt-2 text-2xl font-black ${report.result.netResult >= 0 ? "text-violet-700" : "text-red-700"}`}>{money(report.result.netResult)}</p><div className="mt-2"><Delta value={report.comparison?.deltas.netResultPercent ?? null} /></div></article>
           </section>
 
           <div className="grid gap-5 2xl:grid-cols-[1.15fr_.85fr]">
@@ -207,9 +209,9 @@ export function DrePanel({ timeZone }: { timeZone: string }) {
               <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
                 <h3 className="font-black text-gray-950">Indicadores</h3>
                 <div className="mt-4 grid grid-cols-2 gap-3">
-                  <Metric label="Margem bruta" value={`${report.result.grossMarginPercent.toFixed(1)}%`} />
-                  <Metric label="Margem líquida" value={`${report.result.netMarginPercent.toFixed(1)}%`} />
-                  <Metric label="Ticket médio" value={money(report.result.averageTicket)} />
+                  <Metric label="Margem bruta" value={`${report.result.grossMarginPercent.toFixed(1)}%`} helpKey="dre.grossMargin" />
+                  <Metric label="Margem líquida" value={`${report.result.netMarginPercent.toFixed(1)}%`} helpKey="dre.netMargin" />
+                  <Metric label="Ticket médio" value={money(report.result.averageTicket)} helpKey="dre.averageTicket" />
                   <Metric label="Pedidos" value={String(report.result.orderCount)} />
                   <Metric label="Recebido" value={money(report.revenue.paidSales)} />
                   <Metric label="A receber" value={money(report.revenue.unpaidSales)} />
@@ -260,6 +262,6 @@ function DreLine({ label, value, strong = false, negative = false, accent = fals
   return <div className={`flex items-center justify-between gap-4 px-5 py-3 ${strong ? "bg-gray-50" : ""}`}><span className={`${strong ? "font-black text-gray-950" : "font-semibold text-gray-600"}`}>{label}</span><span className={`${strong ? "font-black" : "font-bold"} ${negative ? "text-red-700" : accent ? (value >= 0 ? "text-emerald-700" : "text-red-700") : "text-gray-950"}`}>{money(value)}</span></div>
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs font-bold text-gray-500">{label}</p><p className="mt-1 text-lg font-black text-gray-950">{value}</p></div>
+function Metric({ label, value, helpKey }: { label: string; value: string; helpKey?: AdminHelpKey }) {
+  return <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs font-bold text-gray-500">{helpKey ? <HelpLabel helpKey={helpKey}>{label}</HelpLabel> : label}</p><p className="mt-1 text-lg font-black text-gray-950">{value}</p></div>
 }

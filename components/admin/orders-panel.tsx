@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import type { Courier, Order, OrderStatus, PaymentStatus, StoreSettings } from "@/lib/types"
 import { printOrder } from "@/lib/print-order"
+import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
 const statusLabels: Record<OrderStatus, string> = {
   pending: "Pendente legado",
@@ -181,6 +182,7 @@ export function OrdersPanel({
                     <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusClasses[order.status]}`}>
                       {statusLabels[order.status]}
                     </span>
+                    <HelpTip helpKey="orders.status" />
                     <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">{order.channel}</span>
                   </div>
 
@@ -207,7 +209,7 @@ export function OrdersPanel({
                     </div>
 
                     <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Pagamento</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400"><HelpLabel helpKey="orders.payment">Pagamento</HelpLabel></p>
                       <p className="mt-1 text-xl font-black text-gray-950">{formatCurrency(order.total)}</p>
                       <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                         <PaymentIcon method={order.paymentMethod} />
@@ -246,7 +248,7 @@ export function OrdersPanel({
                 <div className="flex shrink-0 flex-wrap gap-2 xl:w-48 xl:flex-col">
                   {order.type === "delivery" && !["completed", "cancelled"].includes(order.status) && (
                     <label className="block w-full">
-                      <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-gray-400">Entregador</span>
+                      <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-gray-400"><HelpLabel helpKey="orders.courier">Entregador</HelpLabel></span>
                       <select
                         value={order.courierId || ""}
                         onChange={(event) => {
@@ -318,6 +320,7 @@ export function OrdersPanel({
                   )}
 
                   {!(["completed", "cancelled"] as OrderStatus[]).includes(order.status) && (
+                    <>
                     <button
                       type="button"
                       disabled={busyId === order.id}
@@ -325,7 +328,8 @@ export function OrdersPanel({
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
                     >
                       <XCircle className="h-4 w-4" /> Cancelar
-                    </button>
+                    </button><HelpTip helpKey="orders.cancel" className="self-center" />
+                    </>
                   )}
                 </div>
               </div>

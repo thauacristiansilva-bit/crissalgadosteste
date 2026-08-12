@@ -9,6 +9,7 @@ import {
 import type {
   OrganizationRole,
 } from "@/lib/tenant-context"
+import { HelpLabel } from "@/components/admin/help-tip"
 
 type DomainStatus = {
   domain: string
@@ -581,7 +582,7 @@ export function SecurityPanel({
         <>
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-black">
-              Timezone da empresa
+              <HelpLabel helpKey="security.timezone">Timezone da empresa</HelpLabel>
             </h2>
             <p className="mt-1 text-sm text-gray-500">
               Usado para datas operacionais,
@@ -622,7 +623,7 @@ export function SecurityPanel({
 
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-black">
-              Domínio customizado
+              <HelpLabel helpKey="security.domain">Domínio customizado</HelpLabel>
             </h2>
             <p className="mt-1 text-sm text-gray-500">
               O SaborFlow verifica propriedade
@@ -770,7 +771,7 @@ export function SecurityPanel({
 
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-black">
-              Agentes de impressão
+              <HelpLabel helpKey="security.printAgent">Agentes de impressão</HelpLabel>
             </h2>
             <p className="mt-1 text-sm text-gray-500">
               Cada empresa recebe seu próprio

@@ -18,6 +18,7 @@ import { ProductCustomizer, type ProductCustomization } from "@/components/catal
 import { GoogleAddressAutocomplete } from "@/components/maps/google-address-autocomplete"
 import { geocodeGoogleAddress } from "@/lib/google-maps-client"
 import { modifierSelectionKey, productHasModifiers } from "@/lib/product-composition"
+import { HelpTip } from "@/components/admin/help-tip"
 import type { CustomerAccount, Order, OrderItemModifier, Product, StoreSettings } from "@/lib/types"
 
 const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -331,7 +332,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
       </div>
 
       <aside className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm xl:sticky xl:top-20">
-        <div className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-blue-700"/><h2 className="font-black">Novo pedido</h2></div>
+        <div className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-blue-700"/><h2 className="font-black">Novo pedido</h2>{orderType === "delivery" && <HelpTip helpKey="pdv.delivery" />}</div>
 
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button type="button" disabled={!settings.pickupEnabled} onClick={() => selectOrderType("pickup")} className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-40 ${orderType === "pickup" ? "border-blue-700 bg-blue-50 text-blue-800" : "border-gray-200 bg-white text-gray-600"}`}><Store className="h-4 w-4"/>Retirada</button>
@@ -343,7 +344,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
 
         {orderType === "delivery" && (
           <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
-            <div className="flex items-center gap-2 text-sm font-black text-blue-900"><UserRound className="h-4 w-4"/>Cliente e endereço</div>
+            <div className="flex items-center gap-2 text-sm font-black text-blue-900"><UserRound className="h-4 w-4"/>Cliente e endereço <HelpTip helpKey="pdv.deliveryQuote" /></div>
             <label className="mt-3 block text-[11px] font-bold uppercase tracking-wide text-gray-500">Cliente cadastrado</label>
             <select value={selectedAccountId || ""} onChange={(e) => selectCustomer(e.target.value)} className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm">
               <option value="">Digitar cliente / endereço manualmente</option>
