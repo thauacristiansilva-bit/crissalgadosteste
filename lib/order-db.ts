@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { getCurrentDeploymentOrganizationId } from "@/lib/catalog-db"
+import { reverseIngredientsForOrderWithClient } from "@/lib/food-composition-db"
 import type {
   DashboardSummary,
   Order,
@@ -44,6 +45,19 @@ type OrderItemRow = {
   quantity: number
   unit_price: string | number
   subtotal: string | number
+  modifiers?: Order["items"][number]["modifiers"]
+}
+
+type OrderItemModifierRow = {
+  order_id: number
+  line_no: number
+  modifier_no: number
+  group_id: number
+  group_name: string
+  option_id: number
+  option_name: string
+  price_delta: string | number
+  included: boolean
 }
 
 function iso(value: Date | string) {
@@ -89,6 +103,7 @@ function mapOrder(row: OrderRow, itemRows: OrderItemRow[]): Order {
         quantity: Number(item.quantity),
         unitPrice: Number(item.unit_price),
         subtotal: Number(item.subtotal),
+        ...(item.modifiers?.length ? { modifiers: item.modifiers } : {}),
       })),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
@@ -149,11 +164,52 @@ async function getItemsForOrderIds(
     [organizationId, ids],
   )
 
+  const modifierMap = new Map<string, OrderItemRow["modifiers"]>()
+
+  try {
+    const modifiers = await getPostgresPool().query<OrderItemModifierRow>(
+      `
+        SELECT
+          order_id,
+          line_no,
+          modifier_no,
+          group_id,
+          group_name,
+          option_id,
+          option_name,
+          price_delta,
+          included
+        FROM sf_order_item_modifiers
+        WHERE organization_id = $1
+          AND order_id = ANY($2::int[])
+        ORDER BY order_id ASC, line_no ASC, modifier_no ASC
+      `,
+      [organizationId, ids],
+    )
+
+    for (const modifier of modifiers.rows) {
+      const key = `${Number(modifier.order_id)}:${Number(modifier.line_no)}`
+      const list = modifierMap.get(key) || []
+      list.push({
+        groupId: Number(modifier.group_id),
+        groupName: modifier.group_name,
+        optionId: Number(modifier.option_id),
+        optionName: modifier.option_name,
+        priceDelta: Number(modifier.price_delta),
+        included: Boolean(modifier.included),
+      })
+      modifierMap.set(key, list)
+    }
+  } catch (error) {
+    if ((error as { code?: string })?.code !== "42P01") throw error
+  }
+
   const map = new Map<number, OrderItemRow[]>()
 
   for (const item of result.rows) {
     const list = map.get(Number(item.order_id)) || []
-    list.push(item)
+    const key = `${Number(item.order_id)}:${Number(item.line_no)}`
+    list.push({ ...item, modifiers: modifierMap.get(key) || [] })
     map.set(Number(item.order_id), list)
   }
 
@@ -383,6 +439,27 @@ async function writeOrder(
         item.subtotal,
       ],
     )
+
+
+    if (item.modifiers?.length) {
+      for (let modifierIndex = 0; modifierIndex < item.modifiers.length; modifierIndex += 1) {
+        const modifier = item.modifiers[modifierIndex]
+        await client.query(
+          `
+            INSERT INTO sf_order_item_modifiers (
+              organization_id, order_id, line_no, modifier_no,
+              group_id, group_name, option_id, option_name, price_delta, included
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `,
+          [
+            organizationId, order.id, index + 1, modifierIndex + 1,
+            modifier.groupId, modifier.groupName, modifier.optionId, modifier.optionName,
+            modifier.priceDelta, modifier.included,
+          ],
+        )
+      }
+    }
   }
 }
 
@@ -399,6 +476,41 @@ export async function upsertTenantOrder(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       [`saborflow-orders:${organizationId}`],
     )
+
+    const previous = await client.query<{ status: Order["status"]; source: string }>(
+      `SELECT status, source FROM sf_orders WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
+      [organizationId, order.id],
+    )
+
+    if (
+      previous.rows[0] &&
+      previous.rows[0].status !== "cancelled" &&
+      order.status === "cancelled"
+    ) {
+      await reverseIngredientsForOrderWithClient(client, organizationId, order.id)
+
+      if (["tenant-checkout", "tenant-pdv", "postgres-admin"].includes(previous.rows[0].source)) {
+        const stockItems = await client.query<{ product_id: number; quantity: number }>(
+          `
+            SELECT product_id, SUM(quantity)::int AS quantity
+            FROM sf_order_items
+            WHERE organization_id = $1 AND order_id = $2
+            GROUP BY product_id
+          `,
+          [organizationId, order.id],
+        )
+        for (const stockItem of stockItems.rows) {
+          await client.query(
+            `
+              UPDATE sf_products
+              SET stock = stock + $3, updated_at = now()
+              WHERE organization_id = $1 AND id = $2 AND track_stock = true
+            `,
+            [organizationId, Number(stockItem.product_id), Number(stockItem.quantity)],
+          )
+        }
+      }
+    }
 
     await writeOrder(client, organizationId, order, source)
 
@@ -468,6 +580,10 @@ export async function updateTenantOrder(
   const current = await getTenantOrderById(organizationId, id)
   if (!current) return null
 
+  if (current.status === "cancelled" && patch.status && patch.status !== "cancelled") {
+    throw new Error("Pedido cancelado não pode ser reaberto automaticamente.")
+  }
+
   const next: Order = {
     ...current,
     ...patch,
@@ -495,56 +611,111 @@ export async function getCurrentDeploymentOrderById(id: number) {
   return getTenantOrderById(organizationId, id)
 }
 
-export async function getCurrentDeploymentUnprintedOrders() {
-  const organizationId = await getCurrentDeploymentOrganizationId()
-  if (!organizationId) return null
-  if (!(await isTenantOrdersReady(organizationId))) return null
+export async function getTenantUnprintedOrders(
+  organizationId: string,
+) {
+  if (!(await isTenantOrdersReady(organizationId))) {
+    return null
+  }
 
-  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000)
-
-  const result = await getPostgresPool().query<OrderRow>(
-    `
-      ${orderSelect}
-      WHERE organization_id = $1
-        AND status NOT IN ('completed', 'cancelled')
-        AND printed_at IS NULL
-        AND created_at >= $2
-      ORDER BY created_at ASC, id ASC
-    `,
-    [organizationId, cutoff],
+  const cutoff = new Date(
+    Date.now() - 48 * 60 * 60 * 1000,
   )
 
-  const items = await getItemsForOrderIds(
-    organizationId,
-    result.rows.map((row) => Number(row.id)),
-  )
+  const result =
+    await getPostgresPool().query<OrderRow>(
+      `
+        ${orderSelect}
+        WHERE organization_id = $1
+          AND status NOT IN ('completed', 'cancelled')
+          AND printed_at IS NULL
+          AND created_at >= $2
+        ORDER BY created_at ASC, id ASC
+      `,
+      [organizationId, cutoff],
+    )
+
+  const items =
+    await getItemsForOrderIds(
+      organizationId,
+      result.rows.map(
+        (row) => Number(row.id),
+      ),
+    )
 
   return result.rows.map((row) =>
-    mapOrder(row, items.get(Number(row.id)) || []),
+    mapOrder(
+      row,
+      items.get(
+        Number(row.id),
+      ) || [],
+    ),
+  )
+}
+
+export async function markTenantOrderPrinted(
+  organizationId: string,
+  id: number,
+) {
+  if (!(await isTenantOrdersReady(organizationId))) {
+    return null
+  }
+
+  return updateTenantOrder(
+    organizationId,
+    id,
+    {
+      printedAt:
+        new Date().toISOString(),
+    },
+  )
+}
+
+export async function getCurrentDeploymentUnprintedOrders() {
+  const organizationId =
+    await getCurrentDeploymentOrganizationId()
+
+  if (!organizationId) return null
+
+  return getTenantUnprintedOrders(
+    organizationId,
   )
 }
 
 export async function markCurrentDeploymentOrderPrinted(id: number) {
-  const organizationId = await getCurrentDeploymentOrganizationId()
-  if (!organizationId) return null
-  if (!(await isTenantOrdersReady(organizationId))) return null
+  const organizationId =
+    await getCurrentDeploymentOrganizationId()
 
-  return updateTenantOrder(organizationId, id, {
-    printedAt: new Date().toISOString(),
-  })
+  if (!organizationId) return null
+
+  return markTenantOrderPrinted(
+    organizationId,
+    id,
+  )
 }
 
-export function summarizeOrders(orders: Order[]): DashboardSummary {
-  const today = new Date().toLocaleDateString("en-CA", {
-    timeZone: "America/Fortaleza",
-  })
+export function summarizeOrders(
+  orders: Order[],
+  timeZone = "America/Sao_Paulo",
+): DashboardSummary {
+  const today =
+    new Date().toLocaleDateString(
+      "en-CA",
+      { timeZone },
+    )
 
-  const valid = orders.filter((order) => order.status !== "cancelled")
+  const valid = orders.filter(
+    (order) =>
+      order.status !== "cancelled",
+  )
   const todayOrders = valid.filter(
     (order) =>
-      new Date(order.createdAt).toLocaleDateString("en-CA", {
-        timeZone: "America/Fortaleza",
-      }) === today,
+      new Date(
+        order.createdAt,
+      ).toLocaleDateString(
+        "en-CA",
+        { timeZone },
+      ) === today,
   )
 
   return {

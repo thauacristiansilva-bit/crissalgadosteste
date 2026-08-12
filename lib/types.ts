@@ -44,6 +44,94 @@ export interface Category {
   updatedAt: string
 }
 
+
+export type IngredientUnit = "g" | "kg" | "ml" | "l" | "unit" | "portion"
+
+export interface Ingredient {
+  id: number
+  name: string
+  unit: IngredientUnit
+  stockQuantity: number
+  minStockQuantity: number
+  unitCost: number
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface InventoryMovement {
+  id: number
+  ingredientId: number
+  ingredientName: string
+  kind: "sale" | "reversal" | "manual_in" | "manual_out" | "adjustment" | "waste"
+  quantityDelta: number
+  unitCostSnapshot: number
+  orderId?: number
+  note: string
+  createdAt: string
+}
+
+export interface ProductRecipeItem {
+  ingredientId: number
+  ingredientName: string
+  unit: IngredientUnit
+  quantity: number
+  unitCost: number
+  estimatedCost: number
+}
+
+export interface ProductModifierOptionIngredient {
+  ingredientId: number
+  ingredientName: string
+  unit: IngredientUnit
+  quantity: number
+  unitCost: number
+  estimatedCost: number
+}
+
+export interface ProductModifierOption {
+  id: number
+  name: string
+  description: string
+  priceDelta: number
+  includedEligible: boolean
+  active: boolean
+  sortOrder: number
+  available: boolean
+  estimatedFoodCost?: number
+  ingredients?: ProductModifierOptionIngredient[]
+}
+
+export interface ProductModifierGroup {
+  id: number
+  name: string
+  description: string
+  required: boolean
+  minSelect: number
+  maxSelect: number
+  includedQuantity: number
+  active: boolean
+  sortOrder: number
+  options: ProductModifierOption[]
+}
+
+export interface OrderItemModifier {
+  groupId: number
+  groupName: string
+  optionId: number
+  optionName: string
+  priceDelta: number
+  included: boolean
+}
+
+export interface ProductComposition {
+  productId: number
+  modifierGroups: ProductModifierGroup[]
+  recipe: ProductRecipeItem[]
+  estimatedFoodCost: number
+  ingredientStockAvailable: boolean
+}
+
 export interface Product {
   id: number
   name: string
@@ -56,6 +144,9 @@ export interface Product {
   trackStock: boolean
   stock: number
   minStock: number
+  modifierGroups?: ProductModifierGroup[]
+  estimatedFoodCost?: number
+  ingredientStockAvailable?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -91,6 +182,7 @@ export interface OrderItem {
   quantity: number
   unitPrice: number
   subtotal: number
+  modifiers?: OrderItemModifier[]
 }
 
 export interface OrderCustomer {
@@ -217,6 +309,8 @@ export interface FinancialEntry {
 }
 
 export interface StoreSettings {
+  /** IANA time zone of the organization. Legacy data may omit this field. */
+  timeZone?: string
   storeName: string
   systemName: string
   slogan: string

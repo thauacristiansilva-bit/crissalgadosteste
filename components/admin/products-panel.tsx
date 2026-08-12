@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useMemo, useState } from "react"
 import { CircleDollarSign, Image as ImageIcon, PackagePlus, Pencil, Power, Save, Trash2, Upload, X } from "lucide-react"
 import type { Category, Product } from "@/lib/types"
+import { ProductCompositionEditor } from "@/components/admin/product-composition-editor"
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
@@ -26,6 +27,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
   const [busy, setBusy] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState("")
+  const [compositionProduct, setCompositionProduct] = useState<Product | null>(null)
   const activeCategories = useMemo(() => categories.filter((category) => category.active), [categories])
 
   function beginEdit(product: Product) {
@@ -116,15 +118,15 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
             const outOfStock = product.trackStock && product.stock <= 0
             return <div key={product.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <div className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-xl ${product.active ? "bg-amber-50" : "bg-gray-100 grayscale"}`}>{product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" /> : "🥟"}</div>
-              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-gray-900">{product.name}</h3><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{product.category}</span>{product.featured && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">Destaque</span>}{!product.active && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">Inativo</span>}{outOfStock && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Sem estoque</span>}</div><p className="mt-0.5 text-sm text-gray-500">{product.description || "Sem descrição"}</p>{product.trackStock && <p className="mt-1 text-xs font-medium text-gray-400">Estoque: {product.stock}</p>}</div>
-              <div className="flex items-center justify-between gap-3 sm:justify-end"><strong className="min-w-24 text-right text-base text-gray-950">{formatCurrency(product.price)}</strong><button onClick={() => beginEdit(product)} type="button" className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700" aria-label={`Editar ${product.name}`}><Pencil className="h-4 w-4" /></button><button onClick={() => product.active ? remove(product) : changeActive(product, true)} disabled={busy} type="button" className={`rounded-lg p-2 ${product.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`} aria-label={product.active ? `Desativar ${product.name}` : `Ativar ${product.name}`}>{product.active ? <Trash2 className="h-4 w-4" /> : <Power className="h-4 w-4" />}</button></div>
+              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-gray-900">{product.name}</h3><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{product.category}</span>{product.featured && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">Destaque</span>}{!product.active && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">Inativo</span>}{outOfStock && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Sem estoque</span>}{Boolean(product.modifierGroups?.length) && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Montagem</span>}{product.ingredientStockAvailable === false && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">Ingrediente indisponível</span>}</div><p className="mt-0.5 text-sm text-gray-500">{product.description || "Sem descrição"}</p>{product.trackStock && <p className="mt-1 text-xs font-medium text-gray-400">Estoque: {product.stock}</p>}</div>
+              <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end"><strong className="min-w-24 text-right text-base text-gray-950">{formatCurrency(product.price)}</strong><button onClick={() => setCompositionProduct(product)} type="button" className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100" aria-label={`Montagem e ficha técnica de ${product.name}`}><PackagePlus className="h-4 w-4" /> Montagem</button><button onClick={() => beginEdit(product)} type="button" className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700" aria-label={`Editar ${product.name}`}><Pencil className="h-4 w-4" /></button><button onClick={() => product.active ? remove(product) : changeActive(product, true)} disabled={busy} type="button" className={`rounded-lg p-2 ${product.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`} aria-label={product.active ? `Desativar ${product.name}` : `Ativar ${product.name}`}>{product.active ? <Trash2 className="h-4 w-4" /> : <Power className="h-4 w-4" />}</button></div>
             </div>
           })}
         </div>
       </div>
 
       <form onSubmit={submit} className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm xl:sticky xl:top-20">
-        <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Preço, imagem, categoria e estoque.</p></div>{editingId && <button type="button" onClick={clearForm} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
+        <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Preço, imagem, categoria e estoque. Complementos e ficha técnica ficam no botão “Montagem”.</p></div>{editingId && <button type="button" onClick={clearForm} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</div>}
 
         <div className="space-y-4">
@@ -145,6 +147,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
         </div>
         <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
       </form>
+      <ProductCompositionEditor product={compositionProduct} onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} />
     </section>
   )
 }

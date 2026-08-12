@@ -526,6 +526,38 @@ export async function createOrganizationForUser(
       [organizationId],
     )
 
+    await client.query("SAVEPOINT sf_food_state_optional")
+    try {
+      await client.query(
+        `
+          INSERT INTO sf_food_composition_state (
+            organization_id,
+            ready,
+            source,
+            modifier_groups_count,
+            modifier_options_count,
+            ingredients_count,
+            recipe_items_count,
+            imported_at
+          )
+          VALUES (
+            $1, true, 'onboarding',
+            0, 0, 0, 0, now()
+          )
+        `,
+        [organizationId],
+      )
+      await client.query("RELEASE SAVEPOINT sf_food_state_optional")
+    } catch (foodStateError) {
+      await client.query("ROLLBACK TO SAVEPOINT sf_food_state_optional")
+      await client.query("RELEASE SAVEPOINT sf_food_state_optional")
+      if ((foodStateError as { code?: string })?.code !== "42P01") {
+        throw foodStateError
+      }
+      // Janela segura entre o deploy do código e a migration 010.
+      // A própria migration cria o estado para organizações já existentes.
+    }
+
     await client.query(
       `
         INSERT INTO sf_audit_log (
@@ -563,6 +595,20 @@ export async function createOrganizationForUser(
       ],
     )
 
+    const sessionResult = await client.query<{ session_version: number }>(
+      `
+        SELECT session_version
+        FROM sf_users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId],
+    )
+
+    const sessionVersion = Number(
+      sessionResult.rows[0]?.session_version || 1,
+    )
+
     await client.query("COMMIT")
 
     return {
@@ -573,6 +619,7 @@ export async function createOrganizationForUser(
         tradeName,
       organizationSlug: slug,
       role: "owner",
+      sessionVersion,
     }
   } catch (error) {
     await client.query("ROLLBACK")

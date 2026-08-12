@@ -33,6 +33,14 @@ import {
 import {
   getPostgresPool,
 } from "@/lib/postgres"
+import {
+  consumeIngredientsForOrderWithClient,
+  getModifierGroupsForProductsWithClient,
+  isTenantFoodCompositionReady,
+} from "@/lib/food-composition-db"
+import {
+  validateAndPriceModifierSelection,
+} from "@/lib/product-composition"
 import type {
   DeliveryZone,
   Order,
@@ -48,6 +56,7 @@ export type TenantCheckoutInput = {
   items: Array<{
     productId: number
     quantity: number
+    modifierOptionIds?: number[]
   }>
   requestedFor?: string
   timing?: "now" | "scheduled"
@@ -90,47 +99,43 @@ function money(value: number) {
   )
 }
 
-function combinedItems(
+function normalizedItems(
   items: TenantCheckoutInput["items"],
 ) {
-  const map = new Map<
-    number,
-    number
-  >()
+  if (items.length > 100) {
+    throw new Error("O pedido possui itens demais.")
+  }
 
-  for (const item of items) {
-    const productId = Number(
-      item.productId,
-    )
-    const quantity = Math.floor(
-      Number(item.quantity),
-    )
+  return items.map((item) => {
+    const productId = Number(item.productId)
+    const rawQuantity = Number(item.quantity)
+    const quantity = Math.floor(rawQuantity)
+    const rawModifierOptionIds = Array.isArray(item.modifierOptionIds)
+      ? item.modifierOptionIds
+      : []
+    const parsedModifierOptionIds = rawModifierOptionIds.map(Number)
 
     if (
       !Number.isInteger(productId) ||
       productId <= 0 ||
-      !Number.isFinite(quantity) ||
+      !Number.isFinite(rawQuantity) ||
+      !Number.isInteger(rawQuantity) ||
       quantity <= 0 ||
-      quantity > 500
-    ) {
-      throw new Error(
-        "Quantidade de produto inválida.",
+      quantity > 500 ||
+      parsedModifierOptionIds.some(
+        (value) => !Number.isInteger(value) || value <= 0,
       )
+    ) {
+      throw new Error("Quantidade de produto ou complementos inválidos.")
     }
 
-    map.set(
-      productId,
-      (map.get(productId) || 0) +
-        quantity,
-    )
-  }
+    const modifierOptionIds = [...new Set(parsedModifierOptionIds)]
+    if (modifierOptionIds.length > 50) {
+      throw new Error("Há complementos demais em um dos itens do pedido.")
+    }
 
-  return [...map.entries()].map(
-    ([productId, quantity]) => ({
-      productId,
-      quantity,
-    }),
-  )
+    return { productId, quantity, modifierOptionIds }
+  })
 }
 
 async function validateCouponWithClient(
@@ -332,7 +337,10 @@ export async function createTenantCheckoutOrder(
   }
 
   const requested =
-    combinedItems(input.items)
+    normalizedItems(input.items)
+
+  const compositionReady =
+    await isTenantFoodCompositionReady(organizationId).catch(() => false)
 
   if (!requested.length) {
     throw new Error(
@@ -513,58 +521,65 @@ export async function createTenantCheckoutOrder(
 
     const products = new Map(
       productResult.rows.map(
-        (product) => [
-          Number(product.id),
-          product,
-        ],
+        (product) => [Number(product.id), product],
       ),
     )
 
-    const items: Order["items"] =
-      requested.map(
-        (requestedItem) => {
-          const product =
-            products.get(
-              requestedItem.productId,
-            )
+    const modifierGroups = compositionReady
+      ? await getModifierGroupsForProductsWithClient(
+          client,
+          organizationId,
+          productIds,
+        )
+      : new Map()
 
-          if (
-            !product ||
-            !product.active
-          ) {
-            throw new Error(
-              `Produto ${requestedItem.productId} não encontrado ou inativo.`,
-            )
-          }
-
-          if (
-            product.track_stock &&
-            Number(product.stock) <
-              requestedItem.quantity
-          ) {
-            throw new Error(
-              `${product.name} não possui estoque suficiente.`,
-            )
-          }
-
-          const unitPrice = Number(
-            product.price,
-          )
-
-          return {
-            productId:
-              Number(product.id),
-            name: product.name,
-            quantity:
-              requestedItem.quantity,
-            unitPrice,
-            subtotal: money(
-              unitPrice *
-                requestedItem.quantity,
-            ),
-          }
-        },
+    const requestedStock = new Map<number, number>()
+    for (const requestedItem of requested) {
+      requestedStock.set(
+        requestedItem.productId,
+        (requestedStock.get(requestedItem.productId) || 0) + requestedItem.quantity,
       )
+    }
+
+    for (const [productId, quantity] of requestedStock) {
+      const product = products.get(productId)
+      if (!product || !product.active) {
+        throw new Error(`Produto ${productId} não encontrado ou inativo.`)
+      }
+      if (product.track_stock && Number(product.stock) < quantity) {
+        throw new Error(`${product.name} não possui estoque suficiente.`)
+      }
+    }
+
+    const items: Order["items"] = requested.map((requestedItem) => {
+      const product = products.get(requestedItem.productId)!
+      const groups = compositionReady
+        ? modifierGroups.get(requestedItem.productId) || []
+        : []
+
+      if (!compositionReady && requestedItem.modifierOptionIds.length) {
+        throw new Error("Complementos ainda não estão disponíveis para esta empresa.")
+      }
+
+      const pricing = validateAndPriceModifierSelection(
+        {
+          price: Number(product.price),
+          modifierGroups: groups,
+        },
+        requestedItem.modifierOptionIds,
+      )
+
+      if (!pricing.ok) throw new Error(pricing.error)
+
+      return {
+        productId: Number(product.id),
+        name: product.name,
+        quantity: requestedItem.quantity,
+        unitPrice: pricing.unitPrice,
+        subtotal: money(pricing.unitPrice * requestedItem.quantity),
+        ...(pricing.modifiers.length ? { modifiers: pricing.modifiers } : {}),
+      }
+    })
 
     const subtotal = money(
       items.reduce(
@@ -917,6 +932,35 @@ export async function createTenantCheckoutOrder(
         ],
       )
 
+      for (
+        let modifierIndex = 0;
+        modifierIndex < (item.modifiers || []).length;
+        modifierIndex += 1
+      ) {
+        const modifier = item.modifiers![modifierIndex]
+        await client.query(
+          `
+            INSERT INTO sf_order_item_modifiers (
+              organization_id, order_id, line_no, modifier_no,
+              group_id, group_name, option_id, option_name, price_delta, included
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `,
+          [
+            organizationId,
+            order.id,
+            index + 1,
+            modifierIndex + 1,
+            modifier.groupId,
+            modifier.groupName,
+            modifier.optionId,
+            modifier.optionName,
+            modifier.priceDelta,
+            modifier.included,
+          ],
+        )
+      }
+
       const product =
         products.get(
           item.productId,
@@ -945,6 +989,19 @@ export async function createTenantCheckoutOrder(
           ],
         )
       }
+    }
+
+    if (compositionReady) {
+      await consumeIngredientsForOrderWithClient(
+        client,
+        organizationId,
+        order.id,
+        items.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          optionIds: (item.modifiers || []).map((modifier) => modifier.optionId),
+        })),
+      )
     }
 
     await client.query(

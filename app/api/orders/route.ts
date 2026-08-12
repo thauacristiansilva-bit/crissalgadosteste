@@ -35,6 +35,7 @@ import type {
 import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
+import { canReadOrders } from "@/lib/admin-access"
 
 export async function GET() {
   if (
@@ -53,6 +54,16 @@ export async function GET() {
     await getVerifiedTenantSession()
 
   if (session) {
+    if (!canReadOrders(session.role)) {
+      return NextResponse.json(
+        {
+          error:
+            "Seu perfil não pode visualizar pedidos.",
+        },
+        { status: 403 },
+      )
+    }
+
     const ready =
       await isTenantOrdersReady(
         session.organizationId,
@@ -188,6 +199,7 @@ export async function POST(
         items?: Array<{
           productId: number
           quantity: number
+          modifierOptionIds?: number[]
         }>
         requestedFor?: string
         timing?:

@@ -20,6 +20,7 @@ import {
 import type {
   Order,
 } from "@/lib/types"
+import { canUsePdv } from "@/lib/admin-access"
 
 export async function POST(
   request: Request,
@@ -46,6 +47,7 @@ export async function POST(
         items?: Array<{
           productId: number
           quantity: number
+          modifierOptionIds?: number[]
         }>
         requestedFor?: string
         timing?:
@@ -111,6 +113,16 @@ export async function POST(
       await getVerifiedTenantSession()
 
     if (session) {
+      if (!canUsePdv(session.role)) {
+        return NextResponse.json(
+          {
+            error:
+              "Seu perfil não pode usar o PDV.",
+          },
+          { status: 403 },
+        )
+      }
+
       const result =
         await createTenantCheckoutOrder(
           session.organizationId,

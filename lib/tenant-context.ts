@@ -16,6 +16,7 @@ export interface AdminTenantContext {
   organizationName: string
   organizationSlug: string
   role: OrganizationRole
+  sessionVersion: number
 }
 
 export interface OrganizationMembershipSummary
@@ -60,6 +61,7 @@ type OrganizationMembershipRow = {
   public_store_enabled: boolean
   public_ordering_enabled: boolean
   role: OrganizationRole
+  session_version: number
 }
 
 function mapSummary(
@@ -85,6 +87,7 @@ function mapSummary(
         row.public_ordering_enabled,
       ),
     role: row.role,
+    sessionVersion: Number(row.session_version || 1),
   }
 }
 
@@ -102,7 +105,8 @@ function activeSummaryQuery(
       o.onboarding_status,
       o.public_store_enabled,
       o.public_ordering_enabled,
-      m.role
+      m.role,
+      u.session_version
     FROM sf_users u
     INNER JOIN sf_memberships m
       ON m.user_id = u.id

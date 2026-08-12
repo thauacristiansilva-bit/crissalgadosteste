@@ -2,6 +2,7 @@ import type { BusinessHour, DeliveryZone, StoreSettings } from "@/lib/types"
 import { compareDeliveryZoneSpecificity, pointInPolygonInclusive } from "@/lib/delivery-zone-geometry"
 
 export const FORTALEZA_TIME_ZONE = "America/Fortaleza"
+export const DEFAULT_ORGANIZATION_TIME_ZONE = "America/Sao_Paulo"
 
 export const defaultBusinessHours: BusinessHour[] = [
   { day: 0, label: "Domingo", enabled: false, open: "08:00", close: "20:00" },
@@ -13,14 +14,26 @@ export const defaultBusinessHours: BusinessHour[] = [
   { day: 6, label: "Sábado", enabled: true, open: "08:00", close: "20:00" },
 ]
 
-export function fortalezaParts(date = new Date()) {
+function safeTimeZone(timeZone?: string) {
+  const candidate = timeZone?.trim() || DEFAULT_ORGANIZATION_TIME_ZONE
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(new Date())
+    return candidate
+  } catch {
+    return DEFAULT_ORGANIZATION_TIME_ZONE
+  }
+}
+
+export function zonedParts(date = new Date(), timeZone?: string) {
+  const zone = safeTimeZone(timeZone)
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: FORTALEZA_TIME_ZONE,
+    timeZone: zone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hourCycle: "h23",
     weekday: "short",
   }).formatToParts(date)
@@ -29,16 +42,73 @@ export function fortalezaParts(date = new Date()) {
   return {
     date: `${get("year")}-${get("month")}-${get("day")}`,
     time: `${get("hour")}:${get("minute")}`,
+    seconds: get("second"),
     day: weekdayMap[get("weekday")] ?? 0,
+    year: Number(get("year")),
+    month: Number(get("month")),
+    dateOfMonth: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    second: Number(get("second")),
+    timeZone: zone,
   }
 }
 
-export function localFortalezaDate(dateText: string, timeText: string) {
-  return new Date(`${dateText}T${timeText}:00-03:00`)
+export function zonedDateString(date = new Date(), timeZone?: string) {
+  return zonedParts(date, timeZone).date
 }
 
-export function isWithinBusinessHours(settings: Pick<StoreSettings, "businessHours">, date: Date) {
-  const parts = fortalezaParts(date)
+/**
+ * Converts a wall-clock date/time from an IANA timezone to a real Date instant.
+ * The iterative correction avoids hard-coding a UTC offset and also works in
+ * Brazilian zones outside UTC-03.
+ */
+export function zonedDateTime(dateText: string, timeText: string, timeZone?: string) {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText)
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(timeText)
+  if (!dateMatch || !timeMatch) return new Date(Number.NaN)
+
+  const desired = Date.UTC(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    Number(timeMatch[1]),
+    Number(timeMatch[2]),
+    0,
+  )
+
+  let guess = desired
+  for (let index = 0; index < 4; index += 1) {
+    const actual = zonedParts(new Date(guess), timeZone)
+    const represented = Date.UTC(
+      actual.year,
+      actual.month - 1,
+      actual.dateOfMonth,
+      actual.hour,
+      actual.minute,
+      actual.second,
+    )
+    const delta = desired - represented
+    guess += delta
+    if (Math.abs(delta) < 1000) break
+  }
+
+  return new Date(guess)
+}
+
+export function fortalezaParts(date = new Date()) {
+  return zonedParts(date, FORTALEZA_TIME_ZONE)
+}
+
+export function localFortalezaDate(dateText: string, timeText: string) {
+  return zonedDateTime(dateText, timeText, FORTALEZA_TIME_ZONE)
+}
+
+export function isWithinBusinessHours(
+  settings: Pick<StoreSettings, "businessHours" | "timeZone">,
+  date: Date,
+) {
+  const parts = zonedParts(date, settings.timeZone)
   const schedule = settings.businessHours.find((item) => item.day === parts.day)
   if (!schedule?.enabled) return false
   return parts.time >= schedule.open && parts.time <= schedule.close
@@ -76,8 +146,5 @@ export function findDeliveryZone(zones: DeliveryZone[], latitude: number, longit
       return distance <= zone.radiusMeters ? { zone, distance } : null
     })
     .filter((entry): entry is { zone: DeliveryZone; distance: number } => Boolean(entry))
-  // Quando duas áreas encostam ou uma cobertura externa passa sobre uma interna,
-  // a área geograficamente menor é a mais específica e recebe o ponto.
-  // Isso elimina faixas sem cobertura e também evita duas taxas concorrendo pelo mesmo endereço.
   return matches.sort((a, b) => compareDeliveryZoneSpecificity(a.zone, b.zone))[0] || null
 }

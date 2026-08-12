@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import { ChefHat, Clock3, PackageCheck, ShoppingBag, Truck } from "lucide-react"
 import type { Order, OrderStatus, StoreSettings } from "@/lib/types"
 
-const time = (value: string) => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
-const dateTime = (value: string) => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
+const time = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { timeZone, hour: "2-digit", minute: "2-digit" }).format(new Date(value))
+const dateTime = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { timeZone, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
 
 function urgency(order: Order, now: Date, settings: StoreSettings) {
   const remaining = Math.ceil((new Date(order.requestedFor).getTime() - now.getTime()) / 60000)
@@ -24,6 +24,7 @@ const statusLabel: Partial<Record<OrderStatus, string>> = {
 }
 
 export function KitchenPanel({ orders, settings, onOrderUpdated }: { orders: Order[]; settings: StoreSettings; onOrderUpdated: (order: Order) => void }) {
+  const timeZone = settings.timeZone || "America/Sao_Paulo"
   const [now, setNow] = useState(new Date())
   const [busyId, setBusyId] = useState<number | null>(null)
 
@@ -59,7 +60,7 @@ export function KitchenPanel({ orders, settings, onOrderUpdated }: { orders: Ord
         </div>
         <div className="rounded-2xl bg-slate-950 px-5 py-3 text-white shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Relógio da cozinha</p>
-          <p className="mt-1 font-mono text-2xl font-black tabular-nums">{new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(now)}</p>
+          <p className="mt-1 font-mono text-2xl font-black tabular-nums">{new Intl.DateTimeFormat("pt-BR", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(now)}</p>
         </div>
       </div>
 
@@ -90,12 +91,12 @@ export function KitchenPanel({ orders, settings, onOrderUpdated }: { orders: Ord
                     {order.deliveryZoneName && <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">{order.deliveryZoneName}</span>}
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    <div><p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Receber às</p><p className="mt-1 text-2xl font-black text-gray-950">{time(order.requestedFor)}</p><p className="text-xs font-medium text-gray-500">{dateTime(order.requestedFor)}</p></div>
-                    <div><p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Tempo restante</p><p className="mt-1 text-2xl font-black text-gray-950">{alert.label}</p><p className="text-xs text-gray-500">Pedido entrou às {time(order.createdAt)}</p></div>
+                    <div><p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Receber às</p><p className="mt-1 text-2xl font-black text-gray-950">{time(order.requestedFor, timeZone)}</p><p className="text-xs font-medium text-gray-500">{dateTime(order.requestedFor, timeZone)}</p></div>
+                    <div><p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Tempo restante</p><p className="mt-1 text-2xl font-black text-gray-950">{alert.label}</p><p className="text-xs text-gray-500">Pedido entrou às {time(order.createdAt, timeZone)}</p></div>
                     <div><p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Cliente</p><p className="mt-1 font-black text-gray-900">{order.customer.name}</p><p className="text-xs text-gray-500">{order.customer.phone}</p></div>
                   </div>
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {order.items.map((item, itemIndex) => <div key={`${item.productId}-${itemIndex}`} className="rounded-xl border border-white/80 bg-white/80 px-3 py-2 text-sm"><strong className="mr-2 text-blue-700">{item.quantity}x</strong><span className="font-semibold text-gray-800">{item.name}</span></div>)}
+                    {order.items.map((item, itemIndex) => <div key={`${item.productId}-${itemIndex}`} className="rounded-xl border border-white/80 bg-white/80 px-3 py-2 text-sm"><div><strong className="mr-2 text-blue-700">{item.quantity}x</strong><span className="font-semibold text-gray-800">{item.name}</span></div>{item.modifiers?.length ? <div className="mt-1 space-y-0.5 pl-7">{item.modifiers.map((modifier) => <p key={`${modifier.groupId}-${modifier.optionId}`} className="text-[11px] font-semibold text-gray-500">+ {modifier.optionName}</p>)}</div> : null}</div>)}
                   </div>
                   {order.notes && <p className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs font-semibold text-amber-900"><strong>Obs.:</strong> {order.notes}</p>}
                 </div>

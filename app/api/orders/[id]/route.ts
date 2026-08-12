@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
 import {
   syncLegacyOrderFromTenant,
+  syncLegacyProductFromTenant,
   updateOrder as updateLegacyOrder,
 } from "@/lib/db"
 import {
@@ -12,10 +13,12 @@ import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import {
+  getTenantProducts,
   isCurrentDeploymentOrganization,
 } from "@/lib/catalog-db"
 import type { OrderStatus, PaymentStatus } from "@/lib/types"
 import { getTenantCourier, isTenantOperationsReady } from "@/lib/operations-db"
+import { canAssignCourier, canUpdateOrderStatus, canUpdatePaymentStatus } from "@/lib/admin-access"
 
 const validStatuses: OrderStatus[] = [
   "pending",
@@ -76,6 +79,88 @@ export async function PATCH(
   }
 
   const session = await getVerifiedTenantSession()
+
+  if (session) {
+    if (
+      body.status &&
+      !canUpdateOrderStatus(
+        session.role,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Seu perfil não pode alterar o status do pedido.",
+        },
+        { status: 403 },
+      )
+    }
+
+    if (
+      body.paymentStatus &&
+      !canUpdatePaymentStatus(
+        session.role,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Seu perfil não pode alterar o pagamento.",
+        },
+        { status: 403 },
+      )
+    }
+
+    if (
+      body.courierId !== undefined &&
+      !canAssignCourier(
+        session.role,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Seu perfil não pode atribuir entregadores.",
+        },
+        { status: 403 },
+      )
+    }
+
+    if (
+      session.role === "kitchen" &&
+      body.status &&
+      ![
+        "accepted",
+        "preparing",
+        "ready",
+      ].includes(body.status)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "A cozinha só pode mover pedidos entre aceito, preparando e pronto.",
+        },
+        { status: 403 },
+      )
+    }
+
+    if (
+      session.role === "courier" &&
+      body.status &&
+      ![
+        "in-route",
+        "completed",
+      ].includes(body.status)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "O entregador só pode marcar pedido em rota ou concluído.",
+        },
+        { status: 403 },
+      )
+    }
+  }
 
   let courierPatch:
     | { courierId?: number; courierName?: string }
@@ -193,6 +278,15 @@ export async function PATCH(
 
   if (await isCurrentDeploymentOrganization(session.organizationId)) {
     await syncLegacyOrderFromTenant(order)
+    if (body.status === "cancelled") {
+      const changedProductIds = new Set(order.items.map((item) => item.productId))
+      const products = await getTenantProducts(session.organizationId, { includeInactive: true })
+      for (const product of products) {
+        if (changedProductIds.has(product.id)) {
+          await syncLegacyProductFromTenant(product)
+        }
+      }
+    }
   }
 
   return NextResponse.json({ order })

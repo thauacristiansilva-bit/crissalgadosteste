@@ -7,7 +7,7 @@ import { getTenantSettings, isTenantRuntimeReady } from "@/lib/organization-db"
 import { isCurrentDeploymentOrganization } from "@/lib/catalog-db"
 
 const money = (value: number) => `R$ ${Number(value).toFixed(2).replace(".", ",")}`
-const stamp = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Fortaleza" }).format(new Date(value))
+const stamp = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(value))
 function ascii(text: string) { return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim() }
 function escapePdf(text: string) { return ascii(text).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)") }
 function wrap(text: string, limit = 36) { const words = ascii(text).split(" ").filter(Boolean); const lines: string[] = []; let line = ""; for (const word of words) { const next = line ? `${line} ${word}` : word; if (next.length > limit && line) { lines.push(line); line = word } else line = next } if (line) lines.push(line); return lines.length ? lines : [""] }
@@ -104,13 +104,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       { status: 503 },
     )
   }
+  const timeZone = settings.timeZone || "America/Sao_Paulo"
   const mode = new URL(request.url).searchParams.get("mode") === "kitchen" ? "kitchen" : "customer"
   const lines: Array<{ text: string; bold?: boolean; size?: number }> = [
     { text: settings.storeName.toUpperCase(), bold: true, size: 12 },
     { text: order.code, bold: true, size: 18 },
     { text: order.reference, size: 7 },
     { text: "--------------------------------------" },
-    { text: `RECEBER: ${stamp(order.requestedFor)}`, bold: true, size: 11 },
+    { text: `RECEBER: ${stamp(order.requestedFor, timeZone)}`, bold: true, size: 11 },
     { text: `${order.type === "delivery" ? "DELIVERY" : "RETIRADA"} - ${order.scheduled ? "AGENDADO" : "IMEDIATO"}`, bold: true },
     { text: `Cliente: ${order.customer.name}` },
   ]
@@ -122,7 +123,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (order.courierName) lines.push({ text: `Entregador: ${order.courierName}` })
   }
   lines.push({ text: "--------------------------------------" })
-  order.items.forEach((item) => lines.push({ text: `${item.quantity}x ${item.name}${mode === "customer" ? `  ${money(item.subtotal)}` : ""}`, bold: mode === "kitchen" }))
+  order.items.forEach((item) => {
+    lines.push({ text: `${item.quantity}x ${item.name}${mode === "customer" ? `  ${money(item.subtotal)}` : ""}`, bold: mode === "kitchen" })
+    for (const modifier of item.modifiers || []) {
+      lines.push({
+        text: `   + ${modifier.optionName}${mode === "customer" && !modifier.included && modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`,
+        size: 7,
+      })
+    }
+  })
   if (order.notes) lines.push({ text: "--------------------------------------" }, { text: `OBS: ${order.notes}`, bold: true })
   if (mode === "customer") {
     lines.push({ text: "--------------------------------------" }, { text: `Subtotal: ${money(order.subtotal)}` })

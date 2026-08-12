@@ -1,6 +1,10 @@
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import type { Category, Product } from "@/lib/types"
+import {
+  getProductIngredientAvailability,
+  getProductModifierGroupsForProducts,
+} from "@/lib/food-composition-db"
 
 type CategoryRow = {
   id: number
@@ -193,7 +197,7 @@ export async function getTenantCategories(
 export async function getTenantProducts(
   organizationId: string,
   options?: { includeInactive?: boolean },
-) {
+): Promise<Product[]> {
   const result = await getPostgresPool().query<ProductRow>(
     `
       SELECT
@@ -225,7 +229,33 @@ export async function getTenantProducts(
     [organizationId],
   )
 
-  return result.rows.map(mapProduct)
+  const products = result.rows.map(mapProduct)
+  const productIds = products.map((product) => product.id)
+
+  const [modifierGroups, ingredientAvailability] = await Promise.all([
+    getProductModifierGroupsForProducts(organizationId, productIds, {
+      includeInactive: Boolean(options?.includeInactive),
+    }),
+    getProductIngredientAvailability(organizationId, productIds),
+  ])
+
+  return products.map((product) => {
+    const groups = modifierGroups.get(product.id) || []
+    const requiredModifiersAvailable = groups
+      .filter((group) => group.active)
+      .every((group) => {
+        const minimum = Math.max(group.required ? 1 : 0, group.minSelect)
+        if (minimum <= 0) return true
+        return group.options.filter((option) => option.active && option.available).length >= minimum
+      })
+
+    return {
+      ...product,
+      modifierGroups: groups,
+      ingredientStockAvailable:
+        ingredientAvailability.get(product.id) !== false && requiredModifiersAvailable,
+    }
+  })
 }
 
 export async function createTenantCategory(
