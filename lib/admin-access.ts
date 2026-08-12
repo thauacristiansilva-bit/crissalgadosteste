@@ -6,6 +6,7 @@ export type AdminSection =
   | "overview"
   | "pdv"
   | "sales"
+  | "dre"
   | "orders"
   | "kitchen"
   | "inventory"
@@ -24,6 +25,7 @@ const allSections: AdminSection[] = [
   "overview",
   "pdv",
   "sales",
+  "dre",
   "orders",
   "kitchen",
   "inventory",
@@ -49,6 +51,7 @@ const sectionsByRole: Record<
     "overview",
     "pdv",
     "sales",
+    "dre",
     "orders",
     "kitchen",
     "inventory",

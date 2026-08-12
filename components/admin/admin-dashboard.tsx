@@ -51,6 +51,7 @@ import { SettingsPanel } from "@/components/admin/settings-panel"
 import { PdvPanel } from "@/components/admin/pdv-panel"
 import { InventoryPanel } from "@/components/admin/inventory-panel"
 import { SalesPanel } from "@/components/admin/sales-panel"
+import { DrePanel } from "@/components/admin/dre-panel"
 import { MarketingPanel } from "@/components/admin/marketing-panel"
 import { ReviewsPanel } from "@/components/admin/reviews-panel"
 import { LinksPanel } from "@/components/admin/links-panel"
@@ -84,6 +85,7 @@ const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
   { key: "overview", label: "Visão geral", icon: LayoutDashboard },
   { key: "pdv", label: "Pedidos PDV", icon: ShoppingCart },
   { key: "sales", label: "Vendas e caixa", icon: WalletCards },
+  { key: "dre", label: "DRE gerencial", icon: DollarSign },
   { key: "orders", label: "Pedidos", icon: ClipboardList },
   { key: "kitchen", label: "Cozinha", icon: ChefHat },
   { key: "inventory", label: "Inventário", icon: PackageSearch },
@@ -285,6 +287,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
           </div>}
           {section === "pdv" && <PdvPanel products={products} settings={settings} onOrderCreated={onOrderCreated} />}
           {section === "sales" && <SalesPanel orders={orders} settings={settings} initialCashSessions={cashSessions} initialEntries={financialEntries} />}
+          {section === "dre" && <DrePanel timeZone={settings.timeZone || "America/Sao_Paulo"} />}
           {section === "orders" && <OrdersPanel orders={orders} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} />}
           {section === "kitchen" && <KitchenPanel orders={orders} settings={settings} onOrderUpdated={onOrderUpdated} />}
           {section === "inventory" && <InventoryPanel products={products} onProductsChanged={setProducts} />}
