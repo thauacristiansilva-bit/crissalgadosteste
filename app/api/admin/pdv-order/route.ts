@@ -56,6 +56,7 @@ export async function POST(
         notes?: string
         changeFor?: string
         couponCode?: string
+        accountId?: number
       }
     | null
 
@@ -106,6 +107,23 @@ export async function POST(
       body.changeFor,
     couponCode:
       body.couponCode,
+    accountId:
+      Number.isFinite(Number(body.accountId)) && Number(body.accountId) > 0
+        ? Math.floor(Number(body.accountId))
+        : undefined,
+  }
+
+  if (
+    input.type === "delivery" &&
+    (!input.customer.name?.trim() || !input.customer.phone?.trim())
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Nome e telefone são obrigatórios para entrega.",
+      },
+      { status: 400 },
+    )
   }
 
   try {

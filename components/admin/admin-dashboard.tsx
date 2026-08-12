@@ -22,7 +22,6 @@ import {
   ShieldCheck,
   ShoppingCart,
   Star,
-  Store,
   Users,
   WalletCards,
   X,
@@ -204,23 +203,17 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
 
   const nav = (
     <>
-      <div className="border-b px-4 py-5" style={{ borderColor: "rgba(255,255,255,.10)" }}>
-        <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,.10)", background: "linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.03))" }}>
-          <div className="min-w-0 text-center">
-            <p className="text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Plataforma</p>
-            <div className="mt-3 flex justify-center">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-md">
-                <img src="/saborflow-brand.png" alt="SaborFlow" className="h-full w-full object-contain" />
-              </div>
-            </div>
+      <div className="border-b px-3 py-3" style={{ borderColor: "rgba(255,255,255,.10)" }}>
+        <div className="flex items-center justify-center gap-3 rounded-2xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,.10)", background: "linear-gradient(135deg, rgba(255,255,255,.08), rgba(255,255,255,.02))" }}>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-1.5 shadow-md">
+            <img src="/saborflow-brand.png" alt="SaborFlow" className="h-full w-full object-contain" />
           </div>
-
-          <OrganizationSwitcher fallbackName={settings.storeName} />
+          <p className="text-[11px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Plataforma</p>
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
-        <p className="px-3 pb-2 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Operação</p>
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-3">
+        <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Operação</p>
         {visibleNavItems.map((item) => {
           const Icon = item.icon
           const active = section === item.key
@@ -229,10 +222,10 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
               key={item.key}
               onClick={() => changeSection(item.key)}
               type="button"
-              className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm font-semibold transition"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold transition"
               style={active ? { backgroundColor: saborFlowBrand.cream, color: saborFlowBrand.brown, boxShadow: "0 8px 20px rgba(0,0,0,.13)" } : { color: "#fff7ee" }}
             >
-              <Icon className="h-[18px] w-[18px]" style={active ? { color: saborFlowBrand.orangeStrong } : { color: "#ffd39f" }} />
+              <Icon className="h-4 w-4" style={active ? { color: saborFlowBrand.orangeStrong } : { color: "#ffd39f" }} />
               <span className="truncate">{item.label}</span>
               {item.key === "orders" && <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold" style={active ? { backgroundColor: saborFlowBrand.orangeStrong, color: "#fff" } : { backgroundColor: "rgba(255,255,255,.10)", color: "#fff" }}>{summary.openOrders + summary.readyOrders}</span>}
               {item.key === "inventory" && products.some((product) => product.trackStock && product.stock <= product.minStock) && <span className="ml-auto h-2.5 w-2.5 rounded-full bg-amber-300" />}
@@ -241,14 +234,12 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
         })}
       </nav>
 
-      <div className="border-t p-4" style={{ borderColor: "rgba(255,255,255,.10)" }}>
-        <a href="/minha-loja" target="_blank" className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black text-white shadow-sm transition hover:brightness-105" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.orangeStrong}, ${saborFlowBrand.orange})` }}><Store className="h-4 w-4" />Abrir site do cliente</a>
-        <div className="mb-3 flex items-center gap-3 rounded-2xl p-3" style={{ backgroundColor: "rgba(255,255,255,.06)" }}>
-          <div className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-black text-white" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.orangeStrong}, ${saborFlowBrand.orange})` }}>SF</div>
-          <div className="min-w-0 flex-1"><p className="text-xs font-bold text-white">Administrador</p><p className="truncate text-[11px]" style={{ color: "#e8c6a0" }}>{adminEmail}</p></div>
+      <div className="border-t p-3" style={{ borderColor: "rgba(255,255,255,.10)" }}>
+        <div className="mb-2 flex items-center gap-2.5 rounded-xl p-2" style={{ backgroundColor: "rgba(255,255,255,.06)" }}>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-black text-white" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.orangeStrong}, ${saborFlowBrand.orange})` }}>SF</div>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-bold text-white">Administrador</p><p className="truncate text-[10px]" style={{ color: "#e8c6a0" }}>{adminEmail}</p></div>
         </div>
-        <button onClick={logout} disabled={loggingOut} type="button" className="flex w-full items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-xs font-bold text-white transition hover:bg-white/10 disabled:opacity-50" style={{ borderColor: "rgba(255,255,255,.12)" }}><LogOut className="h-4 w-4" />{loggingOut ? "Saindo..." : "Sair"}</button>
-
+        <button onClick={logout} disabled={loggingOut} type="button" className="flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/10 disabled:opacity-50" style={{ borderColor: "rgba(255,255,255,.12)" }}><LogOut className="h-3.5 w-3.5" />{loggingOut ? "Saindo..." : "Sair"}</button>
       </div>
     </>
   )
@@ -261,7 +252,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex min-h-20 items-center justify-between border-b bg-white/95 px-4 py-3 backdrop-blur sm:px-6" style={{ borderColor: saborFlowBrand.border }}>
           <div className="flex items-center gap-3"><button onClick={() => setMobileNav(true)} type="button" className="rounded-2xl border p-2 text-gray-600 lg:hidden" style={{ borderColor: saborFlowBrand.border }} aria-label="Abrir menu"><Menu className="h-5 w-5" /></button><div><h1 className="font-black text-gray-950">{title}</h1><p className="hidden text-xs text-gray-500 sm:block">{settings.storeName} · {settings.city} - {settings.state}</p></div></div>
-          <div className="flex items-center gap-2"><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline-flex ${operatingNow ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>● {operatingNow ? "Loja aberta" : settings.acceptingOrders ? "Fora do expediente" : "Pedidos pausados"}</span><button onClick={() => changeSection("orders")} type="button" className="relative rounded-2xl border p-2.5 text-gray-600 hover:bg-gray-50" style={{ borderColor: saborFlowBrand.border }} aria-label="Notificações"><Bell className="h-4 w-4" />{summary.openOrders > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{summary.openOrders}</span>}</button></div>
+          <div className="flex items-center gap-2"><OrganizationSwitcher fallbackName={settings.storeName} variant="compact" /><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline-flex ${operatingNow ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>● {operatingNow ? "Loja aberta" : settings.acceptingOrders ? "Fora do expediente" : "Pedidos pausados"}</span><button onClick={() => changeSection("orders")} type="button" className="relative rounded-2xl border p-2.5 text-gray-600 hover:bg-gray-50" style={{ borderColor: saborFlowBrand.border }} aria-label="Notificações"><Bell className="h-4 w-4" />{summary.openOrders > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{summary.openOrders}</span>}</button></div>
         </header>
 
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">

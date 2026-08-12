@@ -26,8 +26,10 @@ type OrganizationsResponse = {
 
 export function OrganizationSwitcher({
   fallbackName,
+  variant = "card",
 }: {
   fallbackName: string
+  variant?: "card" | "compact"
 }) {
   const [data, setData] =
     useState<
@@ -202,6 +204,29 @@ export function OrganizationSwitcher({
   const canManage =
     active?.role === "owner" ||
     active?.role === "admin"
+
+  if (variant === "compact") {
+    if (!data || data.organizations.length <= 1) return null
+
+    return (
+      <label className="hidden items-center gap-2 rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-bold text-gray-600 md:flex">
+        <Building2 className="h-3.5 w-3.5 text-amber-700" />
+        <span className="sr-only">Trocar empresa</span>
+        <select
+          value={data.activeOrganizationId}
+          disabled={busy}
+          onChange={(event: ChangeEvent<HTMLSelectElement>) => switchOrganization(event.target.value)}
+          className="max-w-44 bg-transparent text-xs font-black text-gray-800 outline-none disabled:opacity-50"
+        >
+          {data.organizations.map((organization) => (
+            <option key={organization.organizationId} value={organization.organizationId}>
+              {organization.organizationName}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
+  }
 
   return (
     <div className="mt-4 space-y-2">
