@@ -20,6 +20,7 @@ import {
 } from "@/lib/tenant-permissions"
 import type { StoreSettings } from "@/lib/types"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { assertDemoSettingsPatchAllowed, demoPolicyErrorStatus, DemoPolicyError } from "@/lib/demo-policy"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -101,6 +102,8 @@ export async function PATCH(request: Request) {
       )
     }
 
+    await assertDemoSettingsPatchAllowed(session.organizationId, body as Record<string, unknown>)
+
     if (body.deliveryEnabled === true) {
       await assertOrganizationEntitlement(session.organizationId, "delivery")
     }
@@ -133,7 +136,7 @@ export async function PATCH(request: Request) {
             ? error.message
             : "Não foi possível salvar as configurações.",
       },
-      { status: billingErrorStatus(error) },
+      { status: error instanceof DemoPolicyError ? demoPolicyErrorStatus(error) : billingErrorStatus(error) },
     )
   }
 }

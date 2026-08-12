@@ -8,6 +8,7 @@ import {
 import {
   verifyOrganizationDomain,
 } from "@/lib/organization-security-db"
+import { assertDemoActionAllowed, demoPolicyErrorStatus } from "@/lib/demo-policy"
 
 export async function POST(
   request: Request,
@@ -32,6 +33,7 @@ export async function POST(
     | null
 
   try {
+    await assertDemoActionAllowed(session.organizationId, "custom-domain")
     return NextResponse.json(
       await verifyOrganizationDomain({
         organizationId:
@@ -48,7 +50,7 @@ export async function POST(
             ? error.message
             : "A verificação falhou.",
       },
-      { status: 400 },
+      { status: demoPolicyErrorStatus(error) },
     )
   }
 }

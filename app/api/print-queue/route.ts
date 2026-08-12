@@ -19,6 +19,7 @@ import {
 import {
   authenticatePrintAgent,
 } from "@/lib/organization-security-db"
+import { assertDemoActionAllowed } from "@/lib/demo-policy"
 
 type PrintContext =
   | {
@@ -181,6 +182,15 @@ export async function GET(
     context.mode ===
     "tenant"
   ) {
+    try {
+      await assertDemoActionAllowed(context.organizationId, "external-print")
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Impressão bloqueada na demonstração." },
+        { status: 403 },
+      )
+    }
+
     const [
       orders,
       settings,
@@ -315,6 +325,15 @@ export async function POST(
     context.mode ===
     "tenant"
   ) {
+    try {
+      await assertDemoActionAllowed(context.organizationId, "external-print")
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Impressão bloqueada na demonstração." },
+        { status: 403 },
+      )
+    }
+
     const order =
       await markTenantOrderPrinted(
         context.organizationId,

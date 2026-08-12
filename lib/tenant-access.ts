@@ -1,5 +1,6 @@
 import type { AdminSession } from "@/lib/auth"
 import { getAdminSession } from "@/lib/auth"
+import { demoOrganizationIsUsable, touchDemoEnvironment } from "@/lib/demo-policy"
 import {
   getOrganizationContextForUser,
   type OrganizationRole,
@@ -21,6 +22,10 @@ export async function getVerifiedTenantSession():
     return null
   }
 
+  if (!(await demoOrganizationIsUsable(session.organizationId))) {
+    return null
+  }
+
   const current =
     await getOrganizationContextForUser(
       session.userId,
@@ -35,6 +40,8 @@ export async function getVerifiedTenantSession():
   ) {
     return null
   }
+
+  await touchDemoEnvironment(session.organizationId)
 
   return {
     mode: "tenant",

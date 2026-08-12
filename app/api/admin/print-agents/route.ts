@@ -5,6 +5,7 @@ import {
 import {
   canManageSecurity,
 } from "@/lib/admin-access"
+import { assertDemoActionAllowed, demoPolicyErrorStatus } from "@/lib/demo-policy"
 import {
   createPrintAgent,
   listPrintAgents,
@@ -58,6 +59,7 @@ export async function POST(
     | null
 
   try {
+    await assertDemoActionAllowed(session.organizationId, "external-print")
     const agent =
       await createPrintAgent({
         organizationId:
@@ -83,7 +85,7 @@ export async function POST(
             ? error.message
             : "Não foi possível criar o agente.",
       },
-      { status: 400 },
+      { status: demoPolicyErrorStatus(error) },
     )
   }
 }
@@ -117,6 +119,15 @@ export async function DELETE(
           "Agente inválido.",
       },
       { status: 400 },
+    )
+  }
+
+  try {
+    await assertDemoActionAllowed(session.organizationId, "external-print")
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Ação bloqueada na demonstração." },
+      { status: demoPolicyErrorStatus(error) },
     )
   }
 

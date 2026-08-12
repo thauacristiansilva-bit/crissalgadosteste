@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { cookies } from "next/headers"
 import type { AdminTenantContext, OrganizationRole } from "@/lib/tenant-context"
+import { demoOrganizationIsUsable } from "@/lib/demo-policy"
 
 export const ADMIN_SESSION_COOKIE = "saborflow_admin_session"
 export const LEGACY_ADMIN_SESSION_COOKIE = "cris_admin_session"
@@ -177,7 +178,12 @@ export async function getAdminSession(): Promise<AdminSession | null> {
 
   const tenantToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value
   const tenantSession = parseTenantSessionToken(tenantToken)
-  if (tenantSession) return tenantSession
+  if (tenantSession) {
+    if (await demoOrganizationIsUsable(tenantSession.organizationId)) {
+      return tenantSession
+    }
+    return null
+  }
 
   const legacyToken =
     cookieStore.get(LEGACY_ADMIN_SESSION_COOKIE)?.value ||

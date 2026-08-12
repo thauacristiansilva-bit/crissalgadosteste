@@ -11,6 +11,7 @@ import {
   removeOrganizationDomain,
 } from "@/lib/organization-security-db"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { assertDemoActionAllowed, demoPolicyErrorStatus, DemoPolicyError } from "@/lib/demo-policy"
 
 export const dynamic = "force-dynamic"
 
@@ -59,6 +60,7 @@ export async function POST(
     | null
 
   try {
+    await assertDemoActionAllowed(session.organizationId, "custom-domain")
     await assertOrganizationEntitlement(session.organizationId, "customDomain")
 
     const verification =
@@ -80,7 +82,7 @@ export async function POST(
             ? error.message
             : "Não foi possível cadastrar o domínio.",
       },
-      { status: billingErrorStatus(error) },
+      { status: error instanceof DemoPolicyError ? demoPolicyErrorStatus(error) : billingErrorStatus(error) },
     )
   }
 }
@@ -108,6 +110,7 @@ export async function DELETE(
     | null
 
   try {
+    await assertDemoActionAllowed(session.organizationId, "custom-domain")
     await removeOrganizationDomain({
       organizationId:
         session.organizationId,
@@ -126,7 +129,7 @@ export async function DELETE(
             ? error.message
             : "Não foi possível remover o domínio.",
       },
-      { status: 400 },
+      { status: demoPolicyErrorStatus(error) },
     )
   }
 }

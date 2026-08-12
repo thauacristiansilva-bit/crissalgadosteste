@@ -116,7 +116,7 @@ const saborFlowBrand = {
   border: "#f0d0aa",
 }
 
-export function AdminDashboard({ initialData, adminEmail, adminRole }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole }) {
+export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnvironment }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string } | null }) {
   const router = useRouter()
   const [section, setSection] = useState<Section>(
     () =>
@@ -142,8 +142,11 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
     [adminRole],
   )
   const visibleNavItems = useMemo(
-    () => navItems.filter((item) => allowedSections.has(item.key)),
-    [allowedSections],
+    () => navItems.filter((item) =>
+      allowedSections.has(item.key) &&
+      !(demoEnvironment && item.key === "billing"),
+    ),
+    [allowedSections, demoEnvironment],
   )
 
   useEffect(() => {
@@ -261,6 +264,16 @@ export function AdminDashboard({ initialData, adminEmail, adminRole }: { initial
         </header>
 
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
+          {demoEnvironment && (
+            <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">Ambiente demonstrativo</p>
+                <p className="mt-1 text-sm font-black text-amber-950">{demoEnvironment.kind === "public" ? "Demo pública isolada" : "Trial individual isolado"}</p>
+                <p className="mt-1 text-xs text-amber-800">Dados fictícios · integrações externas bloqueadas · expira em {new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}</p>
+              </div>
+              <a href="/demo" className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-xs font-black text-amber-900">Sobre a demo</a>
+            </div>
+          )}
           <div className="mb-5 flex flex-col gap-3 rounded-3xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: saborFlowBrand.border }}>
             <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>SaborFlow</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>Empresa ativa · {settings.storeName}</p></div>
             <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>Painel oficial</span>

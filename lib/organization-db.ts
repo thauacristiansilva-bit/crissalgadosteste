@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
+import { demoOrganizationIsUsable } from "@/lib/demo-policy"
 import type {
   StaffMember,
   StaffRole,
@@ -168,6 +169,7 @@ export async function getPublicOrganizationBySlug(
 
   const row = result.rows[0]
   if (!row) return null
+  if (!(await demoOrganizationIsUsable(row.id))) return null
 
   return {
     id: row.id,
