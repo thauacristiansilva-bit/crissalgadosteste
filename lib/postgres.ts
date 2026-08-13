@@ -26,20 +26,27 @@ function createRawPool() {
   })
 }
 
+type RoleQuery = <T extends Record<string, unknown> = Record<string, unknown>>(
+  text: string,
+  values?: unknown[],
+) => Promise<{ rows: T[] }>
+
 async function runtimeRoleAvailable(
-  rawQuery: Pool["query"],
+  query: RoleQuery,
   force = false,
 ) {
   const now = Date.now()
+  const cacheTtl = roleCache?.available ? RLS_ROLE_CACHE_MS : 250
+
   if (
     !force &&
     roleCache &&
-    now - roleCache.checkedAt < RLS_ROLE_CACHE_MS
+    now - roleCache.checkedAt < cacheTtl
   ) {
     return roleCache.available
   }
 
-  const result = await rawQuery<{ available: boolean }>(
+  const result = await query<{ available: boolean }>(
     `
       SELECT EXISTS (
         SELECT 1
@@ -117,16 +124,17 @@ async function cleanupCheckedOutClient(client: PoolClient) {
 }
 
 function installRlsBridge(pool: Pool) {
-  const rawQuery = pool.query.bind(pool) as Pool["query"]
   const rawConnect = pool.connect.bind(pool)
 
   pool.query = (async (...args: unknown[]) => {
-    if (!(await runtimeRoleAvailable(rawQuery))) {
-      return (rawQuery as (...queryArgs: unknown[]) => Promise<unknown>)(...args)
-    }
-
     const client = await rawConnect()
+    const clientQuery = client.query.bind(client) as RoleQuery
+
     try {
+      if (!(await runtimeRoleAvailable(clientQuery))) {
+        return await (client.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args)
+      }
+
       await client.query("BEGIN")
       await applyRlsSettings(client, true)
       const result = await (client.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args)
@@ -142,8 +150,9 @@ function installRlsBridge(pool: Pool) {
 
   pool.connect = (async () => {
     const client = await rawConnect()
+    const clientQuery = client.query.bind(client) as RoleQuery
 
-    if (!(await runtimeRoleAvailable(rawQuery))) {
+    if (!(await runtimeRoleAvailable(clientQuery))) {
       return client
     }
 
