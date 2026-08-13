@@ -58,6 +58,7 @@ export type CommercialOnboardingSnapshot = {
     organizationsUsed: number
     organizationsLimit: number | null
     deliveryIncluded: boolean
+    registrationReview: "pending" | "approved" | "rejected"
   }
   readiness: {
     readyToPublish: boolean
@@ -207,7 +208,7 @@ export async function getCommercialOnboardingSnapshot(
   try {
     await ensureOnboardingRow(organizationId)
 
-    const [organizationResult, stateResult, settings, catalogResult, billing] = await Promise.all([
+    const [organizationResult, stateResult, settings, catalogResult, billing, registrationReviewResult] = await Promise.all([
       getPostgresPool().query<{
         id: string
         trade_name: string
@@ -250,6 +251,16 @@ export async function getCommercialOnboardingSnapshot(
         [organizationId],
       ),
       getBillingSnapshotForOrganization(organizationId),
+      getPostgresPool().query<{ status: "pending" | "approved" | "rejected" | null }>(
+        `
+          SELECT r.status
+          FROM sf_organizations o
+          LEFT JOIN sf_platform_registration_reviews r ON r.billing_account_id = o.billing_account_id
+          WHERE o.id = $1
+          LIMIT 1
+        `,
+        [organizationId],
+      ),
     ])
 
     const organization = organizationResult.rows[0]
@@ -267,6 +278,8 @@ export async function getCommercialOnboardingSnapshot(
     if (!settings.pickupEnabled && !settings.deliveryEnabled) pending.push("retirada ou entrega")
     if (!settings.acceptingOrders) pending.push("operação liberada")
     if (billing.subscription?.status !== "active") pending.push("assinatura ativa")
+    const registrationReview = registrationReviewResult.rows[0]?.status || "pending"
+    if (registrationReview !== "approved") pending.push("cadastro aprovado pelo SaborFlow")
 
     return {
       schemaReady: true,
@@ -301,6 +314,7 @@ export async function getCommercialOnboardingSnapshot(
         organizationsUsed: billing.usage.organizations,
         organizationsLimit: billing.entitlements.maxOrganizations,
         deliveryIncluded: billing.entitlements.delivery,
+        registrationReview,
       },
       readiness: {
         readyToPublish: pending.length === 0,

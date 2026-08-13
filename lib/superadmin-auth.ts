@@ -59,3 +59,11 @@ export function canManageSupport(role: PlatformAdminRole) {
 export function canManagePlatformAdmins(role: PlatformAdminRole) {
   return role === "owner"
 }
+
+export function canReviewRegistrations(role: PlatformAdminRole) {
+  return role === "owner" || role === "operator"
+}
+
+export function canManagePlatformFinance(role: PlatformAdminRole) {
+  return role === "owner" || role === "operator" || role === "finance"
+}

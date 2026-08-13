@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { canManageCommercialState, canManageSupport, getSuperadminAccess } from "@/lib/superadmin-auth"
-import { changeSubscriptionPlan, createCommercialCoupon, setBillingAccountStatus, setEntitlementOverride, setSupportCaseStatus } from "@/lib/superadmin-db"
+import { canManageCommercialState, canManageSupport, canReviewRegistrations, getSuperadminAccess } from "@/lib/superadmin-auth"
+import { changeSubscriptionPlan, createCommercialCoupon, setBillingAccountStatus, setEntitlementOverride, setRegistrationReview, setSupportCaseStatus } from "@/lib/superadmin-db"
 import { requestIp, superadminRequestIsSameOrigin } from "@/lib/superadmin-request"
 import type { PlanEntitlementKey } from "@/lib/billing-types"
 
@@ -17,7 +17,12 @@ export async function POST(request: Request) {
     const action = String(body.action || "")
     const ip = requestIp(request)
 
-    if (action === "set-account-status") {
+    if (action === "review-registration") {
+      if (!canReviewRegistrations(access.role)) return NextResponse.json({ error: "Sem permissão para validar cadastros." }, { status: 403 })
+      const status = String(body.status || "")
+      if (status !== "approved" && status !== "rejected") throw new Error("Status de validação inválido.")
+      await setRegistrationReview(access, String(body.billingAccountId || ""), status, String(body.notes || ""), ip)
+    } else if (action === "set-account-status") {
       if (!canManageCommercialState(access.role)) return NextResponse.json({ error: "Sem permissão para alterar cobrança." }, { status: 403 })
       const status = String(body.status || "")
       if (status !== "active" && status !== "suspended") throw new Error("Status inválido.")
