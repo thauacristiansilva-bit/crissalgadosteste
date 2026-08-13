@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto"
 import { getPostgresPool } from "@/lib/postgres"
 import {
+  getCurrentRlsContext,
+  runWithTenantRlsScope,
+} from "@/lib/rls-context"
+import {
   assertActiveSubscriptionForOrganization,
   assertOrganizationEntitlement,
   getBillingSnapshotForOrganization,
@@ -98,37 +102,46 @@ function completedSteps(value: unknown): CommercialOnboardingStep[] {
 }
 
 async function ensureOnboardingRow(organizationId: string) {
-  const pool = getPostgresPool()
-  await pool.query(
-    `
-      INSERT INTO sf_organization_onboarding (
-        organization_id,
-        version,
-        current_step,
-        completed_steps,
-        started_at,
-        completed_at,
-        published_at,
-        updated_at
+  const currentUserId = getCurrentRlsContext()?.userId
+
+  await runWithTenantRlsScope(
+    [organizationId],
+    currentUserId,
+    async () => {
+      const pool = getPostgresPool()
+      await pool.query(
+        `
+          INSERT INTO sf_organization_onboarding (
+            organization_id,
+            version,
+            current_step,
+            completed_steps,
+            started_at,
+            completed_at,
+            published_at,
+            updated_at
+          )
+          SELECT
+            o.id,
+            $2,
+            CASE WHEN o.onboarding_status = 'complete' THEN 'published' ELSE 'business' END,
+            CASE
+              WHEN o.onboarding_status = 'complete'
+                THEN '["business","brand","hours","fulfillment","catalog","publish"]'::jsonb
+              ELSE '[]'::jsonb
+            END,
+            o.created_at,
+            CASE WHEN o.onboarding_status = 'complete' THEN COALESCE(o.onboarding_completed_at, now()) ELSE NULL END,
+            CASE WHEN o.onboarding_status = 'complete' THEN COALESCE(o.onboarding_completed_at, now()) ELSE NULL END,
+            now()
+          FROM sf_organizations o
+          WHERE o.id = $1
+          ON CONFLICT (organization_id) DO NOTHING
+        `,
+        [organizationId, COMMERCIAL_ONBOARDING_VERSION],
       )
-      SELECT
-        o.id,
-        $2,
-        CASE WHEN o.onboarding_status = 'complete' THEN 'published' ELSE 'business' END,
-        CASE
-          WHEN o.onboarding_status = 'complete'
-            THEN '["business","brand","hours","fulfillment","catalog","publish"]'::jsonb
-          ELSE '[]'::jsonb
-        END,
-        o.created_at,
-        CASE WHEN o.onboarding_status = 'complete' THEN COALESCE(o.onboarding_completed_at, now()) ELSE NULL END,
-        CASE WHEN o.onboarding_status = 'complete' THEN COALESCE(o.onboarding_completed_at, now()) ELSE NULL END,
-        now()
-      FROM sf_organizations o
-      WHERE o.id = $1
-      ON CONFLICT (organization_id) DO NOTHING
-    `,
-    [organizationId, COMMERCIAL_ONBOARDING_VERSION],
+    },
+    "tenant-session",
   )
 }
 
