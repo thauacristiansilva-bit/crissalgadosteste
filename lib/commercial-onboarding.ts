@@ -104,45 +104,27 @@ function completedSteps(value: unknown): CommercialOnboardingStep[] {
 async function ensureOnboardingRow(organizationId: string) {
   const currentUserId = getCurrentRlsContext()?.userId
 
-  await runWithTenantRlsScope(
+  const result = await runWithTenantRlsScope(
     [organizationId],
     currentUserId,
-    async () => {
-      const pool = getPostgresPool()
-      await pool.query(
+    () =>
+      getPostgresPool().query<{ organization_id: string }>(
         `
-          INSERT INTO sf_organization_onboarding (
-            organization_id,
-            version,
-            current_step,
-            completed_steps,
-            started_at,
-            completed_at,
-            published_at,
-            updated_at
-          )
-          SELECT
-            o.id,
-            $2,
-            CASE WHEN o.onboarding_status = 'complete' THEN 'published' ELSE 'business' END,
-            CASE
-              WHEN o.onboarding_status = 'complete'
-                THEN '["business","brand","hours","fulfillment","catalog","publish"]'::jsonb
-              ELSE '[]'::jsonb
-            END,
-            o.created_at,
-            CASE WHEN o.onboarding_status = 'complete' THEN COALESCE(o.onboarding_completed_at, now()) ELSE NULL END,
-            CASE WHEN o.onboarding_status = 'complete' THEN COALESCE(o.onboarding_completed_at, now()) ELSE NULL END,
-            now()
-          FROM sf_organizations o
-          WHERE o.id = $1
-          ON CONFLICT (organization_id) DO NOTHING
+          SELECT organization_id
+          FROM sf_organization_onboarding
+          WHERE organization_id = $1
+          LIMIT 1
         `,
-        [organizationId, COMMERCIAL_ONBOARDING_VERSION],
-      )
-    },
+        [organizationId],
+      ),
     "tenant-session",
   )
+
+  if (!result.rows[0]) {
+    throw new Error(
+      "Onboarding comercial não provisionado para esta organização. Execute as migrations pendentes antes de continuar.",
+    )
+  }
 }
 
 async function markStepComplete(
