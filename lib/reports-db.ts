@@ -1,6 +1,7 @@
 import { getBillingSnapshotForOrganization } from "@/lib/billing-db"
 import { getCorporateOverview } from "@/lib/corporate-db"
 import { getPostgresPool } from "@/lib/postgres"
+import { enterTenantRlsScope } from "@/lib/rls-context"
 import type { TenantAdminSession } from "@/lib/tenant-access"
 import type {
   ManagementReport,
@@ -429,6 +430,13 @@ export async function buildManagementReport(
 ): Promise<ManagementReport> {
   const period = normalizeReportPeriod(startRaw, endRaw)
   const scope = await reportScope(session, requestedScope)
+
+  enterTenantRlsScope(
+    scope.organizationIds,
+    session.userId,
+    requestedScope === "group" ? "corporate-report" : "tenant-session",
+  )
+
   const timeZone = await organizationTimeZone(session.organizationId)
 
   const [current, previous, finance] = await Promise.all([

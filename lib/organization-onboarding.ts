@@ -7,6 +7,7 @@ import {
 } from "@/lib/operations"
 import { getPostgresPool } from "@/lib/postgres"
 import { reserveOrganizationSlot } from "@/lib/billing-db"
+import { enterTenantRlsContext, runWithRlsBypass } from "@/lib/rls-context"
 import type {
   StoreSettings,
 } from "@/lib/types"
@@ -262,7 +263,7 @@ function starterSettings(
   }
 }
 
-export async function createOrganizationForUser(
+async function createOrganizationForUserInternal(
   userId: string,
   userEmail: string,
   input: CreateOrganizationInput,
@@ -664,6 +665,24 @@ export async function createOrganizationForUser(
   } finally {
     client.release()
   }
+}
+
+export async function createOrganizationForUser(
+  userId: string,
+  userEmail: string,
+  input: CreateOrganizationInput,
+): Promise<AdminTenantContext> {
+  const context = await runWithRlsBypass(() =>
+    createOrganizationForUserInternal(userId, userEmail, input),
+  )
+
+  enterTenantRlsContext(
+    context.organizationId,
+    context.userId,
+    "tenant-session",
+  )
+
+  return context
 }
 
 export async function getOrganizationOrderingReadiness(

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
+import { runWithRlsBypass } from "@/lib/rls-context"
 import { defaultBusinessHours } from "@/lib/operations"
 import type { AdminTenantContext } from "@/lib/tenant-context"
 import { expireDemoOrganizationIfNeeded } from "@/lib/demo-policy"
@@ -412,7 +413,7 @@ async function findReusableTrial(client: PoolClient, requestedByUserId: string) 
   }
 }
 
-export async function expireDueDemoEnvironments() {
+async function expireDueDemoEnvironmentsInternal() {
   const result = await getPostgresPool().query<{ organization_id: string }>(`
     SELECT organization_id
     FROM sf_demo_environments
@@ -432,12 +433,12 @@ export async function expireDueDemoEnvironments() {
   return expired
 }
 
-export async function createDemoEnvironment(input: {
+async function createDemoEnvironmentInternal(input: {
   kind: DemoEnvironmentKind
   requestedByUserId?: string | null
   requestFingerprint?: string | null
 }): Promise<DemoLaunch> {
-  await expireDueDemoEnvironments()
+  await expireDueDemoEnvironmentsInternal()
 
   const client = await getPostgresPool().connect()
   try {
@@ -618,7 +619,7 @@ export async function createDemoEnvironment(input: {
   }
 }
 
-export async function getDemoHealthCounts() {
+async function getDemoHealthCountsInternal() {
   try {
     const result = await getPostgresPool().query<{
       active_public: string
@@ -641,4 +642,20 @@ export async function getDemoHealthCounts() {
     if ((error as { code?: string })?.code === "42P01") return null
     throw error
   }
+}
+
+export async function expireDueDemoEnvironments() {
+  return runWithRlsBypass(() => expireDueDemoEnvironmentsInternal())
+}
+
+export async function createDemoEnvironment(input: {
+  kind: DemoEnvironmentKind
+  requestedByUserId?: string | null
+  requestFingerprint?: string | null
+}): Promise<DemoLaunch> {
+  return runWithRlsBypass(() => createDemoEnvironmentInternal(input))
+}
+
+export async function getDemoHealthCounts() {
+  return runWithRlsBypass(() => getDemoHealthCountsInternal())
 }

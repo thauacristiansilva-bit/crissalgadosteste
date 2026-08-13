@@ -133,12 +133,20 @@ export async function GET() {
       rls.prepared &&
       rls.enabledCount === 0
 
+    const rlsDefinitive =
+      rls.prepared &&
+      rls.preparedCount > 0 &&
+      rls.enabledCount === rls.preparedCount
+
+    const rlsHealthy =
+      rlsPreparedSafely || rlsDefinitive
+
     return NextResponse.json({
       ok:
         databasePasswordReady &&
         sessionSecretConfigured &&
         timeZoneValid &&
-        rlsPreparedSafely,
+        rlsHealthy,
       phase: 10,
       auth: {
         mode:
@@ -169,16 +177,22 @@ export async function GET() {
           rls.prepared,
         safePrepared:
           rlsPreparedSafely,
+        definitive:
+          rlsDefinitive,
         preparedCount:
           rls.preparedCount,
         enabledCount:
           rls.enabledCount,
         enforcement:
-          rls.enabledCount > 0
-            ? "partial"
-            : "prepared-only",
+          rlsDefinitive
+            ? "enabled"
+            : rls.enabledCount > 0
+              ? "partial"
+              : "prepared-only",
         note:
-          "As políticas RLS estão instaladas, mas o enforcement permanece desligado nesta fase para não interromper rotas antigas antes da adoção completa do contexto de banco.",
+          rlsDefinitive
+            ? "O enforcement tenant RLS está ativo. A validação de FORCE RLS e do papel restrito do runtime é feita em /api/admin/rls-health."
+            : "As políticas RLS estão preparadas e o enforcement ainda não foi concluído.",
       },
       legacy: {
         dataFile:

@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
+import { runWithRlsBypass, runWithTenantRlsScope } from "@/lib/rls-context"
 import type { Category, Product } from "@/lib/types"
 import {
   getProductIngredientAvailability,
@@ -659,27 +660,29 @@ export async function getCurrentDeploymentOrganizationId() {
   if (!email) return null
 
   try {
-    const result = await getPostgresPool().query<{ organization_id: string }>(
-      `
-        SELECT m.organization_id
-        FROM sf_users u
-        INNER JOIN sf_memberships m
-          ON m.user_id = u.id
-         AND m.status = 'active'
-        INNER JOIN sf_organizations o
-          ON o.id = m.organization_id
-         AND o.status IN ('active', 'trial')
-        WHERE lower(u.email) = lower($1)
-        ORDER BY
-          CASE m.role
-            WHEN 'owner' THEN 1
-            WHEN 'admin' THEN 2
-            ELSE 3
-          END,
-          m.created_at ASC
-        LIMIT 1
-      `,
-      [email],
+    const result = await runWithRlsBypass(() =>
+      getPostgresPool().query<{ organization_id: string }>(
+        `
+          SELECT m.organization_id
+          FROM sf_users u
+          INNER JOIN sf_memberships m
+            ON m.user_id = u.id
+           AND m.status = 'active'
+          INNER JOIN sf_organizations o
+            ON o.id = m.organization_id
+           AND o.status IN ('active', 'trial')
+          WHERE lower(u.email) = lower($1)
+          ORDER BY
+            CASE m.role
+              WHEN 'owner' THEN 1
+              WHEN 'admin' THEN 2
+              ELSE 3
+            END,
+            m.created_at ASC
+          LIMIT 1
+        `,
+        [email],
+      ),
     )
 
     return result.rows[0]?.organization_id ?? null
@@ -705,33 +708,40 @@ export async function syncCurrentDeploymentProductStocks(
 
   if (!(await isTenantCatalogReady(organizationId))) return
 
-  const client = await getPostgresPool().connect()
+  await runWithTenantRlsScope(
+    [organizationId],
+    undefined,
+    async () => {
+      const client = await getPostgresPool().connect()
 
-  try {
-    await client.query("BEGIN")
+      try {
+        await client.query("BEGIN")
 
-    for (const product of products) {
-      await client.query(
-        `
-          UPDATE sf_products
-          SET stock = $3, updated_at = now()
-          WHERE organization_id = $1 AND id = $2
-        `,
-        [
-          organizationId,
-          product.id,
-          Math.max(0, Math.floor(Number(product.stock))),
-        ],
-      )
-    }
+        for (const product of products) {
+          await client.query(
+            `
+              UPDATE sf_products
+              SET stock = $3, updated_at = now()
+              WHERE organization_id = $1 AND id = $2
+            `,
+            [
+              organizationId,
+              product.id,
+              Math.max(0, Math.floor(Number(product.stock))),
+            ],
+          )
+        }
 
-    await client.query("COMMIT")
-  } catch (error) {
-    await client.query("ROLLBACK")
-    throw error
-  } finally {
-    client.release()
-  }
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+    },
+    "privileged-backend",
+  )
 }
 
 export async function getTenantCatalogStats(organizationId: string) {

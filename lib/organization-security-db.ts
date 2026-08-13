@@ -5,6 +5,7 @@ import {
 } from "node:crypto"
 import { resolveTxt } from "node:dns/promises"
 import { getPostgresPool } from "@/lib/postgres"
+import { enterTenantRlsContext, runWithRlsBypass } from "@/lib/rls-context"
 import {
   normalizePublicDomain,
 } from "@/lib/organization-db"
@@ -717,33 +718,41 @@ export async function authenticatePrintAgent(
   if (!token) return null
 
   const result =
-    await getPostgresPool().query<{
-      id: string
-      organization_id: string
-      name: string
-      organization_name: string
-      organization_slug: string
-    }>(
-      `
-        SELECT
-          a.id,
-          a.organization_id,
-          a.name,
-          o.trade_name AS organization_name,
-          o.slug AS organization_slug
-        FROM sf_print_agents a
-        INNER JOIN sf_organizations o
-          ON o.id = a.organization_id
-         AND o.status IN ('active', 'trial')
-        WHERE a.token_hash = $1
-          AND a.active = true
-        LIMIT 1
-      `,
-      [printTokenHash(token)],
+    await runWithRlsBypass(() =>
+      getPostgresPool().query<{
+        id: string
+        organization_id: string
+        name: string
+        organization_name: string
+        organization_slug: string
+      }>(
+        `
+          SELECT
+            a.id,
+            a.organization_id,
+            a.name,
+            o.trade_name AS organization_name,
+            o.slug AS organization_slug
+          FROM sf_print_agents a
+          INNER JOIN sf_organizations o
+            ON o.id = a.organization_id
+           AND o.status IN ('active', 'trial')
+          WHERE a.token_hash = $1
+            AND a.active = true
+          LIMIT 1
+        `,
+        [printTokenHash(token)],
+      ),
     )
 
   const row = result.rows[0]
   if (!row) return null
+
+  enterTenantRlsContext(
+    row.organization_id,
+    undefined,
+    "privileged-backend",
+  )
 
   await getPostgresPool().query(
     `

@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { demoOrganizationIsUsable } from "@/lib/demo-policy"
+import { runWithRlsBypass } from "@/lib/rls-context"
 import type {
   StaffMember,
   StaffRole,
@@ -92,38 +93,40 @@ export async function getDefaultDeploymentOrganization():
   const email = (process.env.ADMIN_EMAIL || "").trim()
   if (!email) return null
 
-  const result = await getPostgresPool().query<{
-    id: string
-    trade_name: string
-    slug: string
-    public_store_enabled: boolean
-    public_ordering_enabled: boolean
-  }>(
-    `
-      SELECT
-        o.id,
-        o.trade_name,
-        o.slug,
-        o.public_store_enabled,
-        o.public_ordering_enabled
-      FROM sf_users u
-      INNER JOIN sf_memberships m
-        ON m.user_id = u.id
-       AND m.status = 'active'
-      INNER JOIN sf_organizations o
-        ON o.id = m.organization_id
-       AND o.status IN ('active', 'trial')
-      WHERE lower(u.email) = lower($1)
-      ORDER BY
-        CASE m.role
-          WHEN 'owner' THEN 1
-          WHEN 'admin' THEN 2
-          ELSE 3
-        END,
-        m.created_at ASC
-      LIMIT 1
-    `,
-    [email],
+  const result = await runWithRlsBypass(() =>
+    getPostgresPool().query<{
+      id: string
+      trade_name: string
+      slug: string
+      public_store_enabled: boolean
+      public_ordering_enabled: boolean
+    }>(
+      `
+        SELECT
+          o.id,
+          o.trade_name,
+          o.slug,
+          o.public_store_enabled,
+          o.public_ordering_enabled
+        FROM sf_users u
+        INNER JOIN sf_memberships m
+          ON m.user_id = u.id
+         AND m.status = 'active'
+        INNER JOIN sf_organizations o
+          ON o.id = m.organization_id
+         AND o.status IN ('active', 'trial')
+        WHERE lower(u.email) = lower($1)
+        ORDER BY
+          CASE m.role
+            WHEN 'owner' THEN 1
+            WHEN 'admin' THEN 2
+            ELSE 3
+          END,
+          m.created_at ASC
+        LIMIT 1
+      `,
+      [email],
+    ),
   )
 
   const row = result.rows[0]
@@ -187,30 +190,32 @@ export async function getPublicOrganizationByDomain(
   if (!clean) return null
 
   try {
-    const result = await getPostgresPool().query<{
-      id: string
-      trade_name: string
-      slug: string
-      public_store_enabled: boolean
-      public_ordering_enabled: boolean
-    }>(
-      `
-        SELECT
-          o.id,
-          o.trade_name,
-          o.slug,
-          o.public_store_enabled,
-          o.public_ordering_enabled
-        FROM sf_organization_domains d
-        INNER JOIN sf_organizations o
-          ON o.id = d.organization_id
-         AND o.status IN ('active', 'trial')
-         AND o.public_store_enabled = true
-        WHERE lower(d.domain) = lower($1)
-          AND d.verified = true
-        LIMIT 1
-      `,
-      [clean],
+    const result = await runWithRlsBypass(() =>
+      getPostgresPool().query<{
+        id: string
+        trade_name: string
+        slug: string
+        public_store_enabled: boolean
+        public_ordering_enabled: boolean
+      }>(
+        `
+          SELECT
+            o.id,
+            o.trade_name,
+            o.slug,
+            o.public_store_enabled,
+            o.public_ordering_enabled
+          FROM sf_organization_domains d
+          INNER JOIN sf_organizations o
+            ON o.id = d.organization_id
+           AND o.status IN ('active', 'trial')
+           AND o.public_store_enabled = true
+          WHERE lower(d.domain) = lower($1)
+            AND d.verified = true
+          LIMIT 1
+        `,
+        [clean],
+      ),
     )
 
     const row = result.rows[0]

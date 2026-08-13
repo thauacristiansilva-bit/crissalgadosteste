@@ -1,4 +1,5 @@
 import { getPostgresPool } from "@/lib/postgres"
+import { runWithRlsBypass, runWithRlsUserContext } from "@/lib/rls-context"
 
 export type OrganizationRole =
   | "owner"
@@ -137,31 +138,35 @@ function sortSummaries(
 export async function listOrganizationMembershipsForUser(
   email: string,
 ): Promise<OrganizationMembershipSummary[]> {
-  const result =
-    await getPostgresPool().query<OrganizationMembershipRow>(
-      activeSummaryQuery(
-        "lower(u.email) = lower($1)",
-      ),
-      [email.trim()],
-    )
+  return runWithRlsBypass(async () => {
+    const result =
+      await getPostgresPool().query<OrganizationMembershipRow>(
+        activeSummaryQuery(
+          "lower(u.email) = lower($1)",
+        ),
+        [email.trim()],
+      )
 
-  return sortSummaries(
-    result.rows.map(mapSummary),
-  )
+    return sortSummaries(
+      result.rows.map(mapSummary),
+    )
+  })
 }
 
 export async function listOrganizationMembershipsForUserId(
   userId: string,
 ): Promise<OrganizationMembershipSummary[]> {
-  const result =
-    await getPostgresPool().query<OrganizationMembershipRow>(
-      activeSummaryQuery("u.id = $1"),
-      [userId],
-    )
+  return runWithRlsUserContext(userId, async () => {
+    const result =
+      await getPostgresPool().query<OrganizationMembershipRow>(
+        activeSummaryQuery("u.id = $1"),
+        [userId],
+      )
 
-  return sortSummaries(
-    result.rows.map(mapSummary),
-  )
+    return sortSummaries(
+      result.rows.map(mapSummary),
+    )
+  })
 }
 
 export async function listOrganizationsForUser(
@@ -226,28 +231,30 @@ export async function getOrganizationContextForUser(
   userId: string,
   organizationId: string,
 ): Promise<AdminTenantContext | null> {
-  const result =
-    await getPostgresPool().query<OrganizationMembershipRow>(
-      `
-        ${activeSummaryQuery(
-          "u.id = $1 AND o.id = $2",
-        )}
-      `,
-      [userId, organizationId],
-    )
+  return runWithRlsUserContext(userId, async () => {
+    const result =
+      await getPostgresPool().query<OrganizationMembershipRow>(
+        `
+          ${activeSummaryQuery(
+            "u.id = $1 AND o.id = $2",
+          )}
+        `,
+        [userId, organizationId],
+      )
 
-  const row = result.rows[0]
-  if (!row) return null
+    const row = result.rows[0]
+    if (!row) return null
 
-  const {
-    organizationStatus: _status,
-    onboardingStatus: _onboarding,
-    publicStoreEnabled: _store,
-    publicOrderingEnabled: _ordering,
-    ...context
-  } = mapSummary(row)
+    const {
+      organizationStatus: _status,
+      onboardingStatus: _onboarding,
+      publicStoreEnabled: _store,
+      publicOrderingEnabled: _ordering,
+      ...context
+    } = mapSummary(row)
 
-  return context
+    return context
+  })
 }
 
 export async function membershipExists(

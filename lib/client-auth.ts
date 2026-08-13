@@ -18,6 +18,7 @@ import {
   getCustomerAccount as getLegacyCustomerAccount,
 } from "@/lib/db"
 import type { CustomerAccount } from "@/lib/types"
+import { enterTenantRlsContext } from "@/lib/rls-context"
 
 export const CLIENT_SESSION_COOKIE = "saborflow_client_session"
 export const LEGACY_CLIENT_SESSION_COOKIE = "cris_client_session"
@@ -162,6 +163,12 @@ export async function getCurrentCustomerContext():
     (await getCurrentDeploymentOrganizationId())
 
   if (!currentOrganizationId) return null
+
+  enterTenantRlsContext(
+    currentOrganizationId,
+    undefined,
+    "customer-session",
+  )
 
   const v2 = parseV2Token(
     cookieStore.get(CLIENT_SESSION_COOKIE)?.value,

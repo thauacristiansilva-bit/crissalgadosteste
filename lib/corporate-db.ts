@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
+import { enterTenantRlsScope } from "@/lib/rls-context"
 import type { TenantAdminSession } from "@/lib/tenant-access"
 
 export type CorporateGroupRole = "owner" | "admin" | "analyst"
@@ -345,6 +346,25 @@ export async function getCorporateOverview(
   const effectiveRole: CorporateGroupRole | null =
     group?.member_role || (group && isBillingOwner ? "owner" : null)
   const canSeeAccountScope = isBillingOwner || Boolean(effectiveRole)
+
+  const rlsScope = canSeeAccountScope
+    ? await getPostgresPool().query<{ id: string }>(
+        `
+          SELECT id
+          FROM sf_organizations
+          WHERE billing_account_id = $1
+            AND status <> 'cancelled'
+          ORDER BY created_at ASC
+        `,
+        [account.billing_account_id],
+      )
+    : { rows: [{ id: session.organizationId }] }
+
+  enterTenantRlsScope(
+    rlsScope.rows.map((row) => row.id),
+    session.userId,
+    canSeeAccountScope ? "corporate-report" : "tenant-session",
+  )
 
   const organizationsResult = await getPostgresPool().query<OrganizationRow>(
     `

@@ -10,6 +10,19 @@ import {
   type PublicOrganization,
 } from "@/lib/organization-db"
 
+import { enterTenantRlsContext } from "@/lib/rls-context"
+
+function activatePublicRls(organization: PublicOrganization | null) {
+  if (organization) {
+    enterTenantRlsContext(
+      organization.id,
+      undefined,
+      "public-store",
+    )
+  }
+  return organization
+}
+
 export const PUBLIC_TENANT_COOKIE =
   "saborflow_store_slug"
 
@@ -55,7 +68,9 @@ export async function resolvePublicOrganizationForRequest(
   explicitSlug?: string,
 ): Promise<PublicOrganization | null> {
   if (explicitSlug) {
-    return getPublicOrganizationBySlug(explicitSlug)
+    return activatePublicRls(
+      await getPublicOrganizationBySlug(explicitSlug),
+    )
   }
 
   const host = requestHost(request)
@@ -70,7 +85,7 @@ export async function resolvePublicOrganizationForRequest(
     const byDomain =
       await getPublicOrganizationByDomain(host)
 
-    if (byDomain) return byDomain
+    if (byDomain) return activatePublicRls(byDomain)
   }
 
   const selectedSlug = cookieValue(
@@ -84,24 +99,28 @@ export async function resolvePublicOrganizationForRequest(
         selectedSlug,
       )
 
-    if (bySlug) return bySlug
+    if (bySlug) return activatePublicRls(bySlug)
   }
 
   if (host) {
     const byDomain =
       await getPublicOrganizationByDomain(host)
 
-    if (byDomain) return byDomain
+    if (byDomain) return activatePublicRls(byDomain)
   }
 
-  return getDefaultDeploymentOrganization()
+  return activatePublicRls(
+    await getDefaultDeploymentOrganization(),
+  )
 }
 
 export async function resolveServerPublicOrganization(
   explicitSlug?: string,
 ): Promise<PublicOrganization | null> {
   if (explicitSlug) {
-    return getPublicOrganizationBySlug(explicitSlug)
+    return activatePublicRls(
+      await getPublicOrganizationBySlug(explicitSlug),
+    )
   }
 
   const headerStore = await headers()
@@ -123,7 +142,7 @@ export async function resolveServerPublicOrganization(
     const byDomain =
       await getPublicOrganizationByDomain(host)
 
-    if (byDomain) return byDomain
+    if (byDomain) return activatePublicRls(byDomain)
   }
 
   const selectedSlug =
@@ -135,15 +154,17 @@ export async function resolveServerPublicOrganization(
         selectedSlug,
       )
 
-    if (bySlug) return bySlug
+    if (bySlug) return activatePublicRls(bySlug)
   }
 
   if (host) {
     const byDomain =
       await getPublicOrganizationByDomain(host)
 
-    if (byDomain) return byDomain
+    if (byDomain) return activatePublicRls(byDomain)
   }
 
-  return getDefaultDeploymentOrganization()
+  return activatePublicRls(
+    await getDefaultDeploymentOrganization(),
+  )
 }

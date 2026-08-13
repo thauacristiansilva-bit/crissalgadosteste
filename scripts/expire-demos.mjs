@@ -14,6 +14,21 @@ async function main() {
   const client = await pool.connect()
   try {
     await client.query("BEGIN")
+
+    const role = await client.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_roles
+        WHERE rolname = 'saborflow_rls_app'
+          AND rolsuper = false
+          AND rolbypassrls = false
+      ) AS available
+    `)
+
+    if (role.rows[0]?.available) {
+      await client.query("SET LOCAL ROLE saborflow_rls_app")
+      await client.query("SELECT set_config('app.rls_bypass', 'true', true)")
+    }
+
     const due = await client.query(`
       UPDATE sf_demo_environments
       SET status = 'expired', expired_at = COALESCE(expired_at, now()), updated_at = now()
