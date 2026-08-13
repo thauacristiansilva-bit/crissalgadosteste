@@ -11,6 +11,7 @@ import {
   ClipboardList,
   DollarSign,
   FolderTree,
+  HeartHandshake,
   LayoutDashboard,
   Link2,
   LogOut,
@@ -95,7 +96,7 @@ const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
   { key: "products", label: "Cardápio", icon: BookOpen },
   { key: "categories", label: "Categorias", icon: FolderTree },
   { key: "customers", label: "Clientes", icon: Users },
-  { key: "marketing", label: "Marketing", icon: Megaphone },
+  { key: "marketing", label: "Cupons e divulgação", icon: Megaphone },
   { key: "reviews", label: "Avaliações", icon: Star },
   { key: "links", label: "QR e links", icon: Link2 },
   { key: "chatbot", label: "Chatbot", icon: Bot },
@@ -250,6 +251,18 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             >
               <ReceiptText className="h-4 w-4 text-[#ffd39f]" />
               <span className="truncate">Relatórios avançados</span>
+            </a>
+          </>
+        )}
+        {["owner", "admin", "manager"].includes(adminRole) && (
+          <>
+            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Crescimento</p>
+            <a
+              href="/admin/crm"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
+            >
+              <HeartHandshake className="h-4 w-4 text-[#ffd39f]" />
+              <span className="truncate">CRM e fidelidade</span>
             </a>
           </>
         )}

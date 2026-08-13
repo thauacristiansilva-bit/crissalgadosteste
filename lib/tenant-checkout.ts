@@ -745,34 +745,8 @@ export async function createTenantCheckoutOrder(
 
       accountId = Number(row.id)
 
-      if (
-        settings.loyaltyEnabled
-      ) {
-        const points = Math.max(
-          0,
-          Math.floor(
-            total *
-              settings.loyaltyPointsPerReal,
-          ),
-        )
-
-        await client.query(
-          `
-            UPDATE sf_customer_accounts
-            SET
-              loyalty_points =
-                loyalty_points + $3,
-              updated_at = now()
-            WHERE organization_id = $1
-              AND id = $2
-          `,
-          [
-            organizationId,
-            accountId,
-            points,
-          ],
-        )
-      }
+      // FASE 21: o crédito de fidelidade deixou de acontecer no checkout.
+      // Ele é aplicado de forma idempotente quando o pedido passa para concluído.
     }
 
     const order: Order = {

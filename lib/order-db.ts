@@ -2,6 +2,7 @@ import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { getCurrentDeploymentOrganizationId } from "@/lib/catalog-db"
 import { reverseIngredientsForOrderWithClient } from "@/lib/food-composition-db"
+import { applyLoyaltyForOrderStatusTransitionWithClient } from "@/lib/loyalty-db"
 import type {
   DashboardSummary,
   Order,
@@ -511,6 +512,13 @@ export async function upsertTenantOrder(
         }
       }
     }
+
+    await applyLoyaltyForOrderStatusTransitionWithClient(
+      client,
+      organizationId,
+      previous.rows[0]?.status || null,
+      order,
+    )
 
     await writeOrder(client, organizationId, order, source)
 
