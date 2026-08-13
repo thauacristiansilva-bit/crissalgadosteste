@@ -241,6 +241,18 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             </button>
           )
         })}
+        {["owner", "admin", "manager"].includes(adminRole) && (
+          <>
+            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Inteligência</p>
+            <a
+              href="/admin/relatorios"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
+            >
+              <ReceiptText className="h-4 w-4 text-[#ffd39f]" />
+              <span className="truncate">Relatórios avançados</span>
+            </a>
+          </>
+        )}
         {!demoEnvironment && ["owner", "admin", "manager"].includes(adminRole) && (
           <>
             <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Corporativo</p>
