@@ -16,7 +16,7 @@ const entitlements = JSON.parse(process.env.PLAN_ENTITLEMENTS_JSON || "{}")
 
 const keys = new Set([
   "maxOrganizations", "maxUsers", "maxProducts", "customDomain", "delivery",
-  "kitchen", "financial", "loyalty", "modifiers", "inventory", "advancedReports",
+  "kitchen", "financial", "loyalty", "modifiers", "inventory", "advancedReports", "integrations",
 ])
 
 if (!code || !name) throw new Error("PLAN_CODE e PLAN_NAME são obrigatórios.")

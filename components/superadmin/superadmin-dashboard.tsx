@@ -82,6 +82,7 @@ function EntitlementOverride({ accountId, busy, onApply }: { accountId: string; 
         <option value="modifiers">modifiers</option>
         <option value="inventory">inventory</option>
         <option value="advancedReports">advancedReports</option>
+        <option value="integrations">integrations</option>
       </select>
       {booleanKey ? (
         <select value={value} onChange={(event) => setValue(event.target.value)} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold">
