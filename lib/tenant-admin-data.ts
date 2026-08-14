@@ -6,7 +6,7 @@ import {
   isTenantCatalogReady,
 } from "@/lib/catalog-db"
 import { getAdminData } from "@/lib/db"
-import type { OrganizationRole } from "@/lib/tenant-context"
+import { runWithTenantRlsScope, type OrganizationRole } from "@/lib/rls-context"
 import { getOrganizationTimeZone } from "@/lib/organization-security-db"
 import { canReadCatalog, canReadCustomers, canReadFinance, canReadMarketing, canReadOrders, canReadTeam } from "@/lib/admin-access"
 import {
@@ -249,200 +249,207 @@ export async function getTenantAwareAdminData(
     return getAdminData()
   }
 
-  const activeMembership =
-    await membershipExists(
-      session.userId,
-      session.organizationId,
-    )
-
-  if (!activeMembership) {
-    throw new Error(
-      "Acesso à empresa ativa não está mais disponível.",
-    )
-  }
-
-  const currentDeployment =
-    await isCurrentDeploymentOrganization(
-      session.organizationId,
-    )
-
-  // Para qualquer empresa diferente da original do deployment, o painel é
-  // estritamente PostgreSQL. Nunca usamos store.json como fallback, porque
-  // isso poderia exibir dados de outra organização.
-  if (!currentDeployment) {
-    return restrictTenantDataForRole(
-      await getStrictTenantAdminData(
-        session.organizationId,
-      ),
-      session.role,
-    )
-  }
-
-  // A empresa original ainda mantém fallback legado durante a transição.
-  const data = await getAdminData()
-
-  try {
-    if (
-      await isTenantCatalogReady(
-        session.organizationId,
-      )
-    ) {
-      const [
-        products,
-        categories,
-      ] = await Promise.all([
-        getTenantProducts(
-          session.organizationId,
-          {
-            includeInactive: true,
-          },
-        ),
-        getTenantCategories(
-          session.organizationId,
-          {
-            includeInactive: true,
-          },
-        ),
-      ])
-
-      data.products = products
-      data.categories = categories
-    }
-  } catch (error) {
-    console.error(
-      "[SaborFlow] Catálogo PostgreSQL indisponível na empresa original; usando legado:",
-      error instanceof Error
-        ? error.message
-        : error,
-    )
-  }
-
-  try {
-    if (
-      await isTenantOrdersReady(
-        session.organizationId,
-      )
-    ) {
-      const orders =
-        await getTenantOrders(
+  return runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () => {
+      const activeMembership =
+        await membershipExists(
+          session.userId,
           session.organizationId,
         )
 
-      data.orders = orders
-      const timeZone =
-        await getOrganizationTimeZone(
-          session.organizationId,
-        ).catch(
-          () => "America/Sao_Paulo",
+      if (!activeMembership) {
+        throw new Error(
+          "Acesso à empresa ativa não está mais disponível.",
         )
-
-      data.summary =
-        summarizeOrders(
-          orders,
-          timeZone,
-        )
-    }
-  } catch (error) {
-    console.error(
-      "[SaborFlow] Pedidos PostgreSQL indisponíveis na empresa original; usando legado:",
-      error instanceof Error
-        ? error.message
-        : error,
-    )
-  }
-
-  try {
-    if (
-      await isTenantCustomersReady(
-        session.organizationId,
-      )
-    ) {
-      data.customers =
-        await getTenantCustomers(
-          session.organizationId,
-        )
-    }
-  } catch (error) {
-    console.error(
-      "[SaborFlow] Clientes PostgreSQL indisponíveis na empresa original; usando legado:",
-      error instanceof Error
-        ? error.message
-        : error,
-    )
-  }
-
-  try {
-    if (
-      await isTenantOperationsReady(
-        session.organizationId,
-      )
-    ) {
-      const operations =
-        await getTenantOperationsData(
-          session.organizationId,
-        )
-
-      data.coupons =
-        operations.coupons
-      data.feedbacks =
-        operations.feedbacks
-      data.cashSessions =
-        operations.cashSessions
-      data.financialEntries =
-        operations.financialEntries
-      data.deliveryZones =
-        operations.deliveryZones
-      data.couriers =
-        operations.couriers
-    }
-  } catch (error) {
-    console.error(
-      "[SaborFlow] Operação PostgreSQL indisponível na empresa original; usando legado:",
-      error instanceof Error
-        ? error.message
-        : error,
-    )
-  }
-
-  try {
-    if (
-      await isTenantRuntimeReady(
-        session.organizationId,
-      )
-    ) {
-      const [
-        settings,
-        staffMembers,
-      ] = await Promise.all([
-        getTenantSettings(
-          session.organizationId,
-        ),
-        getTenantStaffMembers(
-          session.organizationId,
-          {
-            includeInactive: true,
-          },
-        ),
-      ])
-
-      if (settings) {
-        data.settings = settings
       }
 
-      data.staffMembers =
-        staffMembers
-    }
-  } catch (error) {
-    console.error(
-      "[SaborFlow] Configurações/equipe PostgreSQL indisponíveis na empresa original; usando legado:",
-      error instanceof Error
-        ? error.message
-        : error,
-    )
-  }
+      const currentDeployment =
+        await isCurrentDeploymentOrganization(
+          session.organizationId,
+        )
 
-  return restrictTenantDataForRole(
-    data,
-    session.role,
+      // Para qualquer empresa diferente da original do deployment, o painel é
+      // estritamente PostgreSQL. Nunca usamos store.json como fallback, porque
+      // isso poderia exibir dados de outra organização.
+      if (!currentDeployment) {
+        return restrictTenantDataForRole(
+          await getStrictTenantAdminData(
+            session.organizationId,
+          ),
+          session.role,
+        )
+      }
+
+      // A empresa original ainda mantém fallback legado durante a transição.
+      const data = await getAdminData()
+
+      try {
+        if (
+          await isTenantCatalogReady(
+            session.organizationId,
+          )
+        ) {
+          const [
+            products,
+            categories,
+          ] = await Promise.all([
+            getTenantProducts(
+              session.organizationId,
+              {
+                includeInactive: true,
+              },
+            ),
+            getTenantCategories(
+              session.organizationId,
+              {
+                includeInactive: true,
+              },
+            ),
+          ])
+
+          data.products = products
+          data.categories = categories
+        }
+      } catch (error) {
+        console.error(
+          "[SaborFlow] Catálogo PostgreSQL indisponível na empresa original; usando legado:",
+          error instanceof Error
+            ? error.message
+            : error,
+        )
+      }
+
+      try {
+        if (
+          await isTenantOrdersReady(
+            session.organizationId,
+          )
+        ) {
+          const orders =
+            await getTenantOrders(
+              session.organizationId,
+            )
+
+          data.orders = orders
+          const timeZone =
+            await getOrganizationTimeZone(
+              session.organizationId,
+            ).catch(
+              () => "America/Sao_Paulo",
+            )
+
+          data.summary =
+            summarizeOrders(
+              orders,
+              timeZone,
+            )
+        }
+      } catch (error) {
+        console.error(
+          "[SaborFlow] Pedidos PostgreSQL indisponíveis na empresa original; usando legado:",
+          error instanceof Error
+            ? error.message
+            : error,
+        )
+      }
+
+      try {
+        if (
+          await isTenantCustomersReady(
+            session.organizationId,
+          )
+        ) {
+          data.customers =
+            await getTenantCustomers(
+              session.organizationId,
+            )
+        }
+      } catch (error) {
+        console.error(
+          "[SaborFlow] Clientes PostgreSQL indisponíveis na empresa original; usando legado:",
+          error instanceof Error
+            ? error.message
+            : error,
+        )
+      }
+
+      try {
+        if (
+          await isTenantOperationsReady(
+            session.organizationId,
+          )
+        ) {
+          const operations =
+            await getTenantOperationsData(
+              session.organizationId,
+            )
+
+          data.coupons =
+            operations.coupons
+          data.feedbacks =
+            operations.feedbacks
+          data.cashSessions =
+            operations.cashSessions
+          data.financialEntries =
+            operations.financialEntries
+          data.deliveryZones =
+            operations.deliveryZones
+          data.couriers =
+            operations.couriers
+        }
+      } catch (error) {
+        console.error(
+          "[SaborFlow] Operação PostgreSQL indisponível na empresa original; usando legado:",
+          error instanceof Error
+            ? error.message
+            : error,
+        )
+      }
+
+      try {
+        if (
+          await isTenantRuntimeReady(
+            session.organizationId,
+          )
+        ) {
+          const [
+            settings,
+            staffMembers,
+          ] = await Promise.all([
+            getTenantSettings(
+              session.organizationId,
+            ),
+            getTenantStaffMembers(
+              session.organizationId,
+              {
+                includeInactive: true,
+              },
+            ),
+          ])
+
+          if (settings) {
+            data.settings = settings
+          }
+
+          data.staffMembers =
+            staffMembers
+        }
+      } catch (error) {
+        console.error(
+          "[SaborFlow] Configurações/equipe PostgreSQL indisponíveis na empresa original; usando legado:",
+          error instanceof Error
+            ? error.message
+            : error,
+        )
+      }
+
+      return restrictTenantDataForRole(
+        data,
+        session.role,
+      )
+    },
+    "tenant-session",
   )
 }
