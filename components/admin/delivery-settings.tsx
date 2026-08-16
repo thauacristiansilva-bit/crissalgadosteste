@@ -278,7 +278,23 @@ export function DeliverySettings({
     if (!response.ok) { setZoneMessage(data.error || "Não foi possível atualizar a área."); return }
     onDeliveryZonesChanged(deliveryZones.map((item) => item.id === zone.id ? data.deliveryZone : item))
   }
-  async function removeZone(zone: DeliveryZone) { if (!window.confirm(`Excluir a área ${zone.name}?`)) return; const response = await fetch(`/api/delivery-zones/${zone.id}`, { method: "DELETE" }); if (response.ok) { onDeliveryZonesChanged(deliveryZones.filter((item) => item.id !== zone.id)); if (editingZoneId === zone.id) clearZoneEditor() } }
+  async function removeZone(zone: DeliveryZone) {
+    if (!window.confirm(`Excluir a área ${zone.name}?`)) return
+    setZoneMessage("")
+    try {
+      const response = await fetch(`/api/delivery-zones/${zone.id}`, { method: "DELETE" })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setZoneMessage(data.error || "Não foi possível excluir a área.")
+        return
+      }
+      onDeliveryZonesChanged(deliveryZones.filter((item) => item.id !== zone.id))
+      if (editingZoneId === zone.id) clearZoneEditor()
+      setZoneMessage("Área excluída do PostgreSQL.")
+    } catch (error) {
+      setZoneMessage(error instanceof Error ? error.message : "Erro ao excluir área.")
+    }
+  }
 
   async function saveCourier(event: FormEvent) {
     event.preventDefault(); setCourierBusy(true); setCourierMessage("")
