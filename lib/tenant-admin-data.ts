@@ -6,7 +6,8 @@ import {
   isTenantCatalogReady,
 } from "@/lib/catalog-db"
 import { getAdminData } from "@/lib/db"
-import { runWithTenantRlsScope, type OrganizationRole } from "@/lib/rls-context"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+import type { OrganizationRole } from "@/lib/tenant-context"
 import { getOrganizationTimeZone } from "@/lib/organization-security-db"
 import { canReadCatalog, canReadCustomers, canReadFinance, canReadMarketing, canReadOrders, canReadTeam } from "@/lib/admin-access"
 import {
