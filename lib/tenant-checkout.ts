@@ -10,7 +10,6 @@ import {
   isTenantOperationsReady,
 } from "@/lib/operations-db"
 import {
-  isStoreOpenNow,
   isWithinBusinessHours,
 } from "@/lib/operations"
 import {
@@ -378,15 +377,30 @@ async function createTenantCheckoutOrderInScope(
     const channel =
       input.channel || "WEB"
 
+    const timing =
+      input.timing === "now"
+        ? "now"
+        : "scheduled"
+
     if (
       channel !== "PDV" &&
-      !isStoreOpenNow(
+      !settings.acceptingOrders
+    ) {
+      throw new Error(
+        "Os pedidos online estão temporariamente pausados pela empresa.",
+      )
+    }
+
+    if (
+      channel !== "PDV" &&
+      timing === "now" &&
+      !isWithinBusinessHours(
         settings,
         nowDate,
       )
     ) {
       throw new Error(
-        "Pedidos são aceitos somente durante o horário de funcionamento da empresa.",
+        "Estamos fora do expediente. Faça o pedido como agendado para um horário disponível.",
       )
     }
 
@@ -407,11 +421,6 @@ async function createTenantCheckoutOrderInScope(
         "Retirada indisponível no momento.",
       )
     }
-
-    const timing =
-      input.timing === "now"
-        ? "now"
-        : "scheduled"
 
     const immediateLeadMinutes =
       input.type === "delivery"
