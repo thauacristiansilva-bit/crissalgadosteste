@@ -12,6 +12,7 @@ import {
   Power,
   RefreshCw,
   ShieldCheck,
+  SlidersHorizontal,
   UserPlus,
   Users,
 } from "lucide-react"
@@ -20,6 +21,14 @@ import type {
   StaffRole,
 } from "@/lib/types"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
+import {
+  OPERATIONAL_PERMISSION_CATALOG,
+  getCustomPermissionsFromStorage,
+  getRolePermissionPreset,
+  storedPermissionsAreCustom,
+  toCustomPermissionStorage,
+  type OperationalPermission,
+} from "@/lib/operational-permissions"
 
 type TeamAccess = {
   staffMemberId: number
@@ -50,30 +59,6 @@ const roleLabels: Record<
   cashier: "Caixa / PDV",
   kitchen: "Cozinha",
   courier: "Entregador",
-}
-
-const permissionsByRole: Record<
-  StaffRole,
-  string[]
-> = {
-  admin: ["all"],
-  manager: [
-    "orders",
-    "products",
-    "customers",
-    "reports",
-    "settings",
-  ],
-  cashier: [
-    "pdv",
-    "orders",
-    "cash",
-  ],
-  kitchen: [
-    "kitchen",
-    "orders",
-  ],
-  courier: ["delivery"],
 }
 
 function accessLabel(
@@ -118,8 +103,12 @@ function accessLabel(
 
 export function TeamPanel({
   staffMembers: initialStaff,
+  canManageTeam,
+  canManageAccess,
 }: {
   staffMembers: StaffMember[]
+  canManageTeam: boolean
+  canManageAccess: boolean
 }) {
   const [
     staffMembers,
@@ -142,6 +131,10 @@ export function TeamPanel({
     useState("")
   const [busyId, setBusyId] =
     useState<number | null>(null)
+  const [permissionEditorId, setPermissionEditorId] =
+    useState<number | null>(null)
+  const [permissionDraft, setPermissionDraft] =
+    useState<OperationalPermission[]>([])
 
   async function reloadAccess() {
     const response = await fetch(
@@ -177,10 +170,26 @@ export function TeamPanel({
       [access],
     )
 
+  const permissionGroups = useMemo(() => {
+    const groups = new Map<string, Array<(typeof OPERATIONAL_PERMISSION_CATALOG)[number]>>()
+    for (const item of OPERATIONAL_PERMISSION_CATALOG) {
+      if (item.id === "billing.view") continue
+      const current = groups.get(item.group) || []
+      current.push(item)
+      groups.set(item.group, current)
+    }
+    return [...groups.entries()]
+  }, [])
+
+  const permissionEditor = permissionEditorId === null
+    ? null
+    : staffMembers.find((member) => member.id === permissionEditorId) || null
+
   async function add(
     event: FormEvent,
   ) {
     event.preventDefault()
+    if (!canManageTeam) return
     setMessage("")
 
     const response = await fetch(
@@ -193,10 +202,7 @@ export function TeamPanel({
         },
         body: JSON.stringify({
           ...draft,
-          permissions:
-            permissionsByRole[
-              draft.role
-            ],
+          permissions: [],
         }),
       },
     )
@@ -235,6 +241,7 @@ export function TeamPanel({
   async function toggle(
     member: StaffMember,
   ) {
+    if (!canManageTeam) return
     setBusyId(member.id)
     setMessage("")
 
@@ -464,6 +471,61 @@ export function TeamPanel({
     await reloadAccess()
   }
 
+  function openPermissions(member: StaffMember) {
+    const custom = storedPermissionsAreCustom(member.permissions)
+    setPermissionEditorId(member.id)
+    setPermissionDraft(
+      custom
+        ? getCustomPermissionsFromStorage(member.permissions)
+        : getRolePermissionPreset(member.role),
+    )
+    setMessage("")
+  }
+
+  function togglePermission(permission: OperationalPermission) {
+    setPermissionDraft((current) =>
+      current.includes(permission)
+        ? current.filter((item) => item !== permission)
+        : [...current, permission],
+    )
+  }
+
+  async function savePermissionProfile(custom: boolean) {
+    if (!permissionEditor || !canManageAccess) return
+
+    setBusyId(permissionEditor.id)
+    setMessage("")
+
+    const response = await fetch(`/api/staff/${permissionEditor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        permissions: custom
+          ? toCustomPermissionStorage(permissionDraft)
+          : [],
+      }),
+    })
+
+    const data = await response.json()
+    setBusyId(null)
+
+    if (!response.ok) {
+      return setMessage(data.error || "Não foi possível salvar as permissões.")
+    }
+
+    setStaffMembers((current) =>
+      current.map((item) =>
+        item.id === permissionEditor.id ? data.staffMember : item,
+      ),
+    )
+    setPermissionEditorId(null)
+    setMessage(
+      custom
+        ? "Permissões personalizadas salvas."
+        : "O colaborador voltou a usar o padrão da função.",
+    )
+  }
+
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -483,7 +545,7 @@ export function TeamPanel({
           </div>
         </div>
 
-        <form
+        {canManageTeam && <form
           onSubmit={add}
           className="mt-5 grid gap-3 rounded-2xl bg-gray-50 p-4 md:grid-cols-2 xl:grid-cols-5"
         >
@@ -545,7 +607,9 @@ export function TeamPanel({
           >
             {Object.entries(
               roleLabels,
-            ).map(
+            )
+              .filter(([value]) => canManageAccess || value !== "admin")
+              .map(
               ([value, label]) => (
                 <option
                   key={value}
@@ -561,7 +625,7 @@ export function TeamPanel({
             <UserPlus className="h-4 w-4" />
             Cadastrar
           </button>
-        </form>
+        </form>}
 
         {message && (
           <p className="mt-3 break-words rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
@@ -618,11 +682,12 @@ export function TeamPanel({
                       </td>
 
                       <td className="px-4 py-3">
-                        {
-                          roleLabels[
-                            member.role
-                          ]
-                        }
+                        <div className="font-semibold">{roleLabels[member.role]}</div>
+                        <div className="mt-1 text-[11px] text-gray-400">
+                          {storedPermissionsAreCustom(member.permissions)
+                            ? "Acesso personalizado"
+                            : "Padrão da função"}
+                        </div>
                       </td>
 
                       <td className="px-4 py-3">
@@ -649,25 +714,28 @@ export function TeamPanel({
 
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() =>
-                              toggle(
-                                member,
-                              )
-                            }
-                            title={
-                              member.active
-                                ? "Desativar colaborador"
-                                : "Ativar perfil operacional"
-                            }
-                            className="rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                          >
-                            <Power className="h-4 w-4" />
-                          </button>
+                          {canManageTeam && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                toggle(
+                                  member,
+                                )
+                              }
+                              title={
+                                member.active
+                                  ? "Desativar colaborador"
+                                  : "Ativar perfil operacional"
+                              }
+                              className="rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              <Power className="h-4 w-4" />
+                            </button>
+                          )}
 
-                          {member.active &&
+                          {canManageAccess &&
+                            member.active &&
                             member.email &&
                             item?.membershipStatus !==
                               "active" && (
@@ -696,8 +764,21 @@ export function TeamPanel({
                               </button>
                             )}
 
-                          {item?.membershipStatus ===
-                            "active" &&
+                          {canManageAccess && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => openPermissions(member)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 px-3 py-2 text-xs font-black text-violet-700 disabled:opacity-50"
+                            >
+                              <SlidersHorizontal className="h-3.5 w-3.5" />
+                              Permissões
+                            </button>
+                          )}
+
+                          {canManageAccess &&
+                            item?.membershipStatus ===
+                              "active" &&
                             item.userId && (
                               <>
                                 <button
@@ -743,6 +824,69 @@ export function TeamPanel({
             </tbody>
           </table>
         </div>
+
+        {permissionEditor && canManageAccess && (
+          <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="font-black text-gray-900">
+                  Permissões de {permissionEditor.name}
+                </h3>
+                <p className="mt-1 text-xs text-gray-600">
+                  Função: {roleLabels[permissionEditor.role]}. Se você salvar como personalizado,
+                  esta lista passa a substituir o padrão da função para este colaborador.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPermissionEditorId(null)}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-600"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {permissionGroups.map(([group, items]) => (
+                <div key={group} className="rounded-xl border border-white bg-white p-3 shadow-sm">
+                  <p className="text-xs font-black uppercase tracking-wide text-violet-700">{group}</p>
+                  <div className="mt-2 space-y-2">
+                    {items.map((item) => (
+                      <label key={item.id} className="flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={permissionDraft.includes(item.id)}
+                          onChange={() => togglePermission(item.id)}
+                          className="mt-0.5"
+                        />
+                        <span>{item.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busyId === permissionEditor.id}
+                onClick={() => void savePermissionProfile(true)}
+                className="rounded-xl bg-violet-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50"
+              >
+                Salvar acesso personalizado
+              </button>
+              <button
+                type="button"
+                disabled={busyId === permissionEditor.id}
+                onClick={() => void savePermissionProfile(false)}
+                className="rounded-xl border border-violet-200 bg-white px-4 py-2 text-xs font-black text-violet-700 disabled:opacity-50"
+              >
+                Usar padrão da função
+              </button>
+            </div>
+          </div>
+        )}
 
         {!staffMembers.length && (
           <p className="mt-4 rounded-xl border border-dashed border-gray-300 p-5 text-center text-sm text-gray-500">

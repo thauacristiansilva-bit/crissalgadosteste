@@ -17,6 +17,7 @@ import {
 } from "@/lib/tenant-access"
 import {
   canManageOrganizationSettings,
+  canViewOrganizationSettings,
 } from "@/lib/tenant-permissions"
 import type { StoreSettings } from "@/lib/types"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
@@ -31,6 +32,13 @@ export async function GET() {
   }
 
   const session = await getVerifiedTenantSession()
+
+  if (session && !canViewOrganizationSettings(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode acessar as configurações da empresa." },
+      { status: 403 },
+    )
+  }
 
   if (
     session &&

@@ -21,7 +21,7 @@ export async function GET() {
 
   if (
     !session ||
-    !canManageSecurity(session.role)
+    !canManageSecurity(session.role, session.operationalPermissions)
   ) {
     return NextResponse.json(
       { error: "Não autorizado." },
@@ -45,7 +45,7 @@ export async function POST(
 
   if (
     !session ||
-    !canManageSecurity(session.role)
+    !canManageSecurity(session.role, session.operationalPermissions)
   ) {
     return NextResponse.json(
       { error: "Não autorizado." },
@@ -95,7 +95,7 @@ export async function DELETE(
 
   if (
     !session ||
-    !canManageSecurity(session.role)
+    !canManageSecurity(session.role, session.operationalPermissions)
   ) {
     return NextResponse.json(
       { error: "Não autorizado." },

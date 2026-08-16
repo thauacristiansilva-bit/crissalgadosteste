@@ -643,6 +643,31 @@ export async function updateTenantStaffMember(
 
   if (
     result.rows[0] &&
+    patch.role !== undefined
+  ) {
+    await getPostgresPool().query(
+      `
+        UPDATE sf_memberships
+        SET
+          role = $3,
+          updated_at = now()
+        WHERE organization_id = $1
+          AND user_id = (
+            SELECT user_id
+            FROM sf_staff_members
+            WHERE organization_id = $1
+              AND id = $2
+              AND user_id IS NOT NULL
+            LIMIT 1
+          )
+          AND role <> 'owner'
+      `,
+      [organizationId, id, next.role],
+    )
+  }
+
+  if (
+    result.rows[0] &&
     patch.active === false
   ) {
     await getPostgresPool().query(

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
 import { getTenantDreHealth } from "@/lib/dre-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
-import { canManageFinance } from "@/lib/tenant-permissions"
+import { canViewFinance } from "@/lib/tenant-permissions"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -17,7 +17,7 @@ export async function GET() {
     )
   }
 
-  if (!canManageFinance(session.role)) {
+  if (!canViewFinance(session.role)) {
     return NextResponse.json(
       { error: "Seu perfil não pode acessar a DRE gerencial." },
       { status: 403 },

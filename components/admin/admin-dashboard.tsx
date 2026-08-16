@@ -67,6 +67,7 @@ import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
 import { SecurityPanel } from "@/components/admin/security-panel"
 import { getAllowedAdminSections, type AdminSection } from "@/lib/admin-access"
 import type { OrganizationRole } from "@/lib/tenant-context"
+import { permissionListHas, type OperationalPermission } from "@/lib/operational-permissions"
 
 interface DashboardData {
   summary: DashboardSummary
@@ -119,11 +120,11 @@ const saborFlowBrand = {
   border: "#f0d0aa",
 }
 
-export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnvironment, organizationSlug }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string } | null; organizationSlug?: string | null }) {
+export function AdminDashboard({ initialData, adminEmail, adminRole, operationalPermissions, demoEnvironment, organizationSlug }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; operationalPermissions: OperationalPermission[]; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string } | null; organizationSlug?: string | null }) {
   const router = useRouter()
   const [section, setSection] = useState<Section>(
     () =>
-      (getAllowedAdminSections(adminRole)[0] as Section) ||
+      (getAllowedAdminSections(adminRole, operationalPermissions)[0] as Section) ||
       "security",
   )
   const [mobileNav, setMobileNav] = useState(false)
@@ -141,8 +142,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
   const [staffMembers] = useState(initialData.staffMembers)
   const [loggingOut, setLoggingOut] = useState(false)
   const allowedSections = useMemo(
-    () => new Set(getAllowedAdminSections(adminRole)),
-    [adminRole],
+    () => new Set(getAllowedAdminSections(adminRole, operationalPermissions)),
+    [adminRole, operationalPermissions],
   )
   const visibleNavItems = useMemo(
     () => navItems.filter((item) =>
@@ -243,7 +244,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             </button>
           )
         })}
-        {["owner", "admin", "manager"].includes(adminRole) && (
+        {permissionListHas(operationalPermissions, "food_operations.manage") && (
           <>
             <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Produção</p>
             <a
@@ -255,7 +256,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             </a>
           </>
         )}
-        {["owner", "admin", "manager"].includes(adminRole) && (
+        {permissionListHas(operationalPermissions, "reports.view") && (
           <>
             <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Inteligência</p>
             <a
@@ -267,7 +268,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             </a>
           </>
         )}
-        {["owner", "admin", "manager"].includes(adminRole) && (
+        {permissionListHas(operationalPermissions, "crm.manage") && (
           <>
             <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Crescimento</p>
             <a
@@ -279,7 +280,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
             </a>
           </>
         )}
-        {!demoEnvironment && ["owner", "admin"].includes(adminRole) && (
+        {!demoEnvironment && permissionListHas(operationalPermissions, "integrations.manage") && (
           <>
             <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Automação</p>
             <a
@@ -377,9 +378,9 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, demoEnviron
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
           {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment)} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
-          {section === "team" && <TeamPanel staffMembers={staffMembers} />}
+          {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
-          {section === "security" && <SecurityPanel role={adminRole} />}
+          {section === "security" && <SecurityPanel canManageSecurity={permissionListHas(operationalPermissions, "security.manage")} />}
           {section === "billing" && <BillingPanel />}
 
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>

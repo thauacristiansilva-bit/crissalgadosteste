@@ -36,6 +36,12 @@ export async function GET() {
       session.organizationId,
     ).catch(() => false))
   ) {
+    if (!canManageDeliveryOperation(session.role)) {
+      return NextResponse.json(
+        { error: "Seu perfil não pode acessar entregadores." },
+        { status: 403 },
+      )
+    }
     return NextResponse.json({
       couriers: await getTenantCouriers(
         session.organizationId,

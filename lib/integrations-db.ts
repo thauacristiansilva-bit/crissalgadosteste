@@ -14,6 +14,7 @@ import {
 } from "@/lib/integration-providers"
 import { getPostgresPool } from "@/lib/postgres"
 import type { TenantAdminSession } from "@/lib/tenant-access"
+import { permissionListHas } from "@/lib/operational-permissions"
 
 export type IntegrationConnectionStatus = "disabled" | "active" | "error"
 
@@ -53,7 +54,7 @@ function bool(value: unknown) {
 }
 
 export function canAccessIntegrations(session: TenantAdminSession) {
-  return ["owner", "admin"].includes(session.role)
+  return permissionListHas(session.operationalPermissions, "integrations.manage")
 }
 
 async function billingState(session: TenantAdminSession) {

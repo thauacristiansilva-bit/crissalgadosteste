@@ -3,7 +3,9 @@ import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import {
+  canManageAccess,
   canManageTeam,
+  canViewTeam,
 } from "@/lib/tenant-permissions"
 import {
   createTeamInvitation,
@@ -21,7 +23,7 @@ export async function GET() {
 
   if (
     !session ||
-    !canManageTeam(session.role)
+    !canViewTeam(session.role)
   ) {
     return NextResponse.json(
       { error: "Não autorizado." },
@@ -45,7 +47,7 @@ export async function POST(
 
   if (
     !session ||
-    !canManageTeam(session.role)
+    !canManageAccess(session.role)
   ) {
     return NextResponse.json(
       { error: "Não autorizado." },
@@ -169,7 +171,7 @@ export async function DELETE(
 
   if (
     !session ||
-    !canManageTeam(session.role)
+    !canManageAccess(session.role)
   ) {
     return NextResponse.json(
       { error: "Não autorizado." },

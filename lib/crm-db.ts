@@ -3,6 +3,7 @@ import { getTenantCustomers } from "@/lib/customer-db"
 import { getTenantSettings } from "@/lib/organization-db"
 import { getPostgresPool } from "@/lib/postgres"
 import type { TenantAdminSession } from "@/lib/tenant-access"
+import { permissionListHas } from "@/lib/operational-permissions"
 
 export type CrmAudienceSegment =
   | "all"
@@ -81,7 +82,7 @@ function cleanTags(value: unknown) {
 }
 
 export function canAccessCrm(session: TenantAdminSession) {
-  return ["owner", "admin", "manager"].includes(session.role)
+  return permissionListHas(session.operationalPermissions, "crm.manage")
 }
 
 async function billingState(session: TenantAdminSession) {

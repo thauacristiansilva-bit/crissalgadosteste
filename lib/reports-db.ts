@@ -3,6 +3,7 @@ import { getCorporateOverview } from "@/lib/corporate-db"
 import { getPostgresPool } from "@/lib/postgres"
 import { enterTenantRlsScope } from "@/lib/rls-context"
 import type { TenantAdminSession } from "@/lib/tenant-access"
+import { permissionListHas } from "@/lib/operational-permissions"
 import type {
   ManagementReport,
   ManagementReportScope,
@@ -17,7 +18,7 @@ import type {
 const MAX_RANGE_DAYS = 366
 
 export function canAccessManagementReports(session: TenantAdminSession) {
-  return ["owner", "admin", "manager"].includes(session.role)
+  return permissionListHas(session.operationalPermissions, "reports.view")
 }
 
 type SummaryRow = {

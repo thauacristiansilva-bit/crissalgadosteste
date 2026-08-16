@@ -6,6 +6,7 @@ import {
 } from "@/lib/catalog-db"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import type { OrganizationRole } from "@/lib/tenant-context"
+import { getRolePermissionPreset, type OperationalPermission } from "@/lib/operational-permissions"
 import { getOrganizationTimeZone } from "@/lib/organization-security-db"
 import {
   canReadCatalog,
@@ -120,16 +121,17 @@ async function getStrictTenantAdminData(organizationId: string) {
 
 type TenantAdminData = Awaited<ReturnType<typeof getStrictTenantAdminData>>
 
-function restrictTenantDataForRole(
+function restrictTenantDataForAccess(
   data: TenantAdminData,
   role: OrganizationRole,
+  permissions: readonly OperationalPermission[],
 ): TenantAdminData {
-  const canOrders = canReadOrders(role)
-  const canCatalog = canReadCatalog(role)
-  const canCustomers = canReadCustomers(role)
-  const canFinance = canReadFinance(role)
-  const canMarketing = canReadMarketing(role)
-  const canTeam = canReadTeam(role)
+  const canOrders = canReadOrders(role, permissions)
+  const canCatalog = canReadCatalog(role, permissions)
+  const canCustomers = canReadCustomers(role, permissions)
+  const canFinance = canReadFinance(role, permissions)
+  const canMarketing = canReadMarketing(role, permissions)
+  const canTeam = canReadTeam(role, permissions)
 
   return {
     ...data,
@@ -144,15 +146,15 @@ function restrictTenantDataForRole(
     feedbacks: canMarketing ? data.feedbacks : [],
     coupons: canMarketing ? data.coupons : [],
     cashSessions: canFinance ? data.cashSessions : [],
-    financialEntries:
-      role === "owner" || role === "admin" || role === "manager"
-        ? data.financialEntries
-        : [],
+    financialEntries: canFinance ? data.financialEntries : [],
     staffMembers: canTeam ? data.staffMembers : [],
   }
 }
 
-export async function getTenantAwareAdminData(session: AdminSession) {
+export async function getTenantAwareAdminData(
+  session: AdminSession,
+  operationalPermissions?: readonly OperationalPermission[],
+) {
   if (session.mode !== "tenant") {
     throw new Error(
       "Sessão administrativa legada foi desativada. Entre novamente.",
@@ -172,9 +174,10 @@ export async function getTenantAwareAdminData(session: AdminSession) {
         throw new Error("Acesso à empresa ativa não está mais disponível.")
       }
 
-      return restrictTenantDataForRole(
+      return restrictTenantDataForAccess(
         await getStrictTenantAdminData(session.organizationId),
         session.role,
+        operationalPermissions ?? getRolePermissionPreset(session.role),
       )
     },
     "tenant-session",

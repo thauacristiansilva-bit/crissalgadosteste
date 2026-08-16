@@ -2,6 +2,13 @@ import type { AdminSession } from "@/lib/auth"
 import { getAdminSession } from "@/lib/auth"
 import { demoOrganizationIsUsable, touchDemoEnvironment } from "@/lib/demo-policy"
 import {
+  currentOrRoleHasOperationalPermission,
+  enterOperationalAccessContext,
+  getOperationalAccessForSession,
+  type OperationalPermissionMode,
+} from "@/lib/operational-rbac"
+import type { OperationalPermission } from "@/lib/operational-permissions"
+import {
   getOrganizationContextForUser,
   type OrganizationRole,
 } from "@/lib/tenant-context"
@@ -10,7 +17,11 @@ import { enterTenantRlsContext } from "@/lib/rls-context"
 export type TenantAdminSession = Extract<
   AdminSession,
   { mode: "tenant" }
->
+> & {
+  operationalPermissions: OperationalPermission[]
+  operationalPermissionMode: OperationalPermissionMode
+  staffMemberId: number | null
+}
 
 export async function getVerifiedTenantSession():
   Promise<TenantAdminSession | null> {
@@ -44,10 +55,21 @@ export async function getVerifiedTenantSession():
 
   await touchDemoEnvironment(session.organizationId)
 
-  // Reafirma o escopo no fim da verificação. Chamadas intermediárias usam
-  // AsyncLocalStorage.run() e podem restaurar o contexto anterior ao retornar.
-  // As rotas administrativas que chamam este helper devem sair daqui com o
-  // tenant efetivo novamente ativo para todas as consultas PostgreSQL seguintes.
+  // Reafirma o tenant após verificações que usam AsyncLocalStorage.run().
+  // A Fase 25-R1 depende deste limite para manter o RLS efetivo nas consultas
+  // administrativas e a Fase 25.1 reutiliza o mesmo escopo para resolver RBAC.
+  enterTenantRlsContext(
+    session.organizationId,
+    session.userId,
+    "tenant-session",
+  )
+
+  const access = await getOperationalAccessForSession(current)
+  enterOperationalAccessContext(access)
+
+  // A resolução do RBAC também abre um escopo RLS explícito; reafirmamos o
+  // tenant no retorno para que as consultas seguintes continuem fail-closed
+  // para qualquer outra organização.
   enterTenantRlsContext(
     session.organizationId,
     session.userId,
@@ -58,15 +80,14 @@ export async function getVerifiedTenantSession():
     mode: "tenant",
     ...current,
     expiresAt: session.expiresAt,
+    operationalPermissions: access.permissions,
+    operationalPermissionMode: access.mode,
+    staffMemberId: access.staffMemberId,
   }
 }
 
 export function canManageCatalog(
   role: OrganizationRole,
 ) {
-  return (
-    role === "owner" ||
-    role === "admin" ||
-    role === "manager"
-  )
+  return currentOrRoleHasOperationalPermission(role, "catalog.manage")
 }

@@ -87,9 +87,9 @@ function CopyButton({
 }
 
 export function SecurityPanel({
-  role,
+  canManageSecurity,
 }: {
-  role: OrganizationRole
+  canManageSecurity: boolean
 }) {
   const [
     data,
@@ -157,9 +157,7 @@ export function SecurityPanel({
   const [busy, setBusy] =
     useState(false)
 
-  const canManage =
-    role === "owner" ||
-    role === "admin"
+  const canManage = canManageSecurity
 
   async function reload() {
     const response = await fetch(

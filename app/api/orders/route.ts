@@ -41,7 +41,7 @@ export async function GET() {
     await getVerifiedTenantSession()
 
   if (session) {
-    if (!canReadOrders(session.role)) {
+    if (!canReadOrders(session.role, session.operationalPermissions)) {
       return NextResponse.json(
         {
           error:

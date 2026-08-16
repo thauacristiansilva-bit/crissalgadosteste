@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { getAdminEmail, getAdminSession } from "@/lib/auth"
 import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
+import { getOperationalAccessForSession } from "@/lib/operational-rbac"
 import { getCommercialOnboardingSnapshot } from "@/lib/commercial-onboarding"
 import { demoOrganizationIsUsable, getDemoEnvironmentForOrganization } from "@/lib/demo-policy"
 
@@ -24,16 +25,21 @@ export default async function AdminPage() {
     if (onboarding && !onboarding.state.completed) redirect("/onboarding")
   }
 
+  const access = session.mode === "tenant"
+    ? await getOperationalAccessForSession(session)
+    : null
+
   return (
     <AdminDashboard
       adminEmail={session.email || getAdminEmail()}
       adminRole={session.mode === "tenant" ? session.role : "owner"}
+      operationalPermissions={access?.permissions || []}
       demoEnvironment={demoEnvironment ? {
         kind: demoEnvironment.kind,
         expiresAt: demoEnvironment.expiresAt,
       } : null}
       organizationSlug={session.mode === "tenant" ? session.organizationSlug : null}
-      initialData={await getTenantAwareAdminData(session)}
+      initialData={await getTenantAwareAdminData(session, access?.permissions)}
     />
   )
 }

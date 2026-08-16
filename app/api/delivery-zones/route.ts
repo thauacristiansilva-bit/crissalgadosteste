@@ -37,6 +37,12 @@ export async function GET() {
       session.organizationId,
     ).catch(() => false))
   ) {
+    if (!canManageDeliveryOperation(session.role)) {
+      return NextResponse.json(
+        { error: "Seu perfil não pode acessar áreas de entrega." },
+        { status: 403 },
+      )
+    }
     try {
       await assertOrganizationEntitlement(session.organizationId, "delivery")
       return NextResponse.json({

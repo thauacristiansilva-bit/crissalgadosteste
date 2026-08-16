@@ -132,7 +132,7 @@ export async function POST(
       await getVerifiedTenantSession()
 
     if (session) {
-      if (!canUsePdv(session.role)) {
+      if (!canUsePdv(session.role, session.operationalPermissions)) {
         return NextResponse.json(
           {
             error:

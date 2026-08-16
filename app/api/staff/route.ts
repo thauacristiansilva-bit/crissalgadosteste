@@ -17,7 +17,9 @@ import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import {
+  canManageAccess,
   canManageTeam,
+  canViewTeam,
 } from "@/lib/tenant-permissions"
 import type { StaffRole } from "@/lib/types"
 
@@ -33,7 +35,7 @@ export async function GET() {
 
   if (
     session &&
-    !canManageTeam(session.role)
+    !canViewTeam(session.role)
   ) {
     return NextResponse.json(
       {
@@ -117,6 +119,18 @@ export async function POST(request: Request) {
         {
           error:
             "Seu perfil não pode cadastrar colaboradores.",
+        },
+        { status: 403 },
+      )
+    }
+
+    if (
+      (input.role === "admin" || input.permissions.length > 0) &&
+      !canManageAccess(session.role)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Somente quem gerencia acessos pode criar administradores ou permissões personalizadas.",
         },
         { status: 403 },
       )

@@ -18,6 +18,7 @@ import {
 } from "@/lib/tenant-access"
 import {
   canManageFinance,
+  canViewFinance,
 } from "@/lib/tenant-permissions"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
@@ -37,7 +38,7 @@ export async function GET() {
       session.organizationId,
     ).catch(() => false))
   ) {
-    if (!canManageFinance(session.role)) {
+    if (!canViewFinance(session.role)) {
       return NextResponse.json(
         {
           error:

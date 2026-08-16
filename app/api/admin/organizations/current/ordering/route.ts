@@ -5,6 +5,7 @@ import {
 import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
+import { canManageOrganizationSettings } from "@/lib/tenant-permissions"
 
 export async function PATCH(
   request: Request,
@@ -22,10 +23,7 @@ export async function PATCH(
     )
   }
 
-  if (
-    session.role !== "owner" &&
-    session.role !== "admin"
-  ) {
+  if (!canManageOrganizationSettings(session.role)) {
     return NextResponse.json(
       {
         error:

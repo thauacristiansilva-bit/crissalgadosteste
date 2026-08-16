@@ -19,6 +19,10 @@ import {
 import {
   listTeamAccess,
 } from "@/lib/team-access-db"
+import {
+  canViewSecurity,
+  canViewTeam,
+} from "@/lib/tenant-permissions"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -35,6 +39,13 @@ export async function GET() {
           "Sessão multiempresa inválida.",
       },
       { status: 401 },
+    )
+  }
+
+  if (!canViewSecurity(session.role)) {
+    return NextResponse.json(
+      { ok: false, error: "Seu perfil não pode acessar a área de segurança." },
+      { status: 403 },
     )
   }
 
@@ -60,8 +71,7 @@ export async function GET() {
         session.organizationId,
       ),
       getRlsRolloutStats(),
-      session.role === "owner" ||
-      session.role === "admin"
+      canViewTeam(session.role)
         ? listTeamAccess(
             session.organizationId,
           )

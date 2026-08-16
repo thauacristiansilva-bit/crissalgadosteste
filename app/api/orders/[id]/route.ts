@@ -85,6 +85,7 @@ export async function PATCH(
       body.status &&
       !canUpdateOrderStatus(
         session.role,
+        session.operationalPermissions,
       )
     ) {
       return NextResponse.json(
@@ -100,6 +101,7 @@ export async function PATCH(
       body.paymentStatus &&
       !canUpdatePaymentStatus(
         session.role,
+        session.operationalPermissions,
       )
     ) {
       return NextResponse.json(
@@ -115,6 +117,7 @@ export async function PATCH(
       body.courierId !== undefined &&
       !canAssignCourier(
         session.role,
+        session.operationalPermissions,
       )
     ) {
       return NextResponse.json(

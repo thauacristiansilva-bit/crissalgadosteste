@@ -21,6 +21,7 @@ import {
 import {
   getSettings,
 } from "@/lib/db"
+import { canManageCustomers } from "@/lib/tenant-permissions"
 
 interface CustomerInput {
   cpf?: string
@@ -28,14 +29,6 @@ interface CustomerInput {
   name?: string
   phone?: string
   email?: string
-}
-
-function canManageCustomers(role: string) {
-  return (
-    role === "owner" ||
-    role === "admin" ||
-    role === "manager"
-  )
 }
 
 export async function POST(request: Request) {

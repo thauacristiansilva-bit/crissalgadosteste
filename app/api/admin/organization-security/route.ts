@@ -36,6 +36,7 @@ export async function GET() {
   if (
     !canManageSecurity(
       session.role,
+      session.operationalPermissions,
     )
   ) {
     return NextResponse.json({
@@ -103,6 +104,7 @@ export async function PATCH(
   if (
     !canManageSecurity(
       session.role,
+      session.operationalPermissions,
     )
   ) {
     return NextResponse.json(

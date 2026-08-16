@@ -18,7 +18,7 @@ export async function GET() {
     const session = await getVerifiedTenantSession()
 
     if (session) {
-      if (!canUsePdv(session.role)) {
+      if (!canUsePdv(session.role, session.operationalPermissions)) {
         return NextResponse.json({ error: "Seu perfil não pode usar o PDV." }, { status: 403 })
       }
 

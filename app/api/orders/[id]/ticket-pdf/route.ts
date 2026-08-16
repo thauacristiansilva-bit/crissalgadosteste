@@ -5,6 +5,7 @@ import { getTenantOrderById, isTenantOrdersReady } from "@/lib/order-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getTenantSettings, isTenantRuntimeReady } from "@/lib/organization-db"
 import { isCurrentDeploymentOrganization } from "@/lib/catalog-db"
+import { canReadOrders } from "@/lib/admin-access"
 
 const money = (value: number) => `R$ ${Number(value).toFixed(2).replace(".", ",")}`
 const stamp = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(value))
@@ -48,6 +49,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params
   const numericId = Number(id)
   const session = await getVerifiedTenantSession()
+  if (
+    session &&
+    !canReadOrders(session.role, session.operationalPermissions)
+  ) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode acessar pedidos." },
+      { status: 403 },
+    )
+  }
   const ready =
     session &&
     (await isTenantOrdersReady(session.organizationId).catch(() => false))

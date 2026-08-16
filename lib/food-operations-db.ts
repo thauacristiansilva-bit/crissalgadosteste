@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { getBillingSnapshotForOrganization } from "@/lib/billing-db"
 import { getPostgresPool } from "@/lib/postgres"
 import type { TenantAdminSession } from "@/lib/tenant-access"
+import { permissionListHas } from "@/lib/operational-permissions"
 
 export type FoodOperationsIngredient = {
   id: number
@@ -78,7 +79,7 @@ function round(value: number, decimals = 4) {
 }
 
 export function canAccessFoodOperations(session: TenantAdminSession) {
-  return ["owner", "admin", "manager"].includes(session.role)
+  return permissionListHas(session.operationalPermissions, "food_operations.manage")
 }
 
 async function billingState(session: TenantAdminSession) {

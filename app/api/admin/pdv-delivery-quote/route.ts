@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     if (session) {
       await assertOrganizationEntitlement(session.organizationId, "delivery")
-      if (!canUsePdv(session.role)) {
+      if (!canUsePdv(session.role, session.operationalPermissions)) {
         return NextResponse.json({ error: "Seu perfil não pode usar o PDV." }, { status: 403 })
       }
 

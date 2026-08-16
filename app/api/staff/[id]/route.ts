@@ -15,6 +15,7 @@ import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import {
+  canManageAccess,
   canManageTeam,
 } from "@/lib/tenant-permissions"
 import type { StaffRole } from "@/lib/types"
@@ -104,6 +105,18 @@ export async function PATCH(
         {
           error:
             "Seu perfil não pode alterar colaboradores.",
+        },
+        { status: 403 },
+      )
+    }
+
+    if (
+      (body.permissions !== undefined || body.role === "admin") &&
+      !canManageAccess(session.role)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Seu perfil não pode alterar permissões de acesso nem promover administradores.",
         },
         { status: 403 },
       )
