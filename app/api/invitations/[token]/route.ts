@@ -6,6 +6,14 @@ import {
 
 export const dynamic = "force-dynamic"
 
+function invitationToken(raw: string) {
+  try {
+    return decodeURIComponent(raw).trim()
+  } catch {
+    return ""
+  }
+}
+
 export async function GET(
   _request: Request,
   context: {
@@ -14,17 +22,14 @@ export async function GET(
     }>
   },
 ) {
-  const { token } =
+  const { token: rawToken } =
     await context.params
+  const token = invitationToken(rawToken)
 
-  const preview =
-    await getInvitationPreview(
-      decodeURIComponent(token),
-    )
-
-  if (!preview) {
+  if (!token) {
     return NextResponse.json(
       {
+        code: "invite_invalid",
         error:
           "Convite inválido ou expirado.",
       },
@@ -32,21 +37,51 @@ export async function GET(
     )
   }
 
-  return NextResponse.json({
-    invitation: {
-      name: preview.name,
-      email: preview.email,
-      role: preview.role,
-      organizationName:
-        preview.organizationName,
-      organizationSlug:
-        preview.organizationSlug,
-      passwordRequired:
-        !preview.passwordReady,
-      expiresAt:
-        preview.expiresAt,
-    },
-  })
+  try {
+    const preview =
+      await getInvitationPreview(token)
+
+    if (!preview) {
+      return NextResponse.json(
+        {
+          code: "invite_invalid",
+          error:
+            "Convite inválido ou expirado.",
+        },
+        { status: 404 },
+      )
+    }
+
+    return NextResponse.json({
+      invitation: {
+        name: preview.name,
+        email: preview.email,
+        role: preview.role,
+        organizationName:
+          preview.organizationName,
+        organizationSlug:
+          preview.organizationSlug,
+        passwordRequired:
+          !preview.passwordReady,
+        expiresAt:
+          preview.expiresAt,
+      },
+    })
+  } catch (error) {
+    return NextResponse.json(
+      {
+        code: "invite_validation_unavailable",
+        error:
+          "Não foi possível validar o convite agora. Tente novamente em instantes.",
+        detail:
+          process.env.NODE_ENV === "development" &&
+          error instanceof Error
+            ? error.message
+            : undefined,
+      },
+      { status: 503 },
+    )
+  }
 }
 
 export async function POST(
@@ -57,8 +92,20 @@ export async function POST(
     }>
   },
 ) {
-  const { token } =
+  const { token: rawToken } =
     await context.params
+  const token = invitationToken(rawToken)
+
+  if (!token) {
+    return NextResponse.json(
+      {
+        code: "invite_invalid",
+        error:
+          "Convite inválido ou expirado.",
+      },
+      { status: 404 },
+    )
+  }
 
   const body = (await request
     .json()
@@ -72,22 +119,29 @@ export async function POST(
         ok: true,
         result:
           await acceptTeamInvitation(
-            decodeURIComponent(
-              token,
-            ),
+            token,
             body?.password,
           ),
       },
     )
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Não foi possível aceitar o convite."
+    const invalid =
+      /convite.*(inválido|expirado|usado|pendente)/i.test(
+        message,
+      )
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Não foi possível aceitar o convite.",
+        code: invalid
+          ? "invite_invalid"
+          : "invite_accept_failed",
+        error: message,
       },
-      { status: 400 },
+      { status: invalid ? 409 : 400 },
     )
   }
 }

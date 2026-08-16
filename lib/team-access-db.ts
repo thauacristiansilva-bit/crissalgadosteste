@@ -14,6 +14,7 @@ import type {
 import type {
   StaffRole,
 } from "@/lib/types"
+import { runWithRlsBypass } from "@/lib/rls-context"
 
 export type TeamAccessStatus = {
   staffMemberId: number
@@ -446,51 +447,59 @@ export async function getInvitationPreview(
     return null
   }
 
+  // A leitura pública do convite é um fluxo de bootstrap autenticado pelo
+  // próprio token opaco. Ela não pode depender de um contexto RLS herdado de
+  // uma sessão administrativa inexistente no navegador do convidado.
   const result =
-    await getPostgresPool().query<{
-      user_id: string
-      name: string
-      email: string
-      password_ready: boolean
-      membership_status:
-        | "active"
-        | "invited"
-        | "disabled"
-      role: OrganizationRole
-      organization_name: string
-      organization_slug: string
-    }>(
-      `
-        SELECT
-          u.id AS user_id,
-          u.name,
-          u.email,
-          (u.password_hash IS NOT NULL) AS password_ready,
-          m.status AS membership_status,
-          m.role,
-          o.trade_name AS organization_name,
-          o.slug AS organization_slug
-        FROM sf_users u
-        INNER JOIN sf_memberships m
-          ON m.user_id = u.id
-         AND m.organization_id = $2
-        INNER JOIN sf_organizations o
-          ON o.id = m.organization_id
-        WHERE u.id = $1
-          AND u.status <> 'blocked'
-        LIMIT 1
-      `,
-      [
-        valid.userId,
-        valid.organizationId,
-      ],
+    await runWithRlsBypass(() =>
+      getPostgresPool().query<{
+        user_id: string
+        name: string
+        email: string
+        password_ready: boolean
+        membership_status:
+          | "active"
+          | "invited"
+          | "disabled"
+        role: OrganizationRole
+        organization_name: string
+        organization_slug: string
+      }>(
+        `
+          SELECT
+            u.id AS user_id,
+            u.name,
+            u.email,
+            (u.password_hash IS NOT NULL) AS password_ready,
+            m.status AS membership_status,
+            m.role,
+            o.trade_name AS organization_name,
+            o.slug AS organization_slug
+          FROM sf_users u
+          INNER JOIN sf_memberships m
+            ON m.user_id = u.id
+           AND m.organization_id = $2
+          INNER JOIN sf_organizations o
+            ON o.id = m.organization_id
+          WHERE u.id = $1
+            AND u.status <> 'blocked'
+          LIMIT 1
+        `,
+        [
+          valid.userId,
+          valid.organizationId,
+        ],
+      ),
     )
 
   const row = result.rows[0]
   if (!row) return null
+
+  // Um token de convite só deve ativar uma associação ainda pendente.
+  // Acesso já ativo/desativado exige um novo fluxo administrativo.
   if (
-    row.membership_status ===
-    "disabled"
+    row.membership_status !==
+    "invited"
   ) {
     return null
   }
@@ -541,104 +550,133 @@ export async function acceptTeamInvitation(
     )
   }
 
-  const client =
-    await getPostgresPool().connect()
+  // O aceite também é um bootstrap autenticado pelo token. O bypass fica
+  // restrito a esta transação e todas as mutações usam simultaneamente o
+  // token, user_id e organization_id obtidos da validação anterior.
+  await runWithRlsBypass(async () => {
+    const client =
+      await getPostgresPool().connect()
 
-  try {
-    await client.query("BEGIN")
+    try {
+      await client.query("BEGIN")
 
-    const consumed =
-      await client.query(
-        `
-          UPDATE sf_auth_tokens
-          SET used_at = now()
-          WHERE id = $1
-            AND used_at IS NULL
-            AND expires_at > now()
-          RETURNING id
-        `,
-        [preview.tokenId],
-      )
+      const consumed =
+        await client.query(
+          `
+            UPDATE sf_auth_tokens
+            SET used_at = now()
+            WHERE id = $1
+              AND user_id = $2
+              AND organization_id = $3
+              AND purpose = 'invite'
+              AND used_at IS NULL
+              AND expires_at > now()
+            RETURNING id
+          `,
+          [
+            preview.tokenId,
+            preview.userId,
+            preview.organizationId,
+          ],
+        )
 
-    if (!consumed.rowCount) {
-      throw new Error(
-        "Este convite já foi usado ou expirou.",
-      )
+      if (!consumed.rowCount) {
+        throw new Error(
+          "Este convite já foi usado ou expirou.",
+        )
+      }
+
+      if (!preview.passwordReady) {
+        await client.query(
+          `
+            UPDATE sf_users
+            SET
+              password_hash = $2,
+              password_updated_at = now(),
+              status = 'active',
+              updated_at = now()
+            WHERE id = $1
+              AND status <> 'blocked'
+          `,
+          [
+            preview.userId,
+            hashAdminPassword(
+              nextPassword,
+            ),
+          ],
+        )
+      } else {
+        await client.query(
+          `
+            UPDATE sf_users
+            SET
+              status = 'active',
+              updated_at = now()
+            WHERE id = $1
+              AND status <> 'blocked'
+          `,
+          [preview.userId],
+        )
+      }
+
+      const membership =
+        await client.query(
+          `
+            UPDATE sf_memberships
+            SET
+              status = 'active',
+              accepted_at = now(),
+              updated_at = now()
+            WHERE organization_id = $1
+              AND user_id = $2
+              AND status = 'invited'
+            RETURNING id
+          `,
+          [
+            preview.organizationId,
+            preview.userId,
+          ],
+        )
+
+      if (!membership.rowCount) {
+        throw new Error(
+          "Este convite não está mais pendente para esta empresa.",
+        )
+      }
+
+      const staff =
+        await client.query(
+          `
+            UPDATE sf_staff_members
+            SET
+              user_id = $3,
+              active = true,
+              updated_at = now()
+            WHERE organization_id = $1
+              AND lower(email) = lower($2)
+            RETURNING id
+          `,
+          [
+            preview.organizationId,
+            preview.email,
+            preview.userId,
+          ],
+        )
+
+      if (!staff.rowCount) {
+        throw new Error(
+          "O perfil do colaborador associado a este convite não foi encontrado.",
+        )
+      }
+
+      await client.query("COMMIT")
+    } catch (error) {
+      await client.query("ROLLBACK")
+      throw error
+    } finally {
+      client.release()
     }
-
-    if (!preview.passwordReady) {
-      await client.query(
-        `
-          UPDATE sf_users
-          SET
-            password_hash = $2,
-            password_updated_at = now(),
-            status = 'active',
-            updated_at = now()
-          WHERE id = $1
-        `,
-        [
-          preview.userId,
-          hashAdminPassword(
-            nextPassword,
-          ),
-        ],
-      )
-    } else {
-      await client.query(
-        `
-          UPDATE sf_users
-          SET
-            status = 'active',
-            updated_at = now()
-          WHERE id = $1
-            AND status <> 'blocked'
-        `,
-        [preview.userId],
-      )
-    }
-
-    await client.query(
-      `
-        UPDATE sf_memberships
-        SET
-          status = 'active',
-          accepted_at = now(),
-          updated_at = now()
-        WHERE organization_id = $1
-          AND user_id = $2
-          AND status = 'invited'
-      `,
-      [
-        preview.organizationId,
-        preview.userId,
-      ],
-    )
-
-    await client.query(
-      `
-        UPDATE sf_staff_members
-        SET
-          user_id = $3,
-          active = true,
-          updated_at = now()
-        WHERE organization_id = $1
-          AND lower(email) = lower($2)
-      `,
-      [
-        preview.organizationId,
-        preview.email,
-        preview.userId,
-      ],
-    )
-
-    await client.query("COMMIT")
-  } catch (error) {
-    await client.query("ROLLBACK")
-    throw error
-  } finally {
-    client.release()
-  }
+  })
 
   return {
     email: preview.email,
