@@ -5,37 +5,24 @@ import { demoOrganizationIsUsable } from "@/lib/demo-policy"
 import { enterTenantRlsContext } from "@/lib/rls-context"
 
 export const ADMIN_SESSION_COOKIE = "saborflow_admin_session"
+// Mantido apenas para que logout/login removam cookies antigos do navegador.
 export const LEGACY_ADMIN_SESSION_COOKIE = "cris_admin_session"
 
-export const getAdminEmail = () =>
-  process.env.ADMIN_EMAIL || "admin@crissalgados.com"
+/** @deprecated Mantido apenas para compatibilidade de componentes antigos. */
+export const getAdminEmail = () => ""
 
-const getAdminPassword = () =>
-  process.env.ADMIN_PASSWORD || "cris1234"
-
-export const getAdminLoginMode = () =>
-  process.env.ADMIN_LOGIN_MODE === "postgres"
-    ? "postgres"
-    : "transition"
-
-export const legacyAdminLoginAllowed = () =>
-  getAdminLoginMode() === "transition"
+export const getAdminLoginMode = () => "postgres" as const
+export const legacyAdminLoginAllowed = () => false
 
 export const isSessionSecretConfigured = () =>
   Boolean(process.env.SESSION_SECRET?.trim())
 
 const getSessionSecret = () => {
   const configured = process.env.SESSION_SECRET?.trim()
-
-  if (configured) return configured
-
-  if (getAdminLoginMode() === "postgres") {
-    throw new Error(
-      "SESSION_SECRET é obrigatório com ADMIN_LOGIN_MODE=postgres.",
-    )
+  if (!configured) {
+    throw new Error("SESSION_SECRET é obrigatório na Fase 25.")
   }
-
-  return `${getAdminPassword()}::cris-salgados-dev-secret`
+  return configured
 }
 
 export type AdminSession =
@@ -51,15 +38,15 @@ export type AdminSession =
       expiresAt: number
     }
   | {
+      // Tipo mantido temporariamente para compatibilidade de componentes antigos.
+      // getAdminSession() nunca produz esta variante após a Fase 25.
       mode: "legacy"
       email: string
     }
 
-export function credentialsAreValid(email: string, password: string) {
-  return (
-    email.trim().toLowerCase() === getAdminEmail().toLowerCase() &&
-    password === getAdminPassword()
-  )
+/** @deprecated Login legado foi desativado na Fase 25. */
+export function credentialsAreValid(_email: string, _password: string) {
+  return false
 }
 
 function sign(value: string) {
@@ -71,29 +58,13 @@ function sign(value: string) {
 function signaturesMatch(actual: string, expected: string) {
   const actualBuffer = Buffer.from(actual)
   const expectedBuffer = Buffer.from(expected)
-
   if (actualBuffer.length !== expectedBuffer.length) return false
   return timingSafeEqual(actualBuffer, expectedBuffer)
 }
 
-function createLegacySessionToken() {
-  return createHmac("sha256", getSessionSecret())
-    .update(`cris-admin:${getAdminEmail().toLowerCase()}`)
-    .digest("hex")
-}
-
-function legacySessionTokenIsValid(token?: string | null) {
-  if (!token) return false
-  return signaturesMatch(token, createLegacySessionToken())
-}
-
-export function createSessionToken(
-  context?: AdminTenantContext | null,
-) {
+export function createSessionToken(context: AdminTenantContext) {
   if (!context) {
-    // Transição segura: enquanto a primeira organização ainda não foi
-    // inicializada, o login atual continua funcionando.
-    return createLegacySessionToken()
+    throw new Error("Sessão administrativa exige contexto tenant PostgreSQL.")
   }
 
   const payload = {
@@ -113,7 +84,9 @@ export function createSessionToken(
 }
 
 function parseTenantSessionToken(token?: string | null): AdminSession | null {
-  if (!token || (!token.startsWith("v2.") && !token.startsWith("v3."))) return null
+  if (!token || (!token.startsWith("v2.") && !token.startsWith("v3."))) {
+    return null
+  }
 
   const parts = token.split(".")
   if (parts.length !== 3) return null
@@ -168,39 +141,24 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
 }
 
 export function sessionTokenIsValid(token?: string | null) {
-  return Boolean(
-    parseTenantSessionToken(token) ||
-      legacySessionTokenIsValid(token),
-  )
+  return Boolean(parseTenantSessionToken(token))
 }
 
 export async function getAdminSession(): Promise<AdminSession | null> {
   const cookieStore = await cookies()
-
   const tenantToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value
   const tenantSession = parseTenantSessionToken(tenantToken)
-  if (tenantSession?.mode === "tenant") {
-    enterTenantRlsContext(
-      tenantSession.organizationId,
-      tenantSession.userId,
-      "tenant-session",
-    )
 
-    if (await demoOrganizationIsUsable(tenantSession.organizationId)) {
-      return tenantSession
-    }
-    return null
-  }
+  if (tenantSession?.mode !== "tenant") return null
 
-  const legacyToken =
-    cookieStore.get(LEGACY_ADMIN_SESSION_COOKIE)?.value ||
-    cookieStore.get(ADMIN_SESSION_COOKIE)?.value
+  enterTenantRlsContext(
+    tenantSession.organizationId,
+    tenantSession.userId,
+    "tenant-session",
+  )
 
-  if (legacySessionTokenIsValid(legacyToken)) {
-    return {
-      mode: "legacy",
-      email: getAdminEmail(),
-    }
+  if (await demoOrganizationIsUsable(tenantSession.organizationId)) {
+    return tenantSession
   }
 
   return null

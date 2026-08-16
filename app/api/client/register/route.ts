@@ -1,19 +1,9 @@
 import { NextResponse } from "next/server"
 import {
-  createCustomerAccount as createLegacyCustomerAccount,
-  getSettings as getLegacySettings,
-  safeCustomer,
-  syncLegacyCustomerAccountFromTenant,
-} from "@/lib/db"
-import {
   createTenantCustomerAccount,
   isTenantCustomersReady,
   safeTenantCustomer,
 } from "@/lib/customer-db"
-import {
-  getCurrentDeploymentOrganizationId,
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
 import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
@@ -46,122 +36,60 @@ export async function POST(request: Request) {
     )
   }
 
-  const publicOrganization =
-    await resolvePublicOrganizationForRequest(
-      request,
-    )
-
-  const organizationId =
-    publicOrganization?.id ||
-    (await getCurrentDeploymentOrganizationId())
-
-  if (!organizationId) {
+  const organization = await resolvePublicOrganizationForRequest(request)
+  if (!organization) {
     return NextResponse.json(
-      { error: "Empresa não disponível." },
-      { status: 503 },
+      { error: "Empresa não identificada. Abra a loja pelo link /loja/{slug}." },
+      { status: 404 },
     )
   }
 
   try {
-    const customersReady =
-      await isTenantCustomersReady(organizationId)
+    const [customersReady, runtimeReady] = await Promise.all([
+      isTenantCustomersReady(organization.id),
+      isTenantRuntimeReady(organization.id),
+    ])
 
-    if (
-      !customersReady &&
-      !(await isCurrentDeploymentOrganization(
-        organizationId,
-      ))
-    ) {
+    if (!customersReady || !runtimeReady) {
       return NextResponse.json(
-        {
-          error:
-            "Cadastro de clientes ainda não foi habilitado para esta empresa.",
-        },
+        { error: "Cadastro de clientes ainda não está disponível nesta empresa." },
         { status: 503 },
       )
     }
 
-    const runtimeReady =
-      await isTenantRuntimeReady(
-        organizationId,
-      ).catch(() => false)
-
-    const isCurrent =
-      await isCurrentDeploymentOrganization(
-        organizationId,
-      )
-
-    const settings =
-      runtimeReady
-        ? await getTenantSettings(
-            organizationId,
-          )
-        : isCurrent
-          ? await getLegacySettings()
-          : null
-
+    const settings = await getTenantSettings(organization.id)
     if (!settings) {
       return NextResponse.json(
-        {
-          error:
-            "Configurações da empresa ainda não estão disponíveis.",
-        },
+        { error: "Configurações da empresa ainda não estão disponíveis." },
         { status: 503 },
       )
     }
 
-    const account = customersReady
-      ? await createTenantCustomerAccount(
-          organizationId,
-          {
-            cpf: body.cpf || "",
-            pin: body.pin || "",
-            name: body.name || "",
-            phone: body.phone || "",
-            email: body.email || "",
-            defaultCity: settings.city,
-            defaultState: settings.state,
-          },
-        )
-      : await createLegacyCustomerAccount({
-          cpf: body.cpf || "",
-          pin: body.pin || "",
-          name: body.name || "",
-          phone: body.phone || "",
-          email: body.email || "",
-        })
+    const account = await createTenantCustomerAccount(
+      organization.id,
+      {
+        cpf: body.cpf || "",
+        pin: body.pin || "",
+        name: body.name || "",
+        phone: body.phone || "",
+        email: body.email || "",
+        defaultCity: settings.city,
+        defaultState: settings.state,
+      },
+    )
 
-    if (
-      customersReady &&
-      (await isCurrentDeploymentOrganization(
-        organizationId,
-      ))
-    ) {
-      await syncLegacyCustomerAccountFromTenant(account)
-    }
-
-    const days =
-      body.remember === false
-        ? 1
-        : settings.rememberClientDays
-
+    const days = body.remember === false ? 1 : settings.rememberClientDays
     const response = NextResponse.json(
       {
-        customer: customersReady
-          ? safeTenantCustomer(account)
-          : safeCustomer(account),
-        sessionMode: customersReady ? "tenant" : "legacy",
+        customer: safeTenantCustomer(account),
+        sessionMode: "tenant",
       },
       { status: 201 },
     )
 
     response.cookies.set(
       CLIENT_SESSION_COOKIE,
-      createClientToken(
-        organizationId,
-        account.id,
-        days,
-      ),
+      createClientToken(organization.id, account.id, days),
       {
         httpOnly: true,
         sameSite: "lax",
@@ -171,17 +99,13 @@ export async function POST(request: Request) {
       },
     )
 
-    response.cookies.set(
-      LEGACY_CLIENT_SESSION_COOKIE,
-      "",
-      {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: 0,
-      },
-    )
+    response.cookies.set(LEGACY_CLIENT_SESSION_COOKIE, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 0,
+    })
 
     return response
   } catch (error) {

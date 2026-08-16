@@ -195,14 +195,11 @@ export async function GET() {
             : "As políticas RLS estão preparadas e o enforcement ainda não foi concluído.",
       },
       legacy: {
-        dataFile:
-          process.env
-            .DATA_FILE ||
-          null,
-        storeMirror:
-          "transition",
+        dataFile: null,
+        storeMirror: "disabled",
+        adminLoginFallback: false,
         note:
-          "O store.json ainda não deve ser removido na Fase 10.",
+          "Fase 25: store.json e login administrativo legado não participam mais do runtime.",
       },
     })
   } catch (error) {

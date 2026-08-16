@@ -1,21 +1,16 @@
 import { NextResponse } from "next/server"
 import {
-  authenticateCustomer as authenticateLegacyCustomer,
-  getSettings,
-  safeCustomer,
-} from "@/lib/db"
-import {
   authenticateTenantCustomer,
   isTenantCustomersReady,
   safeTenantCustomer,
 } from "@/lib/customer-db"
 import {
-  getCurrentDeploymentOrganizationId,
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
+import {
+  getTenantSettings,
+  isTenantRuntimeReady,
+} from "@/lib/organization-db"
 import {
   CLIENT_SESSION_COOKIE,
   LEGACY_CLIENT_SESSION_COOKIE,
@@ -24,11 +19,7 @@ import {
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as
-    | {
-        cpf?: string
-        pin?: string
-        remember?: boolean
-      }
+    | { cpf?: string; pin?: string; remember?: boolean }
     | null
 
   if (!body) {
@@ -38,50 +29,34 @@ export async function POST(request: Request) {
     )
   }
 
-  const publicOrganization =
-    await resolvePublicOrganizationForRequest(
-      request,
-    )
-
-  const organizationId =
-    publicOrganization?.id ||
-    (await getCurrentDeploymentOrganizationId())
-
-  if (!organizationId) {
+  const organization = await resolvePublicOrganizationForRequest(request)
+  if (!organization) {
     return NextResponse.json(
-      { error: "Empresa não disponível." },
+      { error: "Empresa não identificada. Abra a loja pelo link /loja/{slug}." },
+      { status: 404 },
+    )
+  }
+
+  const [customersReady, runtimeReady] = await Promise.all([
+    isTenantCustomersReady(organization.id).catch(() => false),
+    isTenantRuntimeReady(organization.id).catch(() => false),
+  ])
+
+  if (!customersReady || !runtimeReady) {
+    return NextResponse.json(
+      { error: "Contas de clientes ainda não estão disponíveis nesta empresa." },
       { status: 503 },
     )
   }
 
-  const customersReady =
-    await isTenantCustomersReady(organizationId).catch(() => false)
-
-  if (
-    !customersReady &&
-    !(await isCurrentDeploymentOrganization(
-      organizationId,
-    ))
-  ) {
-    return NextResponse.json(
-      {
-        error:
-          "Contas de clientes ainda não foram habilitadas para esta empresa.",
-      },
-      { status: 503 },
-    )
-  }
-
-  const account = customersReady
-    ? await authenticateTenantCustomer(
-        organizationId,
-        body.cpf || "",
-        body.pin || "",
-      )
-    : await authenticateLegacyCustomer(
-        body.cpf || "",
-        body.pin || "",
-      )
+  const [account, settings] = await Promise.all([
+    authenticateTenantCustomer(
+      organization.id,
+      body.cpf || "",
+      body.pin || "",
+    ),
+    getTenantSettings(organization.id),
+  ])
 
   if (!account) {
     return NextResponse.json(
@@ -90,26 +65,22 @@ export async function POST(request: Request) {
     )
   }
 
-  const settings = await getSettings()
-  const days =
-    body.remember === false
-      ? 1
-      : settings.rememberClientDays
+  if (!settings) {
+    return NextResponse.json(
+      { error: "Configurações da empresa não estão disponíveis." },
+      { status: 503 },
+    )
+  }
 
+  const days = body.remember === false ? 1 : settings.rememberClientDays
   const response = NextResponse.json({
-    customer: customersReady
-      ? safeTenantCustomer(account)
-      : safeCustomer(account),
-    sessionMode: customersReady ? "tenant" : "legacy",
+    customer: safeTenantCustomer(account),
+    sessionMode: "tenant",
   })
 
   response.cookies.set(
     CLIENT_SESSION_COOKIE,
-    createClientToken(
-      organizationId,
-      account.id,
-      days,
-    ),
+    createClientToken(organization.id, account.id, days),
     {
       httpOnly: true,
       sameSite: "lax",
@@ -119,17 +90,13 @@ export async function POST(request: Request) {
     },
   )
 
-  response.cookies.set(
-    LEGACY_CLIENT_SESSION_COOKIE,
-    "",
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 0,
-    },
-  )
+  response.cookies.set(LEGACY_CLIENT_SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  })
 
   return response
 }

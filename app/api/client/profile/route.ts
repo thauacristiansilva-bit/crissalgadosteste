@@ -1,20 +1,10 @@
 import { NextResponse } from "next/server"
-import {
-  getCurrentCustomerContext,
-} from "@/lib/client-auth"
+import { getCurrentCustomerContext } from "@/lib/client-auth"
 import {
   isTenantCustomersReady,
   safeTenantCustomer,
   updateTenantCustomerAccount,
 } from "@/lib/customer-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
-  safeCustomer,
-  syncLegacyCustomerAccountFromTenant,
-  updateCustomerAccount as updateLegacyCustomerAccount,
-} from "@/lib/db"
 
 export async function PATCH(request: Request) {
   const context = await getCurrentCustomerContext()
@@ -37,16 +27,17 @@ export async function PATCH(request: Request) {
     )
   }
 
+  if (!(await isTenantCustomersReady(context.organizationId).catch(() => false))) {
+    return NextResponse.json(
+      { error: "Clientes PostgreSQL indisponíveis para esta empresa." },
+      { status: 503 },
+    )
+  }
+
   const patch = {
-    ...(body.name !== undefined
-      ? { name: String(body.name) }
-      : {}),
-    ...(body.phone !== undefined
-      ? { phone: String(body.phone) }
-      : {}),
-    ...(body.email !== undefined
-      ? { email: String(body.email) }
-      : {}),
+    ...(body.name !== undefined ? { name: String(body.name) } : {}),
+    ...(body.phone !== undefined ? { phone: String(body.phone) } : {}),
+    ...(body.email !== undefined ? { email: String(body.email) } : {}),
     ...(body.defaultAddress !== undefined
       ? { defaultAddress: String(body.defaultAddress) }
       : {}),
@@ -69,50 +60,20 @@ export async function PATCH(request: Request) {
       ? { defaultComplement: String(body.defaultComplement) }
       : {}),
     ...(body.defaultLatitude !== undefined
-      ? {
-          defaultLatitude:
-            Number(body.defaultLatitude) || null,
-        }
+      ? { defaultLatitude: Number(body.defaultLatitude) || null }
       : {}),
     ...(body.defaultLongitude !== undefined
-      ? {
-          defaultLongitude:
-            Number(body.defaultLongitude) || null,
-        }
+      ? { defaultLongitude: Number(body.defaultLongitude) || null }
       : {}),
   }
 
-  const customersReady =
-    await isTenantCustomersReady(
-      context.organizationId,
-    ).catch(() => false)
-
-  const updated = customersReady
-    ? await updateTenantCustomerAccount(
-        context.organizationId,
-        context.account.id,
-        patch,
-      )
-    : await updateLegacyCustomerAccount(
-        context.account.id,
-        patch,
-      )
-
-  if (
-    updated &&
-    customersReady &&
-    (await isCurrentDeploymentOrganization(
-      context.organizationId,
-    ))
-  ) {
-    await syncLegacyCustomerAccountFromTenant(updated)
-  }
+  const updated = await updateTenantCustomerAccount(
+    context.organizationId,
+    context.account.id,
+    patch,
+  )
 
   return NextResponse.json({
-    customer: updated
-      ? customersReady
-        ? safeTenantCustomer(updated)
-        : safeCustomer(updated)
-      : null,
+    customer: updated ? safeTenantCustomer(updated) : null,
   })
 }

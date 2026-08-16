@@ -1,10 +1,6 @@
 import { notFound } from "next/navigation"
 import { OrderTracker } from "@/components/store/order-tracker"
 import {
-  getOrderByReference as getLegacyOrderByReference,
-  getSettings as getLegacySettings,
-} from "@/lib/db"
-import {
   getTenantOrderByReference,
   isTenantOrdersReady,
 } from "@/lib/order-db"
@@ -12,12 +8,7 @@ import {
   getTenantSettings,
   isTenantRuntimeReady,
 } from "@/lib/organization-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
-  resolveServerPublicOrganization,
-} from "@/lib/public-tenant"
+import { resolveServerPublicOrganization } from "@/lib/public-tenant"
 
 export const dynamic = "force-dynamic"
 
@@ -27,55 +18,34 @@ export default async function OrderPage({
   params: Promise<{ reference: string }>
 }) {
   const { reference } = await params
-  const decoded = decodeURIComponent(reference)
+  const organization = await resolveServerPublicOrganization()
 
-  const organization =
-    await resolveServerPublicOrganization()
-
+  // Rota de compatibilidade: só funciona quando o tenant é identificável por
+  // domínio/cookie/referer. Links novos usam /loja/{slug}/pedido/{reference}.
   if (!organization) notFound()
 
-  const ordersReady =
-    await isTenantOrdersReady(
+  const [ordersReady, runtimeReady] = await Promise.all([
+    isTenantOrdersReady(organization.id).catch(() => false),
+    isTenantRuntimeReady(organization.id).catch(() => false),
+  ])
+
+  if (!ordersReady || !runtimeReady) notFound()
+
+  const [order, settings] = await Promise.all([
+    getTenantOrderByReference(
       organization.id,
-    ).catch(() => false)
+      decodeURIComponent(reference),
+    ),
+    getTenantSettings(organization.id),
+  ])
 
-  const isCurrent =
-    await isCurrentDeploymentOrganization(
-      organization.id,
-    )
-
-  const order = ordersReady
-    ? await getTenantOrderByReference(
-        organization.id,
-        decoded,
-      )
-    : isCurrent
-      ? await getLegacyOrderByReference(decoded)
-      : null
-
-  if (!order) notFound()
-
-  const runtimeReady =
-    await isTenantRuntimeReady(
-      organization.id,
-    ).catch(() => false)
-
-  const settings =
-    runtimeReady
-      ? await getTenantSettings(organization.id)
-      : isCurrent
-        ? await getLegacySettings()
-        : null
-
-  if (!settings) notFound()
+  if (!order || !settings) notFound()
 
   return (
     <OrderTracker
       initialOrder={order}
       settings={settings}
-      storePath={`/loja/${encodeURIComponent(
-        organization.slug,
-      )}`}
+      storePath={`/loja/${encodeURIComponent(organization.slug)}`}
     />
   )
 }

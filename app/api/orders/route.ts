@@ -6,20 +6,6 @@ import {
   getCurrentCustomerAccount,
 } from "@/lib/client-auth"
 import {
-  createOrder,
-  getOrders as getLegacyOrders,
-  syncLegacyCustomerAccountFromTenant,
-  syncLegacyOrderFromTenant,
-  syncLegacyProductFromTenant,
-} from "@/lib/db"
-import {
-  getTenantCustomerAccount,
-} from "@/lib/customer-db"
-import {
-  getTenantProducts,
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
   getTenantOrders,
   isTenantOrdersReady,
 } from "@/lib/order-db"
@@ -79,91 +65,19 @@ export async function GET() {
       })
     }
 
-    if (
-      !(await isCurrentDeploymentOrganization(
-        session.organizationId,
-      ))
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Pedidos PostgreSQL desta empresa não estão disponíveis.",
-        },
-        { status: 503 },
-      )
-    }
-  }
-
-  return NextResponse.json({
-    orders:
-      await getLegacyOrders(),
-  })
-}
-
-async function mirrorCurrentDeploymentCheckout(
-  organizationId: string,
-  result: Awaited<
-    ReturnType<
-      typeof createTenantCheckoutOrder
-    >
-  >,
-) {
-  if (
-    !(await isCurrentDeploymentOrganization(
-      organizationId,
-    ))
-  ) {
-    return
-  }
-
-  try {
-    await syncLegacyOrderFromTenant(
-      result.order,
-    )
-
-    const changed = new Set(
-      result.changedProductIds,
-    )
-
-    const products =
-      await getTenantProducts(
-        organizationId,
-        {
-          includeInactive: true,
-        },
-      )
-
-    for (const product of products) {
-      if (changed.has(product.id)) {
-        await syncLegacyProductFromTenant(
-          product,
-        )
-      }
-    }
-
-    if (result.accountId) {
-      const account =
-        await getTenantCustomerAccount(
-          organizationId,
-          result.accountId,
-        )
-
-      if (account) {
-        await syncLegacyCustomerAccountFromTenant(
-          account,
-        )
-      }
-    }
-  } catch (error) {
-    // O pedido PostgreSQL já foi confirmado.
-    // Nunca devolvemos falha de espelho para evitar pedido duplicado.
-    console.error(
-      "[SaborFlow] Checkout PostgreSQL concluído, mas o espelho legado falhou:",
-      error instanceof Error
-        ? error.message
-        : error,
+    return NextResponse.json(
+      {
+        error:
+          "Pedidos PostgreSQL desta empresa não estão disponíveis.",
+      },
+      { status: 503 },
     )
   }
+
+  return NextResponse.json(
+    { error: "Sessão tenant obrigatória." },
+    { status: 401 },
+  )
 }
 
 export async function POST(
@@ -174,10 +88,17 @@ export async function POST(
       request,
     )
 
-  if (
-    publicOrganization &&
-    !publicOrganization.publicOrderingEnabled
-  ) {
+  if (!publicOrganization) {
+    return NextResponse.json(
+      {
+        error:
+          "Empresa não identificada. Abra a loja pelo link /loja/{slug}.",
+      },
+      { status: 404 },
+    )
+  }
+
+  if (!publicOrganization.publicOrderingEnabled) {
     return NextResponse.json(
       {
         error:
@@ -289,83 +210,47 @@ export async function POST(
     await getCurrentCustomerAccount()
 
   try {
-    if (publicOrganization) {
-      await assertActiveSubscriptionForOrganization(publicOrganization.id)
-      if (type === "delivery") {
-        await assertOrganizationEntitlement(publicOrganization.id, "delivery")
-      }
-      if (body.items.some((item) => Array.isArray(item.modifierOptionIds) && item.modifierOptionIds.length > 0)) {
-        await assertOrganizationEntitlement(publicOrganization.id, "modifiers")
-      }
-
-      const result =
-        await createTenantCheckoutOrder(
-          publicOrganization.id,
-          {
-            type,
-            paymentMethod,
-            changeFor:
-              body.changeFor,
-            notes: body.notes,
-            customer: {
-              ...body.customer,
-            },
-            items: body.items,
-            requestedFor:
-              body.requestedFor,
-            timing,
-            couponCode:
-              body.couponCode,
-            ...(account &&
-            account.id
-              ? {
-                  accountId:
-                    account.id,
-                }
-              : {}),
-          },
-        )
-
-      await mirrorCurrentDeploymentCheckout(
-        publicOrganization.id,
-        result,
-      )
-
-      return NextResponse.json(
-        {
-          order: result.order,
-        },
-        { status: 201 },
-      )
+    await assertActiveSubscriptionForOrganization(publicOrganization.id)
+    if (type === "delivery") {
+      await assertOrganizationEntitlement(publicOrganization.id, "delivery")
+    }
+    if (body.items.some((item) => Array.isArray(item.modifierOptionIds) && item.modifierOptionIds.length > 0)) {
+      await assertOrganizationEntitlement(publicOrganization.id, "modifiers")
     }
 
-    // Fallback apenas para transição de instalação ainda sem organização.
-    const order =
-      await createOrder({
-        type,
-        paymentMethod,
-        changeFor:
-          body.changeFor,
-        notes: body.notes,
-        customer: {
-          ...body.customer,
-          ...(account
+    const result =
+      await createTenantCheckoutOrder(
+        publicOrganization.id,
+        {
+          type,
+          paymentMethod,
+          changeFor:
+            body.changeFor,
+          notes: body.notes,
+          customer: {
+            ...body.customer,
+          },
+          items: body.items,
+          requestedFor:
+            body.requestedFor,
+          timing,
+          couponCode:
+            body.couponCode,
+          ...(account &&
+          account.id
             ? {
                 accountId:
                   account.id,
               }
             : {}),
         },
-        items: body.items,
-        requestedFor:
-          body.requestedFor,
-        timing,
-        couponCode:
-          body.couponCode,
-      })
+      )
+
 
     return NextResponse.json(
-      { order },
+      {
+        order: result.order,
+      },
       { status: 201 },
     )
   } catch (error) {

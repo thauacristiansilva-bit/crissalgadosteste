@@ -90,9 +90,21 @@ export async function isTenantRuntimeReady(
 
 export async function getDefaultDeploymentOrganization():
   Promise<PublicOrganization | null> {
-  const email = (process.env.ADMIN_EMAIL || "").trim()
-  if (!email) return null
+  // Fase 25: o domínio compartilhado da plataforma não possui tenant padrão.
+  // Lojas públicas são resolvidas por slug, domínio, cookie ou referer.
+  return null
+}
 
+export async function getPublicOrganizationBySlug(
+  slug: string,
+): Promise<PublicOrganization | null> {
+  const clean = slug.trim().toLowerCase()
+  if (!clean) return null
+
+  // Resolver slug é uma operação pública de descoberta de tenant: ainda não
+  // existe organization_id para formar o escopo RLS. O bypass fica restrito
+  // a esta consulta de metadados e, após identificar a empresa, o restante
+  // do fluxo volta a operar no escopo tenant explícito.
   const result = await runWithRlsBypass(() =>
     getPostgresPool().query<{
       id: string
@@ -103,76 +115,27 @@ export async function getDefaultDeploymentOrganization():
     }>(
       `
         SELECT
-          o.id,
-          o.trade_name,
-          o.slug,
-          o.public_store_enabled,
-          o.public_ordering_enabled
-        FROM sf_users u
-        INNER JOIN sf_memberships m
-          ON m.user_id = u.id
-         AND m.status = 'active'
-        INNER JOIN sf_organizations o
-          ON o.id = m.organization_id
-         AND o.status IN ('active', 'trial')
-        WHERE lower(u.email) = lower($1)
-        ORDER BY
-          CASE m.role
-            WHEN 'owner' THEN 1
-            WHEN 'admin' THEN 2
-            ELSE 3
-          END,
-          m.created_at ASC
+          id,
+          trade_name,
+          slug,
+          public_store_enabled,
+          public_ordering_enabled
+        FROM sf_organizations
+        WHERE lower(slug) = lower($1)
+          AND status IN ('active', 'trial')
+          AND public_store_enabled = true
         LIMIT 1
       `,
-      [email],
+      [clean],
     ),
   )
 
   const row = result.rows[0]
   if (!row) return null
 
-  return {
-    id: row.id,
-    name: row.trade_name,
-    slug: row.slug,
-    publicStoreEnabled: Boolean(row.public_store_enabled),
-    publicOrderingEnabled: Boolean(row.public_ordering_enabled),
+  if (!(await runWithRlsBypass(() => demoOrganizationIsUsable(row.id)))) {
+    return null
   }
-}
-
-export async function getPublicOrganizationBySlug(
-  slug: string,
-): Promise<PublicOrganization | null> {
-  const clean = slug.trim().toLowerCase()
-  if (!clean) return null
-
-  const result = await getPostgresPool().query<{
-    id: string
-    trade_name: string
-    slug: string
-    public_store_enabled: boolean
-    public_ordering_enabled: boolean
-  }>(
-    `
-      SELECT
-        id,
-        trade_name,
-        slug,
-        public_store_enabled,
-        public_ordering_enabled
-      FROM sf_organizations
-      WHERE lower(slug) = lower($1)
-        AND status IN ('active', 'trial')
-        AND public_store_enabled = true
-      LIMIT 1
-    `,
-    [clean],
-  )
-
-  const row = result.rows[0]
-  if (!row) return null
-  if (!(await demoOrganizationIsUsable(row.id))) return null
 
   return {
     id: row.id,
@@ -220,6 +183,10 @@ export async function getPublicOrganizationByDomain(
 
     const row = result.rows[0]
     if (!row) return null
+
+    if (!(await runWithRlsBypass(() => demoOrganizationIsUsable(row.id)))) {
+      return null
+    }
 
     return {
       id: row.id,

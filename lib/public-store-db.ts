@@ -1,14 +1,8 @@
 import {
-  getCurrentDeploymentOrganizationId,
   getTenantCategories,
   getTenantProducts,
   isTenantCatalogReady,
 } from "@/lib/catalog-db"
-import {
-  getDeliveryZones as getLegacyDeliveryZones,
-  getPublicStore as getLegacyPublicStore,
-  getSettings as getLegacySettings,
-} from "@/lib/db"
 import {
   getTenantDeliveryZones,
   isTenantOperationsReady,
@@ -23,77 +17,34 @@ import { isStoreOpenNow } from "@/lib/operations"
 export async function getPublicStoreForOrganization(
   organization: PublicOrganization,
 ) {
-  const currentDeploymentOrganizationId =
-    await getCurrentDeploymentOrganizationId()
+  const [runtimeReady, catalogReady, operationsReady] = await Promise.all([
+    isTenantRuntimeReady(organization.id).catch(() => false),
+    isTenantCatalogReady(organization.id).catch(() => false),
+    isTenantOperationsReady(organization.id).catch(() => false),
+  ])
 
-  const isCurrentDeployment =
-    currentDeploymentOrganizationId ===
-    organization.id
+  if (!runtimeReady || !catalogReady || !operationsReady) {
+    throw new Error(
+      "A loja ainda não concluiu a preparação PostgreSQL necessária para publicação.",
+    )
+  }
 
-  const runtimeReady =
-    await isTenantRuntimeReady(
-      organization.id,
-    ).catch(() => false)
-
-  const settings =
-    runtimeReady
-      ? await getTenantSettings(organization.id)
-      : isCurrentDeployment
-        ? await getLegacySettings()
-        : null
+  const [settings, products, categories, deliveryZones] = await Promise.all([
+    getTenantSettings(organization.id),
+    getTenantProducts(organization.id),
+    getTenantCategories(organization.id),
+    getTenantDeliveryZones(organization.id),
+  ])
 
   if (!settings) {
-    throw new Error(
-      "Configurações públicas da empresa ainda não estão disponíveis.",
-    )
-  }
-
-  let products: Awaited<
-    ReturnType<typeof getTenantProducts>
-  > = []
-
-  let categories: Awaited<
-    ReturnType<typeof getTenantCategories>
-  > = []
-
-  if (
-    await isTenantCatalogReady(
-      organization.id,
-    ).catch(() => false)
-  ) {
-    ;[products, categories] = await Promise.all([
-      getTenantProducts(organization.id),
-      getTenantCategories(organization.id),
-    ])
-  } else if (isCurrentDeployment) {
-    const legacy = await getLegacyPublicStore()
-    products = legacy.products
-    categories = legacy.categories
-  }
-
-  let deliveryZones: Awaited<
-    ReturnType<typeof getTenantDeliveryZones>
-  > = []
-
-  if (
-    await isTenantOperationsReady(
-      organization.id,
-    ).catch(() => false)
-  ) {
-    deliveryZones = await getTenantDeliveryZones(
-      organization.id,
-    )
-  } else if (isCurrentDeployment) {
-    deliveryZones =
-      await getLegacyDeliveryZones()
+    throw new Error("Configurações públicas da empresa não foram encontradas.")
   }
 
   const publicSettings = {
     ...settings,
     systemName: "SaborFlow",
     acceptingOrders:
-      settings.acceptingOrders &&
-      organization.publicOrderingEnabled,
+      settings.acceptingOrders && organization.publicOrderingEnabled,
   }
 
   return {
@@ -106,8 +57,7 @@ export async function getPublicStoreForOrganization(
       id: organization.id,
       name: organization.name,
       slug: organization.slug,
-      publicOrderingEnabled:
-        organization.publicOrderingEnabled,
+      publicOrderingEnabled: organization.publicOrderingEnabled,
     },
   }
 }
