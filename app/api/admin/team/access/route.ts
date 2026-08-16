@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
@@ -31,12 +32,18 @@ export async function GET() {
     )
   }
 
-  return NextResponse.json({
-    access:
-      await listTeamAccess(
-        session.organizationId,
-      ),
-  })
+  return runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () =>
+      NextResponse.json({
+        access:
+          await listTeamAccess(
+            session.organizationId,
+          ),
+      }),
+    "tenant-session",
+  )
 }
 
 export async function POST(
@@ -70,97 +77,104 @@ export async function POST(
   const origin =
     new URL(request.url).origin
 
-  try {
-    if (
-      body?.action ===
-      "password-reset"
-    ) {
-      if (!body.userId) {
-        throw new Error(
-          "Usuário inválido.",
+  return runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () => {
+      try {
+        if (
+          body?.action ===
+          "password-reset"
+        ) {
+          if (!body.userId) {
+            throw new Error(
+              "Usuário inválido.",
+            )
+          }
+
+          const reset =
+            await createTeamPasswordReset({
+              organizationId:
+                session.organizationId,
+              targetUserId:
+                body.userId,
+              createdByUserId:
+                session.userId,
+              actorRole:
+                session.role,
+            })
+
+          return NextResponse.json({
+            reset: {
+              email:
+                reset.email,
+              expiresAt:
+                reset.expiresAt,
+              url:
+                `${origin}/recuperar-senha/${encodeURIComponent(
+                  reset.token,
+                )}`,
+            },
+          })
+        }
+
+        const staffMemberId =
+          Number(
+            body?.staffMemberId,
+          )
+
+        if (
+          !Number.isInteger(
+            staffMemberId,
+          ) ||
+          staffMemberId <= 0
+        ) {
+          throw new Error(
+            "Colaborador inválido.",
+          )
+        }
+
+        const currentAccess = await listTeamAccess(session.organizationId)
+        const targetAccess = currentAccess.find((item) => item.staffMemberId === staffMemberId)
+        if (!targetAccess || !["active", "invited"].includes(String(targetAccess.membershipStatus))) {
+          await assertCanAddUser(session.organizationId)
+        }
+
+        const invitation =
+          await createTeamInvitation({
+            organizationId:
+              session.organizationId,
+            staffMemberId,
+            invitedByUserId:
+              session.userId,
+          })
+
+        return NextResponse.json({
+          invitation: {
+            ...invitation,
+            url:
+              invitation.token
+                ? `${origin}/convite/${encodeURIComponent(
+                    invitation.token,
+                  )}`
+                : null,
+            token: undefined,
+          },
+        })
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Não foi possível criar o acesso.",
+          },
+          { status: billingErrorStatus(error) },
         )
       }
-
-      const reset =
-        await createTeamPasswordReset({
-          organizationId:
-            session.organizationId,
-          targetUserId:
-            body.userId,
-          createdByUserId:
-            session.userId,
-          actorRole:
-            session.role,
-        })
-
-      return NextResponse.json({
-        reset: {
-          email:
-            reset.email,
-          expiresAt:
-            reset.expiresAt,
-          url:
-            `${origin}/recuperar-senha/${encodeURIComponent(
-              reset.token,
-            )}`,
-        },
-      })
-    }
-
-    const staffMemberId =
-      Number(
-        body?.staffMemberId,
-      )
-
-    if (
-      !Number.isInteger(
-        staffMemberId,
-      ) ||
-      staffMemberId <= 0
-    ) {
-      throw new Error(
-        "Colaborador inválido.",
-      )
-    }
-
-    const currentAccess = await listTeamAccess(session.organizationId)
-    const targetAccess = currentAccess.find((item) => item.staffMemberId === staffMemberId)
-    if (!targetAccess || !["active", "invited"].includes(String(targetAccess.membershipStatus))) {
-      await assertCanAddUser(session.organizationId)
-    }
-
-    const invitation =
-      await createTeamInvitation({
-        organizationId:
-          session.organizationId,
-        staffMemberId,
-        invitedByUserId:
-          session.userId,
-      })
-
-    return NextResponse.json({
-      invitation: {
-        ...invitation,
-        url:
-          invitation.token
-            ? `${origin}/convite/${encodeURIComponent(
-                invitation.token,
-              )}`
-            : null,
-        token: undefined,
-      },
-    })
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Não foi possível criar o acesso.",
-      },
-      { status: billingErrorStatus(error) },
-    )
-  }
+    },
+    "tenant-session",
+  )
 }
 
 export async function DELETE(
@@ -192,24 +206,31 @@ export async function DELETE(
     )
   }
 
-  try {
-    await disableTeamAccess(
-      session.organizationId,
-      body.userId,
-    )
+  return runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () => {
+      try {
+        await disableTeamAccess(
+          session.organizationId,
+          body.userId!,
+        )
 
-    return NextResponse.json({
-      ok: true,
-    })
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Não foi possível desativar o acesso.",
-      },
-      { status: 400 },
-    )
-  }
+        return NextResponse.json({
+          ok: true,
+        })
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Não foi possível desativar o acesso.",
+          },
+          { status: 400 },
+        )
+      }
+    },
+    "tenant-session",
+  )
 }
