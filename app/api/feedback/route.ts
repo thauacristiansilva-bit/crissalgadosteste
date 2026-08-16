@@ -75,6 +75,10 @@ export async function POST(request: Request) {
     )
   }
 
+  const orderReference = body.orderReference
+  const rating = body.rating
+  const comment = body.comment
+
   try {
     const organization =
       await resolvePublicOrganizationForRequest(
@@ -104,9 +108,9 @@ export async function POST(request: Request) {
         const feedback = await createTenantFeedback(
           organization.id,
           {
-            orderReference: body.orderReference,
-            rating: body.rating,
-            comment: body.comment,
+            orderReference,
+            rating,
+            comment,
           },
         )
 
