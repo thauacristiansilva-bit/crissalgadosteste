@@ -1,33 +1,35 @@
 import { NextResponse } from "next/server"
-import { isAdminAuthenticated } from "@/lib/auth"
-import {
-  syncLegacyStaffMemberFromTenant,
-  updateStaffMember as updateLegacyStaffMember,
-} from "@/lib/db"
 import {
   isTenantRuntimeReady,
   updateTenantStaffMember,
 } from "@/lib/organization-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
-  getVerifiedTenantSession,
-} from "@/lib/tenant-access"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import {
   canManageAccess,
   canManageTeam,
 } from "@/lib/tenant-permissions"
 import type { StaffRole } from "@/lib/types"
 
+export const dynamic = "force-dynamic"
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
+    )
+  }
+
+  if (!canManageTeam(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode alterar colaboradores." },
+      { status: 403 },
     )
   }
 
@@ -38,10 +40,23 @@ export async function PATCH(
     | Record<string, unknown>
     | null
 
-  if (!body || !Number.isInteger(numericId)) {
+  if (!body || !Number.isInteger(numericId) || numericId <= 0) {
     return NextResponse.json(
       { error: "Dados inválidos." },
       { status: 400 },
+    )
+  }
+
+  if (
+    (body.permissions !== undefined || body.role === "admin") &&
+    !canManageAccess(session.role)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Seu perfil não pode alterar permissões de acesso nem promover administradores.",
+      },
+      { status: 403 },
     )
   }
 
@@ -56,100 +71,50 @@ export async function PATCH(
       ? { phone: String(body.phone) }
       : {}),
     ...(body.role !== undefined
-      ? {
-          role: String(
-            body.role,
-          ) as StaffRole,
-        }
+      ? { role: String(body.role) as StaffRole }
       : {}),
     ...(body.active !== undefined
       ? { active: Boolean(body.active) }
       : {}),
-    ...(body.permissions !== undefined &&
-    Array.isArray(body.permissions)
-      ? {
-          permissions:
-            body.permissions.map(String),
-        }
+    ...(body.permissions !== undefined && Array.isArray(body.permissions)
+      ? { permissions: body.permissions.map(String) }
       : {}),
   }
 
   try {
-    const session = await getVerifiedTenantSession()
-    const ready =
-      session &&
-      (await isTenantRuntimeReady(
-        session.organizationId,
-      ).catch(() => false))
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        const ready = await isTenantRuntimeReady(session.organizationId)
 
-    if (!session || !ready) {
-      const staffMember =
-        await updateLegacyStaffMember(
+        if (!ready) {
+          return NextResponse.json(
+            {
+              error:
+                "O runtime PostgreSQL desta empresa não está pronto para alterar colaboradores.",
+            },
+            { status: 503 },
+          )
+        }
+
+        const staffMember = await updateTenantStaffMember(
+          session.organizationId,
           numericId,
           patch,
         )
 
-      return staffMember
-        ? NextResponse.json({ staffMember })
-        : NextResponse.json(
-            {
-              error:
-                "Colaborador não encontrado.",
-            },
+        if (!staffMember) {
+          return NextResponse.json(
+            { error: "Colaborador não encontrado." },
             { status: 404 },
           )
-    }
+        }
 
-    if (!canManageTeam(session.role)) {
-      return NextResponse.json(
-        {
-          error:
-            "Seu perfil não pode alterar colaboradores.",
-        },
-        { status: 403 },
-      )
-    }
-
-    if (
-      (body.permissions !== undefined || body.role === "admin") &&
-      !canManageAccess(session.role)
-    ) {
-      return NextResponse.json(
-        {
-          error: "Seu perfil não pode alterar permissões de acesso nem promover administradores.",
-        },
-        { status: 403 },
-      )
-    }
-
-    const staffMember =
-      await updateTenantStaffMember(
-        session.organizationId,
-        numericId,
-        patch,
-      )
-
-    if (!staffMember) {
-      return NextResponse.json(
-        {
-          error:
-            "Colaborador não encontrado.",
-        },
-        { status: 404 },
-      )
-    }
-
-    if (
-      await isCurrentDeploymentOrganization(
-        session.organizationId,
-      )
-    ) {
-      await syncLegacyStaffMemberFromTenant(
-        staffMember,
-      )
-    }
-
-    return NextResponse.json({ staffMember })
+        return NextResponse.json({ staffMember })
+      },
+      "tenant-session",
+    )
   } catch (error) {
     return NextResponse.json(
       {

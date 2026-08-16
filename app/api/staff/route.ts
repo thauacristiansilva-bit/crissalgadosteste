@@ -1,21 +1,11 @@
 import { NextResponse } from "next/server"
-import { isAdminAuthenticated } from "@/lib/auth"
-import {
-  createStaffMember as createLegacyStaffMember,
-  getStaffMembers as getLegacyStaffMembers,
-  syncLegacyStaffMemberFromTenant,
-} from "@/lib/db"
 import {
   createTenantStaffMember,
   getTenantStaffMembers,
   isTenantRuntimeReady,
 } from "@/lib/organization-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
-  getVerifiedTenantSession,
-} from "@/lib/tenant-access"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import {
   canManageAccess,
   canManageTeam,
@@ -23,53 +13,66 @@ import {
 } from "@/lib/tenant-permissions"
 import type { StaffRole } from "@/lib/types"
 
+export const dynamic = "force-dynamic"
+
 export async function GET() {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
     )
   }
 
-  const session = await getVerifiedTenantSession()
-
-  if (
-    session &&
-    !canViewTeam(session.role)
-  ) {
+  if (!canViewTeam(session.role)) {
     return NextResponse.json(
-      {
-        error:
-          "Seu perfil não pode visualizar a equipe.",
-      },
+      { error: "Seu perfil não pode visualizar a equipe." },
       { status: 403 },
     )
   }
 
-  if (
-    session &&
-    (await isTenantRuntimeReady(
-      session.organizationId,
-    ).catch(() => false))
-  ) {
-    return NextResponse.json({
-      staffMembers: await getTenantStaffMembers(
-        session.organizationId,
-        { includeInactive: true },
-      ),
-    })
-  }
+  return runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () => {
+      const ready = await isTenantRuntimeReady(session.organizationId)
 
-  return NextResponse.json({
-    staffMembers: await getLegacyStaffMembers(),
-  })
+      if (!ready) {
+        return NextResponse.json(
+          {
+            error:
+              "O runtime PostgreSQL desta empresa não está pronto para consultar colaboradores.",
+          },
+          { status: 503 },
+        )
+      }
+
+      return NextResponse.json({
+        staffMembers: await getTenantStaffMembers(
+          session.organizationId,
+          { includeInactive: true },
+        ),
+      })
+    },
+    "tenant-session",
+  )
 }
 
 export async function POST(request: Request) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
+    )
+  }
+
+  if (!canManageTeam(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode cadastrar colaboradores." },
+      { status: 403 },
     )
   }
 
@@ -88,73 +91,53 @@ export async function POST(request: Request) {
     name: String(body.name || ""),
     email: String(body.email || ""),
     phone: String(body.phone || ""),
-    role: String(
-      body.role || "cashier",
-    ) as StaffRole,
+    role: String(body.role || "cashier") as StaffRole,
     permissions: Array.isArray(body.permissions)
       ? body.permissions.map(String)
       : [],
   }
 
-  try {
-    const session = await getVerifiedTenantSession()
-    const ready =
-      session &&
-      (await isTenantRuntimeReady(
-        session.organizationId,
-      ).catch(() => false))
-
-    if (!session || !ready) {
-      const staffMember =
-        await createLegacyStaffMember(input)
-
-      return NextResponse.json(
-        { staffMember },
-        { status: 201 },
-      )
-    }
-
-    if (!canManageTeam(session.role)) {
-      return NextResponse.json(
-        {
-          error:
-            "Seu perfil não pode cadastrar colaboradores.",
-        },
-        { status: 403 },
-      )
-    }
-
-    if (
-      (input.role === "admin" || input.permissions.length > 0) &&
-      !canManageAccess(session.role)
-    ) {
-      return NextResponse.json(
-        {
-          error: "Somente quem gerencia acessos pode criar administradores ou permissões personalizadas.",
-        },
-        { status: 403 },
-      )
-    }
-
-    const staffMember =
-      await createTenantStaffMember(
-        session.organizationId,
-        input,
-      )
-
-    if (
-      await isCurrentDeploymentOrganization(
-        session.organizationId,
-      )
-    ) {
-      await syncLegacyStaffMemberFromTenant(
-        staffMember,
-      )
-    }
-
+  if (
+    (input.role === "admin" || input.permissions.length > 0) &&
+    !canManageAccess(session.role)
+  ) {
     return NextResponse.json(
-      { staffMember },
-      { status: 201 },
+      {
+        error:
+          "Somente quem gerencia acessos pode criar administradores ou permissões personalizadas.",
+      },
+      { status: 403 },
+    )
+  }
+
+  try {
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        const ready = await isTenantRuntimeReady(session.organizationId)
+
+        if (!ready) {
+          return NextResponse.json(
+            {
+              error:
+                "O runtime PostgreSQL desta empresa não está pronto para cadastrar colaboradores.",
+            },
+            { status: 503 },
+          )
+        }
+
+        const staffMember = await createTenantStaffMember(
+          session.organizationId,
+          input,
+        )
+
+        return NextResponse.json(
+          { staffMember },
+          { status: 201 },
+        )
+      },
+      "tenant-session",
     )
   } catch (error) {
     return NextResponse.json(
