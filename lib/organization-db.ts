@@ -752,6 +752,130 @@ export async function updateTenantStaffMember(
     : null
 }
 
+export async function deleteTenantStaffMember(
+  organizationId: string,
+  id: number,
+) {
+  const client = await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+
+    const staffResult = await client.query<{
+      id: number
+      name: string
+      user_id: string | null
+    }>(
+      `
+        SELECT
+          id,
+          name,
+          user_id
+        FROM sf_staff_members
+        WHERE organization_id = $1
+          AND id = $2
+        FOR UPDATE
+      `,
+      [organizationId, id],
+    )
+
+    const staff = staffResult.rows[0]
+
+    if (!staff) {
+      await client.query("COMMIT")
+      return null
+    }
+
+    if (staff.user_id) {
+      const membership = await client.query<{
+        role: string
+      }>(
+        `
+          SELECT role
+          FROM sf_memberships
+          WHERE organization_id = $1
+            AND user_id = $2
+          LIMIT 1
+        `,
+        [organizationId, staff.user_id],
+      )
+
+      if (membership.rows[0]?.role === "owner") {
+        throw new Error(
+          "O proprietário da empresa não pode ser excluído pela gestão de colaboradores.",
+        )
+      }
+
+      await client.query(
+        `
+          UPDATE sf_memberships
+          SET
+            status = 'disabled',
+            updated_at = now()
+          WHERE organization_id = $1
+            AND user_id = $2
+            AND role <> 'owner'
+        `,
+        [organizationId, staff.user_id],
+      )
+
+      await client.query(
+        `
+          UPDATE sf_auth_tokens
+          SET used_at = COALESCE(used_at, now())
+          WHERE organization_id = $1
+            AND user_id = $2
+            AND used_at IS NULL
+        `,
+        [organizationId, staff.user_id],
+      )
+    }
+
+    const couriers = await client.query(
+      `
+        UPDATE sf_couriers
+        SET
+          staff_member_id = NULL,
+          updated_at = now()
+        WHERE organization_id = $1
+          AND staff_member_id = $2
+      `,
+      [organizationId, id],
+    )
+
+    const deleted = await client.query(
+      `
+        DELETE FROM sf_staff_members
+        WHERE organization_id = $1
+          AND id = $2
+        RETURNING id
+      `,
+      [organizationId, id],
+    )
+
+    if (!deleted.rowCount) {
+      throw new Error(
+        "O colaborador não pôde ser excluído.",
+      )
+    }
+
+    await client.query("COMMIT")
+    await refreshTenantRuntimeState(organizationId)
+
+    return {
+      id: Number(staff.id),
+      name: staff.name,
+      accessRevoked: Boolean(staff.user_id),
+      unlinkedCourierProfiles: Number(couriers.rowCount || 0),
+    }
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 export async function getTenantDomains(
   organizationId: string,
 ) {

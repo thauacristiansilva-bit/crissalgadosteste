@@ -15,6 +15,7 @@ import {
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -52,6 +53,14 @@ type TeamAccess = {
     | "disabled"
     | null
   passwordReady: boolean
+}
+
+type GeneratedAccessLink = {
+  kind: "invite" | "password-reset"
+  staffMemberId: number
+  staffName: string
+  url: string
+  expiresAt: string | null
 }
 
 const roleLabels: Record<
@@ -141,6 +150,8 @@ export function TeamPanel({
 
   const [message, setMessage] =
     useState("")
+  const [generatedAccessLink, setGeneratedAccessLink] =
+    useState<GeneratedAccessLink | null>(null)
   const [busyId, setBusyId] =
     useState<number | null>(null)
   const [permissionEditorId, setPermissionEditorId] =
@@ -358,12 +369,21 @@ export function TeamPanel({
     if (
       invitation?.alreadyActive
     ) {
+      setGeneratedAccessLink(null)
       setMessage(
         "Este colaborador já possui acesso ativo.",
       )
     } else if (
       invitation?.url
     ) {
+      setGeneratedAccessLink({
+        kind: "invite",
+        staffMemberId: member.id,
+        staffName: member.name,
+        url: invitation.url,
+        expiresAt: invitation.expiresAt || null,
+      })
+
       await navigator.clipboard
         .writeText(
           invitation.url,
@@ -371,11 +391,12 @@ export function TeamPanel({
         .catch(() => null)
 
       setMessage(
-        `Convite criado e copiado. Link válido até ${new Date(
-          invitation.expiresAt,
-        ).toLocaleString(
-          "pt-BR",
-        )}: ${invitation.url}`,
+        "Convite criado. O link está disponível abaixo para copiar ou abrir.",
+      )
+    } else {
+      setGeneratedAccessLink(null)
+      setMessage(
+        "O acesso foi criado, mas nenhum link de convite foi retornado. Gere um novo convite.",
       )
     }
 
@@ -424,16 +445,20 @@ export function TeamPanel({
       data.reset?.url
 
     if (url) {
+      setGeneratedAccessLink({
+        kind: "password-reset",
+        staffMemberId: member.id,
+        staffName: member.name,
+        url,
+        expiresAt: data.reset.expiresAt || null,
+      })
+
       await navigator.clipboard
         .writeText(url)
         .catch(() => null)
 
       setMessage(
-        `Link de recuperação copiado. Válido até ${new Date(
-          data.reset.expiresAt,
-        ).toLocaleString(
-          "pt-BR",
-        )}: ${url}`,
+        "Link de recuperação gerado. Ele está disponível abaixo para copiar ou abrir.",
       )
     }
   }
@@ -496,6 +521,76 @@ export function TeamPanel({
     setMessage(
       "Acesso desativado.",
     )
+    await reloadAccess()
+  }
+
+  async function deleteMember(
+    member: StaffMember,
+  ) {
+    if (!canManageAccess) return
+
+    const item = accessByStaff.get(member.id)
+    const accessWarning = item?.userId
+      ? " O acesso deste usuário a esta empresa será revogado."
+      : ""
+    const courierWarning = member.role === "courier"
+      ? " Se houver perfil de entregador vinculado, ele será desvinculado."
+      : ""
+
+    if (
+      !window.confirm(
+        `Excluir definitivamente o perfil de ${member.name}?${accessWarning}${courierWarning} Esta ação não pode ser desfeita.`,
+      )
+    ) {
+      return
+    }
+
+    setBusyId(member.id)
+    setMessage("")
+    setGeneratedAccessLink((current) =>
+      current?.staffMemberId === member.id ? null : current,
+    )
+
+    const response = await fetch(
+      `/api/staff/${member.id}`,
+      {
+        method: "DELETE",
+      },
+    )
+
+    const data = await response.json()
+    setBusyId(null)
+
+    if (!response.ok) {
+      return setMessage(
+        data.error ||
+          "Não foi possível excluir o colaborador.",
+      )
+    }
+
+    setStaffMembers((current) =>
+      current.filter((entry) => entry.id !== member.id),
+    )
+    setEditorId((current) =>
+      current === member.id ? null : current,
+    )
+    setPermissionEditorId((current) =>
+      current === member.id ? null : current,
+    )
+
+    const details = [
+      data.accessRevoked ? "login revogado" : null,
+      Number(data.unlinkedCourierProfiles || 0) > 0
+        ? `${data.unlinkedCourierProfiles} perfil(is) de entregador desvinculado(s)`
+        : null,
+    ].filter(Boolean)
+
+    setMessage(
+      details.length
+        ? `Colaborador excluído. ${details.join(" • ")}.`
+        : "Colaborador excluído.",
+    )
+
     await reloadAccess()
   }
 
@@ -719,6 +814,64 @@ export function TeamPanel({
           </p>
         )}
 
+        {generatedAccessLink && (
+          <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-emerald-800">
+                  {generatedAccessLink.kind === "invite"
+                    ? "Link de convite"
+                    : "Link de recuperação"}
+                </p>
+                <p className="mt-1 text-xs text-emerald-700">
+                  {generatedAccessLink.staffName}
+                  {generatedAccessLink.expiresAt
+                    ? ` • válido até ${new Date(generatedAccessLink.expiresAt).toLocaleString("pt-BR")}`
+                    : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGeneratedAccessLink(null)}
+                className="rounded-lg border border-emerald-200 bg-white p-2 text-emerald-700"
+                title="Fechar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2 lg:flex-row">
+              <input
+                readOnly
+                value={generatedAccessLink.url}
+                onFocus={(event) => event.currentTarget.select()}
+                className="h-10 min-w-0 flex-1 rounded-xl border border-emerald-200 bg-white px-3 text-xs text-gray-700"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard
+                    .writeText(generatedAccessLink.url)
+                    .then(() => setMessage("Link copiado."))
+                    .catch(() => setMessage("Não foi possível copiar automaticamente. Selecione o link acima e copie manualmente."))
+                }}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-xs font-black text-white"
+              >
+                <Copy className="h-4 w-4" />
+                Copiar link
+              </button>
+              <a
+                href={generatedAccessLink.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-emerald-300 bg-white px-4 text-xs font-black text-emerald-800"
+              >
+                Abrir link
+              </a>
+            </div>
+          </div>
+        )}
+
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
@@ -913,6 +1066,17 @@ export function TeamPanel({
                                 </button>
                               </>
                             )}
+                          {canManageAccess && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void deleteMember(member)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Excluir
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

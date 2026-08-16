@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import {
+  deleteTenantStaffMember,
   isTenantRuntimeReady,
   updateTenantStaffMember,
 } from "@/lib/organization-db"
@@ -135,6 +136,94 @@ export async function PATCH(
           error instanceof Error
             ? error.message
             : "Não foi possível atualizar.",
+      },
+      { status: 400 },
+    )
+  }
+}
+
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
+    return NextResponse.json(
+      { error: "Não autorizado." },
+      { status: 401 },
+    )
+  }
+
+  if (!canManageAccess(session.role)) {
+    return NextResponse.json(
+      {
+        error:
+          "Seu perfil não pode excluir colaboradores ou revogar acessos.",
+      },
+      { status: 403 },
+    )
+  }
+
+  const { id } = await context.params
+  const numericId = Number(id)
+
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return NextResponse.json(
+      { error: "Colaborador inválido." },
+      { status: 400 },
+    )
+  }
+
+  try {
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        const ready = await isTenantRuntimeReady(session.organizationId)
+
+        if (!ready) {
+          return NextResponse.json(
+            {
+              error:
+                "O runtime PostgreSQL desta empresa não está pronto para excluir colaboradores.",
+            },
+            { status: 503 },
+          )
+        }
+
+        const deleted = await deleteTenantStaffMember(
+          session.organizationId,
+          numericId,
+        )
+
+        if (!deleted) {
+          return NextResponse.json(
+            { error: "Colaborador não encontrado." },
+            { status: 404 },
+          )
+        }
+
+        return NextResponse.json({
+          ok: true,
+          deletedStaffMember: {
+            id: deleted.id,
+            name: deleted.name,
+          },
+          accessRevoked: deleted.accessRevoked,
+          unlinkedCourierProfiles: deleted.unlinkedCourierProfiles,
+        })
+      },
+      "tenant-session",
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível excluir o colaborador.",
       },
       { status: 400 },
     )
