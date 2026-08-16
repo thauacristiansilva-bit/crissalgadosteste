@@ -76,6 +76,7 @@ export async function GET() {
       perEmployeeOverrides: true,
       backendAuthorization: true,
       adminNavigationFiltered: true,
+      dedicatedOperationalWorkspaces: true,
       postgresTenantIsolationPreserved: true,
     },
     boundaries: {
@@ -84,7 +85,7 @@ export async function GET() {
       accessGovernanceReservedByDefaultToOwnerAndAdmin: true,
       billingRemainsGovernanceControlled: true,
       customPermissionsNeverBypassRls: true,
-      dedicatedRolePagesReservedForPhase25_2: true,
+      dedicatedRolePagesActive: true,
       deliveryTrackingReservedForLaterDeliveryPhase: true,
     },
   })

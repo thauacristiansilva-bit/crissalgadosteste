@@ -6,6 +6,7 @@ import {
   updateOrder as updateLegacyOrder,
 } from "@/lib/db"
 import {
+  getTenantOrderById,
   isTenantOrdersReady,
   updateTenantOrder,
 } from "@/lib/order-db"
@@ -80,6 +81,17 @@ export async function PATCH(
 
   const session = await getVerifiedTenantSession()
 
+  const currentOrder = session
+    ? await getTenantOrderById(session.organizationId, numericId)
+    : null
+
+  if (session && !currentOrder) {
+    return NextResponse.json(
+      { error: "Pedido não encontrado." },
+      { status: 404 },
+    )
+  }
+
   if (session) {
     if (
       body.status &&
@@ -129,39 +141,65 @@ export async function PATCH(
       )
     }
 
-    if (
-      session.role === "kitchen" &&
-      body.status &&
-      ![
-        "accepted",
-        "preparing",
-        "ready",
-      ].includes(body.status)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "A cozinha só pode mover pedidos entre aceito, preparando e pronto.",
-        },
-        { status: 403 },
-      )
+    if (session.role === "cashier" && body.status) {
+      const validCashierTransition =
+        (currentOrder?.status === "pending" && body.status === "accepted") ||
+        (currentOrder?.status !== "completed" &&
+          currentOrder?.status !== "cancelled" &&
+          body.status === "cancelled") ||
+        (currentOrder?.type === "pickup" &&
+          currentOrder.status === "ready" &&
+          body.status === "completed")
+
+      if (!validCashierTransition) {
+        return NextResponse.json(
+          {
+            error:
+              "O caixa só pode aceitar pedidos, cancelar pedidos ativos ou concluir uma retirada pronta.",
+          },
+          { status: 403 },
+        )
+      }
     }
 
-    if (
-      session.role === "courier" &&
-      body.status &&
-      ![
-        "in-route",
-        "completed",
-      ].includes(body.status)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "O entregador só pode marcar pedido em rota ou concluído.",
-        },
-        { status: 403 },
-      )
+    if (session.role === "kitchen" && body.status) {
+      const validKitchenTransition =
+        (currentOrder?.status === "pending" && body.status === "accepted") ||
+        (currentOrder?.status === "accepted" && body.status === "preparing") ||
+        (currentOrder?.status === "preparing" && body.status === "ready")
+
+      if (!validKitchenTransition) {
+        return NextResponse.json(
+          {
+            error:
+              "A cozinha só pode avançar o pedido de pendente para aceito, preparando e pronto.",
+          },
+          { status: 403 },
+        )
+      }
+    }
+
+    if (session.role === "courier" && body.status) {
+      if (currentOrder?.type !== "delivery") {
+        return NextResponse.json(
+          { error: "O entregador só pode operar pedidos de entrega." },
+          { status: 403 },
+        )
+      }
+
+      const validTransition =
+        (currentOrder.status === "ready" && body.status === "in-route") ||
+        (currentOrder.status === "in-route" && body.status === "completed")
+
+      if (!validTransition) {
+        return NextResponse.json(
+          {
+            error:
+              "A entrega só pode avançar de pronto para em rota e depois para concluído.",
+          },
+          { status: 403 },
+        )
+      }
     }
   }
 

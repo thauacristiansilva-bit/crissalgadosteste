@@ -3,6 +3,7 @@ import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { getAdminEmail, getAdminSession } from "@/lib/auth"
 import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
 import { getOperationalAccessForSession } from "@/lib/operational-rbac"
+import { getDefaultOperationalPath } from "@/lib/operational-home"
 import { getCommercialOnboardingSnapshot } from "@/lib/commercial-onboarding"
 import { demoOrganizationIsUsable, getDemoEnvironmentForOrganization } from "@/lib/demo-policy"
 
@@ -28,6 +29,14 @@ export default async function AdminPage() {
   const access = session.mode === "tenant"
     ? await getOperationalAccessForSession(session)
     : null
+
+  if (session.mode === "tenant" && access) {
+    const operationalHome = getDefaultOperationalPath(
+      session.role,
+      access.permissions,
+    )
+    if (operationalHome !== "/admin") redirect(operationalHome)
+  }
 
   return (
     <AdminDashboard

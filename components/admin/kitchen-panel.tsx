@@ -18,7 +18,7 @@ function urgency(order: Order, now: Date, settings: StoreSettings) {
 }
 
 const statusLabel: Partial<Record<OrderStatus, string>> = {
-  pending: "Legado / pendente",
+  pending: "Pendente",
   accepted: "Aceito automaticamente",
   preparing: "Em preparo",
   ready: "Pronto",
@@ -76,7 +76,7 @@ export function KitchenPanel({ orders, settings, onOrderUpdated }: { orders: Ord
           const alert = urgency(order, now, settings)
           const TypeIcon = order.type === "delivery" ? Truck : ShoppingBag
           const next: OrderStatus | null = order.status === "pending" ? "accepted" : order.status === "accepted" ? "preparing" : order.status === "preparing" ? "ready" : null
-          const action = order.status === "pending" ? "Aceitar legado" : order.status === "accepted" ? "Começar preparo" : order.status === "preparing" ? "Marcar pronto" : ""
+          const action = order.status === "pending" ? "Aceitar pedido" : order.status === "accepted" ? "Começar preparo" : order.status === "preparing" ? "Marcar pronto" : ""
           return (
             <article key={order.id} className={`overflow-hidden rounded-2xl border-2 shadow-sm transition ${alert.card}`}>
               <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start">

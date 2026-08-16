@@ -6,7 +6,11 @@ import {
 } from "@/lib/catalog-db"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import type { OrganizationRole } from "@/lib/tenant-context"
-import { getRolePermissionPreset, type OperationalPermission } from "@/lib/operational-permissions"
+import {
+  getRolePermissionPreset,
+  permissionListHas,
+  type OperationalPermission,
+} from "@/lib/operational-permissions"
 import { getOrganizationTimeZone } from "@/lib/organization-security-db"
 import {
   canReadCatalog,
@@ -132,20 +136,23 @@ function restrictTenantDataForAccess(
   const canFinance = canReadFinance(role, permissions)
   const canMarketing = canReadMarketing(role, permissions)
   const canTeam = canReadTeam(role, permissions)
+  const canPdv = permissionListHas(permissions, "pdv.use")
+  const canCash = permissionListHas(permissions, "cash.manage")
 
   return {
     ...data,
     summary: canOrders ? data.summary : emptySummary(),
     orders: canOrders ? data.orders : [],
-    products: canCatalog ? data.products : [],
+    // O PDV precisa ler o catálogo de venda, mas isso não concede catalog.manage.
+    products: canCatalog || canPdv ? data.products : [],
     categories: canCatalog ? data.categories : [],
     customers: canCustomers ? data.customers : [],
     deliveryZones:
-      canCatalog || canOrders ? data.deliveryZones : [],
+      canCatalog || canOrders || canPdv ? data.deliveryZones : [],
     couriers: canOrders ? data.couriers : [],
     feedbacks: canMarketing ? data.feedbacks : [],
     coupons: canMarketing ? data.coupons : [],
-    cashSessions: canFinance ? data.cashSessions : [],
+    cashSessions: canFinance || canCash ? data.cashSessions : [],
     financialEntries: canFinance ? data.financialEntries : [],
     staffMembers: canTeam ? data.staffMembers : [],
   }
