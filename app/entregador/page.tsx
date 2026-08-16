@@ -6,6 +6,7 @@ import {
   getDefaultOperationalPath,
 } from "@/lib/operational-home"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const dynamic = "force-dynamic"
 
@@ -28,12 +29,18 @@ export default async function CourierPage() {
     )
   }
 
-  const dispatch = await getCourierWorkspaceSnapshot({
-    organizationId: session.organizationId,
-    userId: session.userId,
-    role: session.role,
-    permissions: session.operationalPermissions,
-  })
+  const dispatch = await runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    () =>
+      getCourierWorkspaceSnapshot({
+        organizationId: session.organizationId,
+        userId: session.userId,
+        role: session.role,
+        permissions: session.operationalPermissions,
+      }),
+    "tenant-session",
+  )
 
   return (
     <CourierWorkspace

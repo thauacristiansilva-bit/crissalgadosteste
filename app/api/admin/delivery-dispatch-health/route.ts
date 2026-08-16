@@ -35,7 +35,7 @@ export async function GET() {
 
     return NextResponse.json({
       ok: health.schemaReady,
-      phase: "25.3-delivery-dispatch-identity",
+      phase: "25.7.2-courier-rls-session-scope",
       organization: {
         id: session.organizationId,
         name: session.organizationName,
@@ -60,6 +60,8 @@ export async function GET() {
         courierRouteNavigation: true,
         realtimeCustomerTracking: true,
         postgresRlsPreserved: true,
+        courierLookupUsesExplicitTenantRlsScope: true,
+        courierPageUsesExplicitTenantRlsScope: true,
       },
       boundaries: {
         unlinkedCourierCanRemainOperationalWithoutAppLogin: true,
@@ -73,7 +75,7 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: false,
-        phase: "25.3-delivery-dispatch-identity",
+        phase: "25.7.2-courier-rls-session-scope",
         error: error instanceof Error
           ? error.message
           : "Falha ao validar expedição.",
