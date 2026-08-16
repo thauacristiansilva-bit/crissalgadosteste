@@ -15,7 +15,24 @@ export type RlsContext = {
   source: RlsContextSource
 }
 
-const storage = new AsyncLocalStorage<RlsContext>()
+type GlobalWithRlsStorage = typeof globalThis & {
+  __saborflowRlsContextStorage?: AsyncLocalStorage<RlsContext>
+}
+
+function getRlsStorage() {
+  const globalForRls = globalThis as GlobalWithRlsStorage
+
+  if (!globalForRls.__saborflowRlsContextStorage) {
+    globalForRls.__saborflowRlsContextStorage = new AsyncLocalStorage<RlsContext>()
+  }
+
+  return globalForRls.__saborflowRlsContextStorage
+}
+
+// Next/Turbopack pode materializar o mesmo módulo em chunks server diferentes.
+// O singleton em globalThis garante que auth.ts, páginas SSR e postgres.ts
+// compartilhem a MESMA AsyncLocalStorage dentro do processo Node.
+const storage = getRlsStorage()
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
