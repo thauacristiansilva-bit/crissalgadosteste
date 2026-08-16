@@ -11,6 +11,7 @@ import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
+import { getPublicDeliveryTracking } from "@/lib/delivery-tracking-db"
 
 export const dynamic = "force-dynamic"
 
@@ -78,8 +79,15 @@ export async function GET(
         )
       }
 
+      const tracking = await getPublicDeliveryTracking({
+        organizationId: organization.id,
+        order,
+        enabled: settings.deliveryTrackingEnabled !== false,
+      })
+
       return NextResponse.json({
         order,
+        tracking,
         store: {
           storeName: settings.storeName,
           whatsapp: settings.whatsapp,

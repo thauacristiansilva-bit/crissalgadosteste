@@ -58,6 +58,8 @@ export async function GET() {
       dedicatedKitchenWorkspace: true,
       dedicatedCourierWorkspace: true,
       courierAssignmentIdentity: true,
+      courierRouteNavigation: true,
+      realtimeCustomerTracking: true,
       backendRbacPreserved: true,
       postgresRlsPreserved: true,
     },
@@ -66,8 +68,8 @@ export async function GET() {
       kitchenControlsPreparationOnly: true,
       courierControlsDeliveryStatusOnly: true,
       courierAssignmentIdentityActive: true,
-      routeOptimizationReservedForPhase25_4: true,
-      realtimeCustomerTrackingReservedForPhase25_5: true,
+      courierRouteNavigationActive: true,
+      realtimeCustomerTrackingActive: true,
     },
   })
 }

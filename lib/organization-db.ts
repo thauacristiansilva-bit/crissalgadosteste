@@ -233,6 +233,7 @@ export async function getTenantSettings(
     ...settings,
     systemName: "SaborFlow",
     timeZone: row.timezone || "America/Sao_Paulo",
+    deliveryTrackingEnabled: settings.deliveryTrackingEnabled !== false,
   }
 }
 
@@ -245,6 +246,10 @@ function normalizedSettings(
     ...patch,
     systemName: "SaborFlow",
     deliveryFee: 0,
+    deliveryTrackingEnabled:
+      patch.deliveryTrackingEnabled !== undefined
+        ? Boolean(patch.deliveryTrackingEnabled)
+        : current.deliveryTrackingEnabled !== false,
     minimumOrder:
       patch.minimumOrder !== undefined
         ? Math.max(0, Number(patch.minimumOrder))

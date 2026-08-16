@@ -341,6 +341,8 @@ export interface StoreSettings {
   acceptingOrders: boolean
   pickupEnabled: boolean
   deliveryEnabled: boolean
+  /** Compartilha GPS somente enquanto o pedido do cliente é a entrega ativa. */
+  deliveryTrackingEnabled?: boolean
   dineInEnabled: boolean
   deliveryFee: number
   deliveryPricingMode: DeliveryPricingMode

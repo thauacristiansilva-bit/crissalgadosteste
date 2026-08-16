@@ -1,13 +1,44 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { CheckCircle2, ChefHat, Clock3, ExternalLink, Home, MapPin, MessageCircle, PackageCheck, Star, Truck } from "lucide-react"
+import { CheckCircle2, ChefHat, Clock3, ExternalLink, Home, MapPin, MessageCircle, Navigation, PackageCheck, ShieldCheck, Star, Truck } from "lucide-react"
 import type { Order, StoreSettings } from "@/lib/types"
 
 const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 const date = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value))
 const statusLabel: Record<Order["status"], string> = { pending: "Pedido recebido", accepted: "Pedido aceito", preparing: "Em preparação", ready: "Pedido pronto", "in-route": "Saiu para entrega", completed: "Concluído", cancelled: "Cancelado" }
 const reactions = ["😞", "🙁", "😐", "🙂", "😍"]
+
+type DeliveryTracking = {
+  enabled: boolean
+  state:
+    | "disabled"
+    | "preparing"
+    | "waiting-courier"
+    | "waiting-departure"
+    | "other-delivery"
+    | "active"
+    | "active-location-pending"
+    | "completed"
+    | "cancelled"
+  message: string
+  courierName?: string
+  location?: {
+    latitude: number
+    longitude: number
+    accuracyMeters: number | null
+    updatedAt: string
+  }
+}
+
+function liveMapUrl(latitude: number, longitude: number) {
+  const delta = 0.007
+  const left = longitude - delta
+  const right = longitude + delta
+  const bottom = latitude - delta
+  const top = latitude + delta
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(`${left},${bottom},${right},${top}`)}&layer=mapnik&marker=${encodeURIComponent(`${latitude},${longitude}`)}`
+}
 
 export function OrderTracker({ initialOrder, settings, storePath = "/" }: { initialOrder: Order; settings: StoreSettings; storePath?: string }) {
   const [order, setOrder] = useState(initialOrder)
@@ -16,11 +47,36 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
   const [feedbackSent, setFeedbackSent] = useState(false)
   const [feedbackError, setFeedbackError] = useState("")
   const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [tracking, setTracking] = useState<DeliveryTracking | null>(null)
 
   useEffect(() => {
-    if (["completed", "cancelled"].includes(order.status)) return
-    const id = window.setInterval(async () => { const response = await fetch(`/api/order-status/${encodeURIComponent(order.reference)}`, { cache: "no-store" }); if (!response.ok) return; const data = await response.json(); setOrder(data.order) }, 12000)
-    return () => window.clearInterval(id)
+    let disposed = false
+
+    const refresh = async () => {
+      const response = await fetch(
+        `/api/order-status/${encodeURIComponent(order.reference)}`,
+        { cache: "no-store" },
+      ).catch(() => null)
+
+      if (!response?.ok || disposed) return
+      const data = (await response.json()) as {
+        order?: Order
+        tracking?: DeliveryTracking
+      }
+      if (data.order) setOrder(data.order)
+      if (data.tracking) setTracking(data.tracking)
+    }
+
+    void refresh()
+    if (["completed", "cancelled"].includes(order.status)) {
+      return () => { disposed = true }
+    }
+
+    const id = window.setInterval(refresh, 5000)
+    return () => {
+      disposed = true
+      window.clearInterval(id)
+    }
   }, [order.reference, order.status])
 
   const steps = useMemo(() => { const base = [{ key: "accepted", label: "Aceito", icon: Clock3 }, { key: "preparing", label: "Preparando", icon: ChefHat }, { key: "ready", label: "Pronto", icon: PackageCheck }]; if (order.type === "delivery") base.push({ key: "in-route", label: "Em rota", icon: Truck }); base.push({ key: "completed", label: order.type === "delivery" ? "Entregue" : "Retirado", icon: CheckCircle2 }); return base }, [order.type])
@@ -43,6 +99,53 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
           </div>
           <div className="p-5 sm:p-8">
             {order.status === "cancelled" ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800"><strong>Pedido cancelado.</strong><p className="mt-1 text-sm">Fale com a loja caso precise de ajuda.</p></div> : <><div className="mb-3 flex items-center justify-between"><h2 className="font-black">Acompanhe seu pedido</h2><span className="text-xs text-gray-400">Atualiza automaticamente</span></div><div className={`grid gap-2 ${order.type === "delivery" ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>{steps.map((step, index) => { const Icon = step.icon; const done = activeIndex >= index || order.status === "completed"; const active = activeIndex === index; return <div key={step.key} className={`rounded-2xl border p-3 ${done ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"}`}><div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full ${active ? "text-white" : done ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-500"}`} style={active ? { backgroundColor: settings.primaryColor } : undefined}><Icon className="h-4 w-4" /></div><p className={`text-xs font-black ${done ? "text-gray-900" : "text-gray-400"}`}>{step.label}</p></div> })}</div><p className="mt-3 text-xs text-gray-500">Horário escolhido: <strong>{date(order.requestedFor)}</strong>{order.scheduled ? " · agendado" : ""}.</p></>}
+
+            {order.type === "delivery" && tracking?.enabled && (
+              <section className={`mt-6 overflow-hidden rounded-2xl border ${tracking.state === "active" ? "border-emerald-200 bg-emerald-50/50" : tracking.state === "other-delivery" ? "border-amber-200 bg-amber-50" : "border-blue-100 bg-blue-50/50"}`}>
+                <div className="flex items-start gap-3 p-4">
+                  <div className={`mt-0.5 rounded-xl p-2 ${tracking.state === "active" ? "bg-emerald-100 text-emerald-700" : tracking.state === "other-delivery" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
+                    {tracking.state === "active" ? <Truck className="h-5 w-5" /> : tracking.state === "other-delivery" ? <ShieldCheck className="h-5 w-5" /> : <Navigation className="h-5 w-5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black">
+                      {tracking.state === "active"
+                        ? "Entregador a caminho"
+                        : tracking.state === "other-delivery"
+                          ? "Entregador em outra entrega"
+                          : tracking.state === "waiting-departure"
+                            ? "Entregador definido"
+                            : tracking.state === "waiting-courier"
+                              ? "Aguardando entregador"
+                              : tracking.state === "active-location-pending"
+                                ? "Entrega em rota"
+                                : "Preparando sua entrega"}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-600">{tracking.message}</p>
+                    {tracking.courierName && <p className="mt-1 text-xs font-bold text-gray-500">Entregador: {tracking.courierName}</p>}
+                    {tracking.state === "other-delivery" && (
+                      <p className="mt-2 text-xs font-semibold text-amber-800">Por privacidade, o mapa e a posição do entregador ficam ocultos até o seu pedido ser a entrega ativa.</p>
+                    )}
+                  </div>
+                </div>
+
+                {tracking.state === "active" && tracking.location && (
+                  <div className="border-t border-emerald-200 bg-white">
+                    <iframe
+                      title="Localização atual do entregador"
+                      src={liveMapUrl(tracking.location.latitude, tracking.location.longitude)}
+                      className="h-64 w-full border-0"
+                      loading="lazy"
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-gray-500">
+                      <span>Atualizado {new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium" }).format(new Date(tracking.location.updatedAt))}</span>
+                      {tracking.location.accuracyMeters !== null && (
+                        <span>Precisão aproximada: {Math.round(tracking.location.accuracyMeters)} m</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               <section className="rounded-2xl border border-gray-200 p-4"><h2 className="font-black">Itens</h2><div className="mt-3 space-y-2">{order.items.map((item, index) => <div key={`${item.productId}-${index}`} className="flex items-start justify-between gap-3 text-sm"><div><span><strong>{item.quantity}x</strong> {item.name}</span>{item.modifiers?.length ? <div className="mt-1 space-y-0.5 pl-4">{item.modifiers.map((modifier) => <p key={`${modifier.groupId}-${modifier.optionId}`} className="text-xs text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${money(modifier.priceDelta)}` : ""}</p>)}</div> : null}</div><strong>{money(item.subtotal)}</strong></div>)}</div><div className="mt-3 border-t border-gray-100 pt-3"><div className="flex justify-between text-xs text-gray-500"><span>Subtotal</span><span>{money(order.subtotal)}</span></div>{order.discount > 0 && <div className="mt-1 flex justify-between text-xs font-bold text-emerald-700"><span>Desconto {order.couponCode ? `(${order.couponCode})` : ""}</span><span>-{money(order.discount)}</span></div>}{order.deliveryFee > 0 && <div className="mt-1 flex justify-between text-xs text-gray-500"><span>Entrega</span><span>{money(order.deliveryFee)}</span></div>}<div className="mt-2 flex justify-between"><strong>Total</strong><strong className="text-lg">{money(order.total)}</strong></div></div></section>

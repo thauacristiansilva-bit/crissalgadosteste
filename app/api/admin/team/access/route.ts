@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { resolvePublicAppOrigin } from "@/lib/public-origin"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   getVerifiedTenantSession,
@@ -74,14 +75,13 @@ export async function POST(
       }
     | null
 
-  const origin =
-    new URL(request.url).origin
-
   return runWithTenantRlsScope(
     [session.organizationId],
     session.userId,
     async () => {
       try {
+        const origin = resolvePublicAppOrigin(request)
+
         if (
           body?.action ===
           "password-reset"

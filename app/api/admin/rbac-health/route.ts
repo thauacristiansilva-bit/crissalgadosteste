@@ -77,6 +77,8 @@ export async function GET() {
       backendAuthorization: true,
       adminNavigationFiltered: true,
       dedicatedOperationalWorkspaces: true,
+      deliveryRouteNavigation: true,
+      deliveryRealtimeTracking: true,
       postgresTenantIsolationPreserved: true,
     },
     boundaries: {
@@ -86,7 +88,7 @@ export async function GET() {
       billingRemainsGovernanceControlled: true,
       customPermissionsNeverBypassRls: true,
       dedicatedRolePagesActive: true,
-      deliveryTrackingReservedForLaterDeliveryPhase: true,
+      deliveryTrackingActiveWithOrderPrivacy: true,
     },
   })
 }

@@ -57,14 +57,16 @@ export async function GET() {
         courierReceivesAssignedOrdersOnly: true,
         backendAssignmentOwnershipCheck: true,
         dedicatedCourierWorkspace: true,
+        courierRouteNavigation: true,
+        realtimeCustomerTracking: true,
         postgresRlsPreserved: true,
       },
       boundaries: {
         unlinkedCourierCanRemainOperationalWithoutAppLogin: true,
         courierAppRequiresLinkedStaffLogin: true,
         courierCannotOperateAnotherCourierOrder: true,
-        routeOptimizationReservedForPhase25_4: true,
-        realtimeCustomerTrackingReservedForPhase25_5: true,
+        courierRouteNavigationActive: true,
+        realtimeCustomerTrackingActive: true,
       },
     }, { status: health.schemaReady ? 200 : 503 })
   } catch (error) {
