@@ -344,9 +344,9 @@ export function CourierWorkspace({
           <div className="flex items-start gap-3">
             <Link2Off className="mt-0.5 h-5 w-5 shrink-0" />
             <div>
-              <h2 className="font-black">Login ainda não vinculado ao perfil de entregador</h2>
+              <h2 className="font-black">Conta ativa, mas perfil de entregador não está operacional</h2>
               <p className="mt-1 text-sm leading-relaxed">
-                O administrador precisa abrir Configurações → Entregadores e vincular este colaborador a um perfil operacional de entrega.
+                A senha e o login podem estar corretos. Para receber pedidos, este colaborador também precisa estar vinculado a um perfil de entregador ativo em Configurações → Entregadores.
               </p>
             </div>
           </div>

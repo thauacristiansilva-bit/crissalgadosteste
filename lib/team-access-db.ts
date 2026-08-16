@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import type { PoolClient } from "pg"
 import {
   hashAdminPassword,
 } from "@/lib/admin-user-db"
@@ -525,6 +526,137 @@ export async function getInvitationPreview(
   }
 }
 
+
+
+async function reconcileCourierProfileAfterInvitation(
+  client: PoolClient,
+  input: {
+    organizationId: string
+    staffMemberId: number
+    role: OrganizationRole
+    name: string
+    phone: string
+  },
+) {
+  if (input.role !== "courier") return
+
+  const schema = await client.query(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'sf_couriers'
+          AND column_name = 'staff_member_id'
+      ) AS ready
+    `,
+  )
+
+  if (!schema.rows[0]?.ready) return
+
+  const linked = await client.query(
+    `
+      SELECT id
+      FROM sf_couriers
+      WHERE organization_id = $1
+        AND staff_member_id = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [input.organizationId, input.staffMemberId],
+  )
+
+  if (linked.rows[0]) {
+    await client.query(
+      `
+        UPDATE sf_couriers
+        SET active = true, updated_at = now()
+        WHERE organization_id = $1
+          AND id = $2
+      `,
+      [input.organizationId, Number(linked.rows[0].id)],
+    )
+    return
+  }
+
+  const digits = input.phone.replace(/\D/g, "")
+  const candidates = await client.query(
+    `
+      SELECT id
+      FROM sf_couriers
+      WHERE organization_id = $1
+        AND staff_member_id IS NULL
+        AND (
+          ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') = $2)
+          OR lower(trim(name)) = lower(trim($3))
+        )
+      ORDER BY id ASC
+      FOR UPDATE
+    `,
+    [input.organizationId, digits, input.name],
+  )
+
+  if (candidates.rows.length === 1) {
+    await client.query(
+      `
+        UPDATE sf_couriers
+        SET
+          staff_member_id = $3,
+          active = true,
+          updated_at = now()
+        WHERE organization_id = $1
+          AND id = $2
+          AND staff_member_id IS NULL
+      `,
+      [
+        input.organizationId,
+        Number(candidates.rows[0].id),
+        input.staffMemberId,
+      ],
+    )
+    return
+  }
+
+  if (candidates.rows.length > 1 || !input.phone.trim()) return
+
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [`saborflow-courier-id:${input.organizationId}`],
+  )
+
+  const next = await client.query(
+    `
+      SELECT COALESCE(MAX(id), 0)::int + 1 AS next_id
+      FROM sf_couriers
+      WHERE organization_id = $1
+    `,
+    [input.organizationId],
+  )
+
+  await client.query(
+    `
+      INSERT INTO sf_couriers (
+        organization_id,
+        id,
+        name,
+        phone,
+        vehicle,
+        active,
+        staff_member_id,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, '', true, $5, now(), now())
+    `,
+    [
+      input.organizationId,
+      Number(next.rows[0]?.next_id || 1),
+      input.name.trim(),
+      input.phone.trim(),
+      input.staffMemberId,
+    ],
+  )
+}
 export async function acceptTeamInvitation(
   token: string,
   password?: string,
@@ -654,7 +786,7 @@ export async function acceptTeamInvitation(
               updated_at = now()
             WHERE organization_id = $1
               AND lower(email) = lower($2)
-            RETURNING id
+            RETURNING id, role, name, phone
           `,
           [
             preview.organizationId,
@@ -668,6 +800,18 @@ export async function acceptTeamInvitation(
           "O perfil do colaborador associado a este convite não foi encontrado.",
         )
       }
+
+      const acceptedStaff = staff.rows.find(
+        (row) => row.role === preview.role,
+      ) ?? staff.rows[0]
+
+      await reconcileCourierProfileAfterInvitation(client, {
+        organizationId: preview.organizationId,
+        staffMemberId: Number(acceptedStaff.id),
+        role: preview.role,
+        name: String(acceptedStaff.name || preview.name),
+        phone: String(acceptedStaff.phone || ""),
+      })
 
       await client.query("COMMIT")
     } catch (error) {
