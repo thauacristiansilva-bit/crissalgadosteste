@@ -20,6 +20,7 @@ import {
 import type { OrderStatus, PaymentStatus } from "@/lib/types"
 import { getTenantCourier, isTenantOperationsReady } from "@/lib/operations-db"
 import { canAssignCourier, canUpdateOrderStatus, canUpdatePaymentStatus } from "@/lib/admin-access"
+import { getCourierIdentityForOrderOperation } from "@/lib/delivery-dispatch-db"
 
 const validStatuses: OrderStatus[] = [
   "pending",
@@ -58,6 +59,18 @@ export async function PATCH(
   if (!Number.isInteger(numericId) || !body) {
     return NextResponse.json(
       { error: "Requisição inválida." },
+      { status: 400 },
+    )
+  }
+
+  const hasSupportedMutation =
+    body.status !== undefined ||
+    body.paymentStatus !== undefined ||
+    body.courierId !== undefined
+
+  if (!hasSupportedMutation) {
+    return NextResponse.json(
+      { error: "Nenhuma alteração suportada foi informada." },
       { status: 400 },
     )
   }
@@ -180,16 +193,27 @@ export async function PATCH(
     }
 
     if (session.role === "courier" && body.status) {
-      if (currentOrder?.type !== "delivery") {
+      try {
+        await getCourierIdentityForOrderOperation({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          role: session.role,
+          order: currentOrder!,
+        })
+      } catch (error) {
         return NextResponse.json(
-          { error: "O entregador só pode operar pedidos de entrega." },
+          {
+            error: error instanceof Error
+              ? error.message
+              : "Este pedido não está atribuído ao seu perfil de entregador.",
+          },
           { status: 403 },
         )
       }
 
       const validTransition =
-        (currentOrder.status === "ready" && body.status === "in-route") ||
-        (currentOrder.status === "in-route" && body.status === "completed")
+        (currentOrder!.status === "ready" && body.status === "in-route") ||
+        (currentOrder!.status === "in-route" && body.status === "completed")
 
       if (!validTransition) {
         return NextResponse.json(

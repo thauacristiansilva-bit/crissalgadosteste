@@ -258,7 +258,7 @@ export function OrdersPanel({
                         className="h-10 w-full rounded-xl border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none"
                       >
                         <option value="">Não atribuído</option>
-                        {couriers.filter((courier) => courier.active).map((courier) => <option key={courier.id} value={courier.id}>{courier.name}</option>)}
+                        {couriers.filter((courier) => courier.active).map((courier) => <option key={courier.id} value={courier.id}>{courier.name}{courier.linkedUserId ? " · app ativo" : courier.staffMemberId ? " · aguardando login" : " · sem login vinculado"}</option>)}
                       </select>
                     </label>
                   )}

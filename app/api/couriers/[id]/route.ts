@@ -1,33 +1,42 @@
 import { NextResponse } from "next/server"
-import { isAdminAuthenticated } from "@/lib/auth"
-import {
-  deleteCourier as deleteLegacyCourier,
-  syncLegacyCourierFromTenant,
-  updateCourier as updateLegacyCourier,
-} from "@/lib/db"
 import {
   deactivateTenantCourier,
   isTenantOperationsReady,
   updateTenantCourier,
 } from "@/lib/operations-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
-  getVerifiedTenantSession,
-} from "@/lib/tenant-access"
-import {
-  canManageDeliveryOperation,
-} from "@/lib/tenant-permissions"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { canManageDeliveryOperation } from "@/lib/tenant-permissions"
+
+export const dynamic = "force-dynamic"
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
+    )
+  }
+
+  if (!canManageDeliveryOperation(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode alterar entregadores." },
+      { status: 403 },
+    )
+  }
+
+  const ready = await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false)
+
+  if (!ready) {
+    return NextResponse.json(
+      { error: "Operação PostgreSQL da empresa não está pronta." },
+      { status: 503 },
     )
   }
 
@@ -57,40 +66,17 @@ export async function PATCH(
     ...(body.active !== undefined
       ? { active: Boolean(body.active) }
       : {}),
+    ...(body.staffMemberId !== undefined
+      ? {
+          staffMemberId:
+            body.staffMemberId === null || body.staffMemberId === ""
+              ? null
+              : Number(body.staffMemberId),
+        }
+      : {}),
   }
 
   try {
-    const session = await getVerifiedTenantSession()
-    const ready =
-      session &&
-      (await isTenantOperationsReady(
-        session.organizationId,
-      ).catch(() => false))
-
-    if (!session || !ready) {
-      const courier = await updateLegacyCourier(
-        numericId,
-        patch,
-      )
-
-      return courier
-        ? NextResponse.json({ courier })
-        : NextResponse.json(
-            { error: "Entregador não encontrado." },
-            { status: 404 },
-          )
-    }
-
-    if (!canManageDeliveryOperation(session.role)) {
-      return NextResponse.json(
-        {
-          error:
-            "Seu perfil não pode alterar entregadores.",
-        },
-        { status: 403 },
-      )
-    }
-
     const courier = await updateTenantCourier(
       session.organizationId,
       numericId,
@@ -102,14 +88,6 @@ export async function PATCH(
         { error: "Entregador não encontrado." },
         { status: 404 },
       )
-    }
-
-    if (
-      await isCurrentDeploymentOrganization(
-        session.organizationId,
-      )
-    ) {
-      await syncLegacyCourierFromTenant(courier)
     }
 
     return NextResponse.json({ courier })
@@ -130,43 +108,40 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
     )
   }
 
-  const { id } = await context.params
-  const numericId = Number(id)
-  const session = await getVerifiedTenantSession()
-
-  const ready =
-    session &&
-    (await isTenantOperationsReady(
-      session.organizationId,
-    ).catch(() => false))
-
-  if (!session || !ready) {
-    const courier = await deleteLegacyCourier(
-      numericId,
-    )
-
-    return courier
-      ? NextResponse.json({ ok: true })
-      : NextResponse.json(
-          { error: "Entregador não encontrado." },
-          { status: 404 },
-        )
-  }
-
   if (!canManageDeliveryOperation(session.role)) {
     return NextResponse.json(
-      {
-        error:
-          "Seu perfil não pode desativar entregadores.",
-      },
+      { error: "Seu perfil não pode desativar entregadores." },
       { status: 403 },
+    )
+  }
+
+  const ready = await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false)
+
+  if (!ready) {
+    return NextResponse.json(
+      { error: "Operação PostgreSQL da empresa não está pronta." },
+      { status: 503 },
+    )
+  }
+
+  const { id } = await context.params
+  const numericId = Number(id)
+
+  if (!Number.isInteger(numericId)) {
+    return NextResponse.json(
+      { error: "Entregador inválido." },
+      { status: 400 },
     )
   }
 
@@ -180,14 +155,6 @@ export async function DELETE(
       { error: "Entregador não encontrado." },
       { status: 404 },
     )
-  }
-
-  if (
-    await isCurrentDeploymentOrganization(
-      session.organizationId,
-    )
-  ) {
-    await syncLegacyCourierFromTenant(courier)
   }
 
   return NextResponse.json({ ok: true })

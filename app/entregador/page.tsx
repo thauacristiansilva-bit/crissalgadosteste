@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation"
 import { CourierWorkspace } from "@/components/operational/courier-workspace"
-import { canAccessOperationalWorkspace, getDefaultOperationalPath } from "@/lib/operational-home"
+import { getCourierWorkspaceSnapshot } from "@/lib/delivery-dispatch-db"
+import {
+  canAccessOperationalWorkspace,
+  getDefaultOperationalPath,
+} from "@/lib/operational-home"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
-import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
 
 export const dynamic = "force-dynamic"
 
@@ -10,16 +13,34 @@ export default async function CourierPage() {
   const session = await getVerifiedTenantSession()
   if (!session) redirect("/login")
 
-  if (!canAccessOperationalWorkspace("courier", session.role, session.operationalPermissions)) {
-    redirect(getDefaultOperationalPath(session.role, session.operationalPermissions))
+  if (
+    !canAccessOperationalWorkspace(
+      "courier",
+      session.role,
+      session.operationalPermissions,
+    )
+  ) {
+    redirect(
+      getDefaultOperationalPath(
+        session.role,
+        session.operationalPermissions,
+      ),
+    )
   }
 
-  const data = await getTenantAwareAdminData(session, session.operationalPermissions)
+  const dispatch = await getCourierWorkspaceSnapshot({
+    organizationId: session.organizationId,
+    userId: session.userId,
+    role: session.role,
+    permissions: session.operationalPermissions,
+  })
 
   return (
     <CourierWorkspace
       organizationName={session.organizationName}
-      initialOrders={data.orders}
+      initialOrders={dispatch.orders}
+      selfMode={dispatch.selfMode}
+      courier={dispatch.courier}
     />
   )
 }

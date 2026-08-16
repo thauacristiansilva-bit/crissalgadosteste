@@ -3,7 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react"
 import { Clock3, CreditCard, Globe2, Image as ImageIcon, Link2, MonitorSmartphone, Palette, Printer, Save, ShieldCheck, Star, Store, Upload } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
-import type { BusinessHour, Courier, DeliveryZone, StoreSettings } from "@/lib/types"
+import type { BusinessHour, Courier, DeliveryZone, StaffMember, StoreSettings } from "@/lib/types"
 import { DeliverySettings } from "@/components/admin/delivery-settings"
 import { StoreLocationEditor } from "@/components/admin/store-location-editor"
 import { HelpTip } from "@/components/admin/help-tip"
@@ -13,7 +13,7 @@ function formatCep(value: string) {
   return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits
 }
 
-export function SettingsPanel({ settings, deliveryZones, couriers, onSettingsChanged, onDeliveryZonesChanged, onCouriersChanged }: { settings: StoreSettings; deliveryZones: DeliveryZone[]; couriers: Courier[]; onSettingsChanged: (settings: StoreSettings) => void; onDeliveryZonesChanged: (zones: DeliveryZone[]) => void; onCouriersChanged: (couriers: Courier[]) => void }) {
+export function SettingsPanel({ settings, deliveryZones, couriers, staffMembers, onSettingsChanged, onDeliveryZonesChanged, onCouriersChanged }: { settings: StoreSettings; deliveryZones: DeliveryZone[]; couriers: Courier[]; staffMembers: StaffMember[]; onSettingsChanged: (settings: StoreSettings) => void; onDeliveryZonesChanged: (zones: DeliveryZone[]) => void; onCouriersChanged: (couriers: Courier[]) => void }) {
   const [draft, setDraft] = useState(settings)
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState<"logo" | "cover" | null>(null)
@@ -100,6 +100,6 @@ export function SettingsPanel({ settings, deliveryZones, couriers, onSettingsCha
       {message && <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">{message}</div>}
       <button disabled={busy || uploading !== null} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-700 px-6 text-sm font-black text-white shadow-sm hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4"/>{busy ? "Salvando..." : "Salvar configurações"}</button>
     </form>
-    <DeliverySettings settings={draft} deliveryZones={deliveryZones} couriers={couriers} onSettingsChanged={(next) => { setDraft(next); onSettingsChanged(next) }} onDeliveryZonesChanged={onDeliveryZonesChanged} onCouriersChanged={onCouriersChanged}/>
+    <DeliverySettings settings={draft} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={(next) => { setDraft(next); onSettingsChanged(next) }} onDeliveryZonesChanged={onDeliveryZonesChanged} onCouriersChanged={onCouriersChanged}/>
   </div>
 }

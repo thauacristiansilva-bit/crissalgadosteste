@@ -84,6 +84,9 @@ type CourierRow = {
   phone: string
   vehicle: string
   active: boolean
+  staff_member_id: number | null
+  linked_user_id?: string | null
+  staff_email?: string | null
   created_at: Date | string
   updated_at: Date | string
 }
@@ -196,6 +199,11 @@ function mapCourier(row: CourierRow): Courier {
     phone: row.phone,
     vehicle: row.vehicle || "",
     active: Boolean(row.active),
+    ...(row.staff_member_id !== null
+      ? { staffMemberId: Number(row.staff_member_id) }
+      : {}),
+    ...(row.linked_user_id ? { linkedUserId: row.linked_user_id } : {}),
+    ...(row.staff_email ? { staffEmail: row.staff_email } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   }
@@ -1271,17 +1279,27 @@ export async function getTenantCouriers(
   const result = await getPostgresPool().query<CourierRow>(
     `
       SELECT
-        id,
-        name,
-        phone,
-        vehicle,
-        active,
-        created_at,
-        updated_at
-      FROM sf_couriers
-      WHERE organization_id = $1
-        ${options?.includeInactive ? "" : "AND active = true"}
-      ORDER BY name ASC, id ASC
+        c.id,
+        c.name,
+        c.phone,
+        c.vehicle,
+        c.active,
+        c.staff_member_id,
+        m.user_id AS linked_user_id,
+        NULLIF(s.email, '') AS staff_email,
+        c.created_at,
+        c.updated_at
+      FROM sf_couriers c
+      LEFT JOIN sf_staff_members s
+        ON s.organization_id = c.organization_id
+       AND s.id = c.staff_member_id
+      LEFT JOIN sf_memberships m
+        ON m.organization_id = c.organization_id
+       AND m.user_id = s.user_id
+       AND m.status = 'active'
+      WHERE c.organization_id = $1
+        ${options?.includeInactive ? "" : "AND c.active = true"}
+      ORDER BY c.name ASC, c.id ASC
     `,
     [organizationId],
   )
@@ -1296,16 +1314,26 @@ export async function getTenantCourier(
   const result = await getPostgresPool().query<CourierRow>(
     `
       SELECT
-        id,
-        name,
-        phone,
-        vehicle,
-        active,
-        created_at,
-        updated_at
-      FROM sf_couriers
-      WHERE organization_id = $1
-        AND id = $2
+        c.id,
+        c.name,
+        c.phone,
+        c.vehicle,
+        c.active,
+        c.staff_member_id,
+        m.user_id AS linked_user_id,
+        NULLIF(s.email, '') AS staff_email,
+        c.created_at,
+        c.updated_at
+      FROM sf_couriers c
+      LEFT JOIN sf_staff_members s
+        ON s.organization_id = c.organization_id
+       AND s.id = c.staff_member_id
+      LEFT JOIN sf_memberships m
+        ON m.organization_id = c.organization_id
+       AND m.user_id = s.user_id
+       AND m.status = 'active'
+      WHERE c.organization_id = $1
+        AND c.id = $2
       LIMIT 1
     `,
     [organizationId, id],
@@ -1316,19 +1344,90 @@ export async function getTenantCourier(
     : null
 }
 
+export async function getTenantCourierForUser(
+  organizationId: string,
+  userId: string,
+) {
+  const result = await getPostgresPool().query<CourierRow>(
+    `
+      SELECT
+        c.id,
+        c.name,
+        c.phone,
+        c.vehicle,
+        c.active,
+        c.staff_member_id,
+        s.user_id AS linked_user_id,
+        NULLIF(s.email, '') AS staff_email,
+        c.created_at,
+        c.updated_at
+      FROM sf_couriers c
+      INNER JOIN sf_staff_members s
+        ON s.organization_id = c.organization_id
+       AND s.id = c.staff_member_id
+      WHERE c.organization_id = $1
+        AND s.user_id = $2
+        AND s.active = true
+        AND s.role = 'courier'
+        AND c.active = true
+      LIMIT 1
+    `,
+    [organizationId, userId],
+  )
+
+  return result.rows[0]
+    ? mapCourier(result.rows[0])
+    : null
+}
+
+async function assertCourierStaffMember(
+  organizationId: string,
+  staffMemberId: number | null | undefined,
+) {
+  if (staffMemberId === null || staffMemberId === undefined) return
+
+  if (!Number.isInteger(staffMemberId) || staffMemberId <= 0) {
+    throw new Error("Colaborador de entrega inválido.")
+  }
+
+  const result = await getPostgresPool().query<{ id: number }>(
+    `
+      SELECT id
+      FROM sf_staff_members
+      WHERE organization_id = $1
+        AND id = $2
+        AND role = 'courier'
+        AND active = true
+      LIMIT 1
+    `,
+    [organizationId, staffMemberId],
+  )
+
+  if (!result.rows[0]) {
+    throw new Error(
+      "O perfil de entrega só pode ser vinculado a um colaborador ativo com função Entregador.",
+    )
+  }
+}
+
 export async function createTenantCourier(
   organizationId: string,
-  input: Pick<Courier, "name" | "phone" | "vehicle">,
+  input: Pick<Courier, "name" | "phone" | "vehicle"> & {
+    staffMemberId?: number | null
+  },
 ) {
   const name = input.name.trim()
   const phone = input.phone.trim()
   const vehicle = input.vehicle.trim()
+  const staffMemberId = input.staffMemberId ?? null
 
   if (!name || !phone) {
     throw new Error(
       "Nome e telefone do entregador são obrigatórios.",
     )
   }
+
+  await assertCourierStaffMember(organizationId, staffMemberId)
 
   const client = await getPostgresPool().connect()
 
@@ -1351,11 +1450,12 @@ export async function createTenantCourier(
           phone,
           vehicle,
           active,
+          staff_member_id,
           created_at,
           updated_at
         )
         VALUES (
-          $1, $2, $3, $4, $5, true, now(), now()
+          $1, $2, $3, $4, $5, true, $6, now(), now()
         )
         RETURNING
           id,
@@ -1363,6 +1463,7 @@ export async function createTenantCourier(
           phone,
           vehicle,
           active,
+          staff_member_id,
           created_at,
           updated_at
       `,
@@ -1372,13 +1473,15 @@ export async function createTenantCourier(
         name,
         phone,
         vehicle,
+        staffMemberId,
       ],
     )
 
     await client.query("COMMIT")
     await refreshState(organizationId)
 
-    return mapCourier(result.rows[0])
+    return (await getTenantCourier(organizationId, Number(result.rows[0].id)))
+      ?? mapCourier(result.rows[0])
   } catch (error) {
     await client.query("ROLLBACK")
     throw error
@@ -1392,7 +1495,9 @@ export async function updateTenantCourier(
   id: number,
   patch: Partial<
     Pick<Courier, "name" | "phone" | "vehicle" | "active">
-  >,
+  > & {
+    staffMemberId?: number | null
+  },
 ) {
   const current = await getTenantCourier(
     organizationId,
@@ -1424,6 +1529,13 @@ export async function updateTenantCourier(
     )
   }
 
+  const staffMemberId =
+    patch.staffMemberId !== undefined
+      ? patch.staffMemberId
+      : current.staffMemberId ?? null
+
+  await assertCourierStaffMember(organizationId, staffMemberId)
+
   const result = await getPostgresPool().query<CourierRow>(
     `
       UPDATE sf_couriers
@@ -1432,6 +1544,7 @@ export async function updateTenantCourier(
         phone = $4,
         vehicle = $5,
         active = $6,
+        staff_member_id = $7,
         updated_at = now()
       WHERE organization_id = $1
         AND id = $2
@@ -1441,6 +1554,7 @@ export async function updateTenantCourier(
         phone,
         vehicle,
         active,
+        staff_member_id,
         created_at,
         updated_at
     `,
@@ -1451,12 +1565,14 @@ export async function updateTenantCourier(
       next.phone,
       next.vehicle,
       next.active,
+      staffMemberId,
     ],
   )
 
-  return result.rows[0]
-    ? mapCourier(result.rows[0])
-    : null
+  if (!result.rows[0]) return null
+
+  return (await getTenantCourier(organizationId, id))
+    ?? mapCourier(result.rows[0])
 }
 
 export async function deactivateTenantCourier(

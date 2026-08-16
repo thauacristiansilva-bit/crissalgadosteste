@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Bike, Crosshair, MapPin, Plus, Power, Save, Trash2, UserPlus } from "lucide-react"
-import type { Courier, DeliveryDistanceBand, DeliveryPricingMode, DeliveryZone, GeoPoint, StoreSettings } from "@/lib/types"
+import type { Courier, DeliveryDistanceBand, DeliveryPricingMode, DeliveryZone, GeoPoint, StaffMember, StoreSettings } from "@/lib/types"
 import { googleMapsMapId, hasGoogleMapsKey, loadGoogleMaps } from "@/lib/google-maps-client"
 import { deliveryZoneAreaScore, deliveryZoneColor, nextDeliveryZoneColor, snapPointToDeliveryBoundaries, validateDeliveryPolygon } from "@/lib/delivery-zone-geometry"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
@@ -22,6 +22,7 @@ export function DeliverySettings({
   settings,
   deliveryZones,
   couriers,
+  staffMembers,
   onSettingsChanged,
   onDeliveryZonesChanged,
   onCouriersChanged,
@@ -29,6 +30,7 @@ export function DeliverySettings({
   settings: StoreSettings
   deliveryZones: DeliveryZone[]
   couriers: Courier[]
+  staffMembers: StaffMember[]
   onSettingsChanged: (settings: StoreSettings) => void
   onDeliveryZonesChanged: (zones: DeliveryZone[]) => void
   onCouriersChanged: (couriers: Courier[]) => void
@@ -62,9 +64,13 @@ export function DeliverySettings({
   const [editingZoneId, setEditingZoneId] = useState<number | null>(null)
   const [zoneBusy, setZoneBusy] = useState(false)
   const [zoneMessage, setZoneMessage] = useState("")
-  const [courierDraft, setCourierDraft] = useState({ name: "", phone: "", vehicle: "Moto" })
+  const [courierDraft, setCourierDraft] = useState({ name: "", phone: "", vehicle: "Moto", staffMemberId: "" })
   const [courierBusy, setCourierBusy] = useState(false)
   const [courierMessage, setCourierMessage] = useState("")
+  const courierStaffMembers = useMemo(
+    () => staffMembers.filter((member) => member.active && member.role === "courier"),
+    [staffMembers],
+  )
 
   editingZoneIdRef.current = editingZoneId
   const editingZone = deliveryZones.find((zone) => zone.id === editingZoneId) || null
@@ -276,9 +282,48 @@ export function DeliverySettings({
 
   async function saveCourier(event: FormEvent) {
     event.preventDefault(); setCourierBusy(true); setCourierMessage("")
-    try { const response = await fetch("/api/couriers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(courierDraft) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível cadastrar."); onCouriersChanged([...couriers, data.courier]); setCourierDraft({ name: "", phone: "", vehicle: "Moto" }); setCourierMessage("Entregador cadastrado.") } catch (error) { setCourierMessage(error instanceof Error ? error.message : "Erro ao cadastrar entregador.") } finally { setCourierBusy(false) }
+    try {
+      const response = await fetch("/api/couriers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...courierDraft,
+          staffMemberId: courierDraft.staffMemberId ? Number(courierDraft.staffMemberId) : null,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "Não foi possível cadastrar.")
+      onCouriersChanged([...couriers, data.courier])
+      setCourierDraft({ name: "", phone: "", vehicle: "Moto", staffMemberId: "" })
+      setCourierMessage("Entregador cadastrado.")
+    } catch (error) {
+      setCourierMessage(error instanceof Error ? error.message : "Erro ao cadastrar entregador.")
+    } finally {
+      setCourierBusy(false)
+    }
   }
-  async function toggleCourier(courier: Courier) { const response = await fetch(`/api/couriers/${courier.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: !courier.active }) }); const data = await response.json(); if (response.ok) onCouriersChanged(couriers.map((item) => item.id === courier.id ? data.courier : item)) }
+
+  async function toggleCourier(courier: Courier) {
+    const response = await fetch(`/api/couriers/${courier.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: !courier.active }) })
+    const data = await response.json()
+    if (response.ok) onCouriersChanged(couriers.map((item) => item.id === courier.id ? data.courier : item))
+  }
+
+  async function linkCourierStaff(courier: Courier, staffMemberId: string) {
+    setCourierMessage("")
+    const response = await fetch(`/api/couriers/${courier.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staffMemberId: staffMemberId ? Number(staffMemberId) : null }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      setCourierMessage(data.error || "Não foi possível vincular o login do entregador.")
+      return
+    }
+    onCouriersChanged(couriers.map((item) => item.id === courier.id ? data.courier : item))
+    setCourierMessage(staffMemberId ? "Perfil operacional vinculado ao colaborador." : "Vínculo do colaborador removido.")
+  }
 
   return <div className="space-y-5">
     <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -300,10 +345,10 @@ export function DeliverySettings({
     </section>}
 
     <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center gap-3"><div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700"><Bike className="h-5 w-5" /></div><div><h2 className="text-lg font-bold text-gray-900"><HelpLabel helpKey="delivery.couriers">Entregadores</HelpLabel></h2><p className="text-sm text-gray-500">Cadastre a equipe para atribuir pedidos de delivery.</p></div></div>
-      <form onSubmit={saveCourier} className="grid gap-3 rounded-2xl bg-gray-50 p-4 md:grid-cols-4"><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Nome</span><input required value={courierDraft.name} onChange={(e) => setCourierDraft({ ...courierDraft, name: e.target.value })} className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Telefone</span><input required value={courierDraft.phone} onChange={(e) => setCourierDraft({ ...courierDraft, phone: e.target.value })} className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Veículo</span><input value={courierDraft.vehicle} onChange={(e) => setCourierDraft({ ...courierDraft, vehicle: e.target.value })} placeholder="Moto" className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><button disabled={courierBusy} className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-50"><UserPlus className="h-4 w-4" />Cadastrar</button></form>
+      <div className="mb-4 flex items-center gap-3"><div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700"><Bike className="h-5 w-5" /></div><div><h2 className="text-lg font-bold text-gray-900"><HelpLabel helpKey="delivery.couriers">Entregadores</HelpLabel></h2><p className="text-sm text-gray-500">Cadastre o perfil operacional e vincule-o ao colaborador que fará login no app de entregas.</p></div></div>
+      <form onSubmit={saveCourier} className="grid gap-3 rounded-2xl bg-gray-50 p-4 md:grid-cols-5"><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Nome</span><input required value={courierDraft.name} onChange={(e) => setCourierDraft({ ...courierDraft, name: e.target.value })} className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Telefone</span><input required value={courierDraft.phone} onChange={(e) => setCourierDraft({ ...courierDraft, phone: e.target.value })} className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Veículo</span><input value={courierDraft.vehicle} onChange={(e) => setCourierDraft({ ...courierDraft, vehicle: e.target.value })} placeholder="Moto" className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><label><span className="mb-1 block text-xs font-bold uppercase text-gray-500">Colaborador / login</span><select value={courierDraft.staffMemberId} onChange={(e) => setCourierDraft({ ...courierDraft, staffMemberId: e.target.value })} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="">Vincular depois</option>{courierStaffMembers.map((member) => <option key={member.id} value={member.id}>{member.name}{member.email ? ` · ${member.email}` : ""}</option>)}</select></label><button disabled={courierBusy} className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-50"><UserPlus className="h-4 w-4" />Cadastrar</button></form>
       {courierMessage && <p className="mt-2 text-sm font-semibold text-emerald-700">{courierMessage}</p>}
-      <div className="mt-4 divide-y divide-gray-100 rounded-xl border border-gray-200">{couriers.map((courier) => <div key={courier.id} className="flex items-center gap-3 p-3"><div className={`flex h-10 w-10 items-center justify-center rounded-full font-black ${courier.active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}`}>{courier.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="font-bold text-gray-900">{courier.name}</p><p className="text-xs text-gray-500">{courier.phone}{courier.vehicle ? ` · ${courier.vehicle}` : ""}</p></div><span className={`rounded-full px-2 py-1 text-xs font-bold ${courier.active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{courier.active ? "Ativo" : "Inativo"}</span><button type="button" onClick={() => toggleCourier(courier)} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><Power className="h-4 w-4" /></button></div>)}{!couriers.length && <div className="p-6 text-center text-sm text-gray-500">Nenhum entregador cadastrado.</div>}</div>
+      <div className="mt-4 divide-y divide-gray-100 rounded-xl border border-gray-200">{couriers.map((courier) => <div key={courier.id} className="grid items-center gap-3 p-3 md:grid-cols-[auto_1fr_minmax(220px,320px)_auto_auto]"><div className={`flex h-10 w-10 items-center justify-center rounded-full font-black ${courier.active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}`}>{courier.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0"><p className="font-bold text-gray-900">{courier.name}</p><p className="text-xs text-gray-500">{courier.phone}{courier.vehicle ? ` · ${courier.vehicle}` : ""}</p>{courier.linkedUserId && <p className="mt-1 text-[11px] font-bold text-emerald-700">Login do app ativo{courier.staffEmail ? ` · ${courier.staffEmail}` : ""}</p>}</div><select value={courier.staffMemberId ? String(courier.staffMemberId) : ""} onChange={(event) => void linkCourierStaff(courier, event.target.value)} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="">Sem colaborador vinculado</option>{courierStaffMembers.map((member) => <option key={member.id} value={member.id}>{member.name}{member.email ? ` · ${member.email}` : ""}</option>)}</select><span className={`rounded-full px-2 py-1 text-center text-xs font-bold ${courier.active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{courier.active ? "Ativo" : "Inativo"}</span><button type="button" onClick={() => toggleCourier(courier)} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><Power className="h-4 w-4" /></button></div>)}{!couriers.length && <div className="p-6 text-center text-sm text-gray-500">Nenhum entregador cadastrado.</div>}</div>
     </section>
   </div>
 }

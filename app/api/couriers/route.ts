@@ -1,67 +1,75 @@
 import { NextResponse } from "next/server"
-import { isAdminAuthenticated } from "@/lib/auth"
-import {
-  createCourier as createLegacyCourier,
-  getCouriers as getLegacyCouriers,
-  syncLegacyCourierFromTenant,
-} from "@/lib/db"
 import {
   createTenantCourier,
   getTenantCouriers,
   isTenantOperationsReady,
 } from "@/lib/operations-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
-  getVerifiedTenantSession,
-} from "@/lib/tenant-access"
-import {
-  canManageDeliveryOperation,
-} from "@/lib/tenant-permissions"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { canManageDeliveryOperation } from "@/lib/tenant-permissions"
+
+export const dynamic = "force-dynamic"
 
 export async function GET() {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
     )
   }
 
-  const session = await getVerifiedTenantSession()
+  if (!canManageDeliveryOperation(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode acessar entregadores." },
+      { status: 403 },
+    )
+  }
 
-  if (
-    session &&
-    (await isTenantOperationsReady(
-      session.organizationId,
-    ).catch(() => false))
-  ) {
-    if (!canManageDeliveryOperation(session.role)) {
-      return NextResponse.json(
-        { error: "Seu perfil não pode acessar entregadores." },
-        { status: 403 },
-      )
-    }
-    return NextResponse.json({
-      couriers: await getTenantCouriers(
-        session.organizationId,
-        { includeInactive: true },
-      ),
-    })
+  const ready = await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false)
+
+  if (!ready) {
+    return NextResponse.json(
+      { error: "Operação PostgreSQL da empresa não está pronta." },
+      { status: 503 },
+    )
   }
 
   return NextResponse.json({
-    couriers: await getLegacyCouriers({
-      includeInactive: true,
-    }),
+    couriers: await getTenantCouriers(
+      session.organizationId,
+      { includeInactive: true },
+    ),
   })
 }
 
 export async function POST(request: Request) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
+    )
+  }
+
+  if (!canManageDeliveryOperation(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode alterar entregadores." },
+      { status: 403 },
+    )
+  }
+
+  const ready = await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false)
+
+  if (!ready) {
+    return NextResponse.json(
+      { error: "Operação PostgreSQL da empresa não está pronta." },
+      { status: 503 },
     )
   }
 
@@ -76,52 +84,24 @@ export async function POST(request: Request) {
     )
   }
 
-  const input = {
-    name: String(body.name || ""),
-    phone: String(body.phone || ""),
-    vehicle: String(body.vehicle || ""),
-  }
+  const rawStaffMemberId = body.staffMemberId
+  const staffMemberId =
+    rawStaffMemberId === null ||
+    rawStaffMemberId === undefined ||
+    rawStaffMemberId === ""
+      ? null
+      : Number(rawStaffMemberId)
 
   try {
-    const session = await getVerifiedTenantSession()
-    const ready =
-      session &&
-      (await isTenantOperationsReady(
-        session.organizationId,
-      ).catch(() => false))
-
-    if (!session || !ready) {
-      const courier =
-        await createLegacyCourier(input)
-
-      return NextResponse.json(
-        { courier },
-        { status: 201 },
-      )
-    }
-
-    if (!canManageDeliveryOperation(session.role)) {
-      return NextResponse.json(
-        {
-          error:
-            "Seu perfil não pode alterar entregadores.",
-        },
-        { status: 403 },
-      )
-    }
-
     const courier = await createTenantCourier(
       session.organizationId,
-      input,
+      {
+        name: String(body.name || ""),
+        phone: String(body.phone || ""),
+        vehicle: String(body.vehicle || ""),
+        staffMemberId,
+      },
     )
-
-    if (
-      await isCurrentDeploymentOrganization(
-        session.organizationId,
-      )
-    ) {
-      await syncLegacyCourierFromTenant(courier)
-    }
 
     return NextResponse.json(
       { courier },

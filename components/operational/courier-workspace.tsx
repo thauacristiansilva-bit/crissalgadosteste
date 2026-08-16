@@ -1,9 +1,18 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { CheckCircle2, MapPin, Navigation, PackageCheck, Phone, Truck } from "lucide-react"
+import {
+  CheckCircle2,
+  Link2Off,
+  MapPin,
+  Navigation,
+  PackageCheck,
+  Phone,
+  Truck,
+  UserRoundCheck,
+} from "lucide-react"
 import { OperationalShell } from "@/components/operational/operational-shell"
-import type { Order, OrderStatus } from "@/lib/types"
+import type { Courier, Order, OrderStatus } from "@/lib/types"
 
 function address(order: Order) {
   return [
@@ -17,9 +26,13 @@ function address(order: Order) {
 export function CourierWorkspace({
   organizationName,
   initialOrders,
+  selfMode,
+  courier,
 }: {
   organizationName: string
   initialOrders: Order[]
+  selfMode: boolean
+  courier: Courier | null
 }) {
   const [orders, setOrders] = useState(initialOrders)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -68,11 +81,37 @@ export function CourierWorkspace({
 
   return (
     <OperationalShell
-      title="Entregas"
-      subtitle="Tela móvel do entregador. Nesta fase ela recebe entregas prontas e registra saída/conclusão. GPS, roteirização e vínculo individual de entregador entram nas próximas fases de entrega."
+      title={selfMode ? "Minhas entregas" : "Expedição de entregas"}
+      subtitle={selfMode
+        ? "Você recebe somente pedidos atribuídos ao seu perfil. Inicie a entrega e finalize quando o pedido chegar ao cliente."
+        : "Visão operacional da expedição. Atribua entregadores pelo painel de pedidos e acompanhe o que está pronto ou em rota."}
       organizationName={organizationName}
-      roleLabel="Entregador"
+      roleLabel={selfMode ? "Entregador" : "Gestão de entrega"}
     >
+      {selfMode && !courier && (
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-950">
+          <div className="flex items-start gap-3">
+            <Link2Off className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <h2 className="font-black">Login ainda não vinculado ao perfil de entregador</h2>
+              <p className="mt-1 text-sm leading-relaxed">
+                O administrador precisa abrir Configurações → Entregadores e vincular este colaborador a um perfil operacional de entrega. Até lá nenhum pedido será exibido neste app.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selfMode && courier && (
+        <div className="mb-5 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+          <UserRoundCheck className="h-5 w-5" />
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Perfil vinculado</p>
+            <p className="font-black">{courier.name}{courier.vehicle ? ` · ${courier.vehicle}` : ""}</p>
+          </div>
+        </div>
+      )}
+
       <div className="mb-5 grid gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-bold text-slate-500"><PackageCheck className="h-4 w-4" />Prontas para sair</div>
@@ -92,6 +131,8 @@ export function CourierWorkspace({
           const mapsHref = destination
             ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destination)}`
             : null
+          const mayOperate = !selfMode || Boolean(courier && order.courierId === courier.id)
+
           return (
             <article key={order.id} className={`rounded-2xl border bg-white p-4 shadow-sm ${order.status === "in-route" ? "border-blue-300" : "border-slate-200"}`}>
               <div className="flex items-start justify-between gap-3">
@@ -103,6 +144,7 @@ export function CourierWorkspace({
                     </span>
                   </div>
                   {order.courierName && <p className="mt-1 text-xs font-bold text-slate-500">Atribuído: {order.courierName}</p>}
+                  {!order.courierId && !selfMode && <p className="mt-1 text-xs font-bold text-amber-700">Ainda sem entregador atribuído</p>}
                 </div>
                 <Navigation className="h-5 w-5 text-blue-700" />
               </div>
@@ -120,7 +162,7 @@ export function CourierWorkspace({
                     <MapPin className="h-4 w-4" />Abrir endereço
                   </a>
                 )}
-                {order.status === "ready" && (
+                {mayOperate && order.status === "ready" && order.courierId && (
                   <button
                     type="button"
                     disabled={busyId === order.id}
@@ -130,7 +172,7 @@ export function CourierWorkspace({
                     <Truck className="h-4 w-4" />Iniciar entrega
                   </button>
                 )}
-                {order.status === "in-route" && (
+                {mayOperate && order.status === "in-route" && (
                   <button
                     type="button"
                     disabled={busyId === order.id}
@@ -149,7 +191,11 @@ export function CourierWorkspace({
           <div className="lg:col-span-2 rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
             <Truck className="mx-auto h-10 w-10 text-slate-300" />
             <h2 className="mt-3 font-black">Nenhuma entrega disponível</h2>
-            <p className="mt-1 text-sm text-slate-500">Pedidos prontos para delivery aparecerão aqui automaticamente.</p>
+            <p className="mt-1 text-sm text-slate-500">
+              {selfMode
+                ? "Somente pedidos atribuídos ao seu perfil aparecerão aqui."
+                : "Pedidos prontos para delivery aparecerão aqui automaticamente."}
+            </p>
           </div>
         )}
       </div>

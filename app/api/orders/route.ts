@@ -22,6 +22,7 @@ import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
 import { canReadOrders } from "@/lib/admin-access"
+import { getCourierWorkspaceSnapshot } from "@/lib/delivery-dispatch-db"
 import { assertActiveSubscriptionForOrganization, assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
@@ -57,6 +58,16 @@ export async function GET() {
       ).catch(() => false)
 
     if (ready) {
+      if (session.role === "courier") {
+        const dispatch = await getCourierWorkspaceSnapshot({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          role: session.role,
+          permissions: session.operationalPermissions,
+        })
+        return NextResponse.json({ orders: dispatch.orders })
+      }
+
       return NextResponse.json({
         orders:
           await getTenantOrders(

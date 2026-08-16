@@ -172,6 +172,9 @@ export interface Courier {
   phone: string
   vehicle: string
   active: boolean
+  staffMemberId?: number
+  linkedUserId?: string
+  staffEmail?: string
   createdAt: string
   updatedAt: string
 }

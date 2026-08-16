@@ -6,6 +6,7 @@ import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getTenantSettings, isTenantRuntimeReady } from "@/lib/organization-db"
 import { isCurrentDeploymentOrganization } from "@/lib/catalog-db"
 import { canReadOrders } from "@/lib/admin-access"
+import { getCourierIdentityForOrderOperation } from "@/lib/delivery-dispatch-db"
 
 const money = (value: number) => `R$ ${Number(value).toFixed(2).replace(".", ",")}`
 const stamp = (value: string, timeZone: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(value))
@@ -85,6 +86,23 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       : await getLegacyOrderById(numericId)
 
   if (!order) return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 })
+
+  if (session?.role === "courier") {
+    try {
+      await getCourierIdentityForOrderOperation({
+        organizationId: session.organizationId,
+        userId: session.userId,
+        role: session.role,
+        order,
+      })
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Pedido não atribuído ao entregador." },
+        { status: 403 },
+      )
+    }
+  }
+
   const runtimeReady =
     session &&
     (await isTenantRuntimeReady(
