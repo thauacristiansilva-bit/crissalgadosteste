@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import type {
   BillingSnapshot,
   PlanEntitlementKey,
@@ -205,34 +206,59 @@ async function usageForAccount(
   accountId: string,
   organizationId?: string,
 ) {
-  const [organizations, users, products] = await Promise.all([
-    client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM sf_organizations WHERE billing_account_id = $1 AND status <> 'cancelled'`,
-      [accountId],
-    ),
-    client.query<{ count: string }>(
-      `
-        SELECT COUNT(DISTINCT m.user_id)::text AS count
-        FROM sf_memberships m
-        INNER JOIN sf_organizations o ON o.id = m.organization_id
-        WHERE o.billing_account_id = $1
-          AND o.status <> 'cancelled'
-          AND m.status IN ('active', 'invited')
-      `,
-      [accountId],
-    ),
-    organizationId
-      ? client.query<{ count: string }>(
-          `SELECT COUNT(*)::text AS count FROM sf_products WHERE organization_id = $1`,
-          [organizationId],
-        )
-      : Promise.resolve({ rows: [{ count: "0" }] }),
-  ])
+  // sf_organizations é a âncora da conta de cobrança e não é uma tabela tenant
+  // com organization_id. Primeiro derivamos, no backend, o conjunto exato de
+  // organizações que pertencem à conta. Esse conjunto vira o escopo RLS
+  // explícito usado apenas para calcular consumo comercial da própria conta.
+  const organizations = await client.query<{ id: string }>(
+    `
+      SELECT id
+      FROM sf_organizations
+      WHERE billing_account_id = $1
+        AND status <> 'cancelled'
+      ORDER BY created_at ASC, id ASC
+    `,
+    [accountId],
+  )
+
+  const organizationIds = organizations.rows.map((row) => row.id)
+
+  const scopedUsage = await runWithTenantRlsScope(
+    organizationIds,
+    undefined,
+    async () => {
+      const pool = getPostgresPool()
+
+      const users = await pool.query<{ count: string }>(
+        `
+          SELECT COUNT(DISTINCT m.user_id)::text AS count
+          FROM sf_memberships m
+          INNER JOIN sf_organizations o ON o.id = m.organization_id
+          WHERE o.billing_account_id = $1
+            AND o.status <> 'cancelled'
+            AND m.status IN ('active', 'invited')
+        `,
+        [accountId],
+      )
+
+      const products = organizationId
+        ? await pool.query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count FROM sf_products WHERE organization_id = $1`,
+            [organizationId],
+          )
+        : { rows: [{ count: "0" }] }
+
+      return {
+        users: Number(users.rows[0]?.count || 0),
+        products: Number(products.rows[0]?.count || 0),
+      }
+    },
+  )
 
   return {
-    organizations: Number(organizations.rows[0]?.count || 0),
-    users: Number(users.rows[0]?.count || 0),
-    products: Number(products.rows[0]?.count || 0),
+    organizations: organizationIds.length,
+    users: scopedUsage.users,
+    products: scopedUsage.products,
   }
 }
 
