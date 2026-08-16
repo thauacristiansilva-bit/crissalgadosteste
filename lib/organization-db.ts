@@ -3,6 +3,7 @@ import { getPostgresPool } from "@/lib/postgres"
 import { demoOrganizationIsUsable } from "@/lib/demo-policy"
 import { runWithRlsBypass } from "@/lib/rls-context"
 import type {
+  StaffEmploymentType,
   StaffMember,
   StaffRole,
   StoreSettings,
@@ -24,6 +25,9 @@ type StaffRow = {
   role: StaffRole
   active: boolean
   permissions: string[]
+  hire_date: Date | string | null
+  employment_type: StaffEmploymentType | null
+  notes: string | null
   created_at: Date | string
   updated_at: Date | string
 }
@@ -45,6 +49,9 @@ function mapStaff(row: StaffRow): StaffMember {
     permissions: Array.isArray(row.permissions)
       ? row.permissions.map(String)
       : [],
+    hireDate: row.hire_date ? iso(row.hire_date).slice(0, 10) : "",
+    employmentType: row.employment_type || null,
+    notes: row.notes || "",
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   }
@@ -423,6 +430,9 @@ export async function getTenantStaffMembers(
         role,
         active,
         permissions,
+        hire_date,
+        employment_type,
+        notes,
         created_at,
         updated_at
       FROM sf_staff_members
@@ -457,11 +467,14 @@ export async function createTenantStaffMember(
   input: Pick<
     StaffMember,
     "name" | "email" | "phone" | "role" | "permissions"
-  >,
+  > & Partial<Pick<StaffMember, "hireDate" | "employmentType" | "notes">>,
 ) {
   const name = input.name.trim()
   const email = input.email.trim().toLowerCase()
   const phone = input.phone.trim()
+  const hireDate = input.hireDate?.trim() || null
+  const employmentType = input.employmentType || null
+  const notes = input.notes?.trim() || ""
 
   if (!name) {
     throw new Error("Informe o nome do colaborador.")
@@ -508,12 +521,15 @@ export async function createTenantStaffMember(
           role,
           active,
           permissions,
+          hire_date,
+          employment_type,
+          notes,
           created_at,
           updated_at
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, true,
-          $7::jsonb, now(), now()
+          $7::jsonb, $8::date, $9, $10, now(), now()
         )
         RETURNING
           id,
@@ -523,6 +539,9 @@ export async function createTenantStaffMember(
           role,
           active,
           permissions,
+          hire_date,
+          employment_type,
+          notes,
           created_at,
           updated_at
       `,
@@ -534,6 +553,9 @@ export async function createTenantStaffMember(
         phone,
         input.role,
         JSON.stringify(input.permissions || []),
+        hireDate,
+        employmentType,
+        notes,
       ],
     )
 
@@ -569,14 +591,16 @@ export async function updateTenantStaffMember(
       | "role"
       | "active"
       | "permissions"
+      | "hireDate"
+      | "employmentType"
+      | "notes"
     >
   >,
 ) {
-  const current = (
-    await getTenantStaffMembers(organizationId, {
-      includeInactive: true,
-    })
-  ).find((item) => item.id === id)
+  const staffMembers = await getTenantStaffMembers(organizationId, {
+    includeInactive: true,
+  })
+  const current = staffMembers.find((item) => item.id === id)
 
   if (!current) return null
 
@@ -595,6 +619,18 @@ export async function updateTenantStaffMember(
       patch.phone !== undefined
         ? patch.phone.trim()
         : current.phone,
+    hireDate:
+      patch.hireDate !== undefined
+        ? patch.hireDate.trim()
+        : current.hireDate,
+    employmentType:
+      patch.employmentType !== undefined
+        ? patch.employmentType
+        : current.employmentType,
+    notes:
+      patch.notes !== undefined
+        ? patch.notes.trim()
+        : current.notes,
     permissions:
       patch.permissions !== undefined
         ? patch.permissions.map(String)
@@ -603,6 +639,17 @@ export async function updateTenantStaffMember(
 
   if (!next.name) {
     throw new Error("Informe o nome do colaborador.")
+  }
+
+  if (
+    next.email &&
+    staffMembers.some(
+      (item) =>
+        item.id !== id &&
+        item.email.trim().toLowerCase() === next.email,
+    )
+  ) {
+    throw new Error("Já existe um colaborador com este e-mail nesta empresa.")
   }
 
   const result = await getPostgresPool().query<StaffRow>(
@@ -615,6 +662,9 @@ export async function updateTenantStaffMember(
         role = $6,
         active = $7,
         permissions = $8::jsonb,
+        hire_date = $9::date,
+        employment_type = $10,
+        notes = $11,
         updated_at = now()
       WHERE organization_id = $1
         AND id = $2
@@ -626,6 +676,9 @@ export async function updateTenantStaffMember(
         role,
         active,
         permissions,
+        hire_date,
+        employment_type,
+        notes,
         created_at,
         updated_at
     `,
@@ -638,6 +691,9 @@ export async function updateTenantStaffMember(
       next.role,
       next.active,
       JSON.stringify(next.permissions),
+      next.hireDate || null,
+      next.employmentType,
+      next.notes,
     ],
   )
 

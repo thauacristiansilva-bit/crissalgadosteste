@@ -11,7 +11,7 @@ import {
   canManageTeam,
   canViewTeam,
 } from "@/lib/tenant-permissions"
-import type { StaffRole } from "@/lib/types"
+import type { StaffEmploymentType, StaffRole } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 
@@ -95,6 +95,9 @@ export async function POST(request: Request) {
     permissions: Array.isArray(body.permissions)
       ? body.permissions.map(String)
       : [],
+    hireDate: body.hireDate !== undefined ? String(body.hireDate) : "",
+    employmentType: body.employmentType ? String(body.employmentType) as StaffEmploymentType : null,
+    notes: body.notes !== undefined ? String(body.notes) : "",
   }
 
   if (

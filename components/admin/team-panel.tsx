@@ -9,14 +9,18 @@ import {
 import {
   Copy,
   KeyRound,
+  Pencil,
   Power,
+  Save,
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
   UserPlus,
   Users,
+  X,
 } from "lucide-react"
 import type {
+  StaffEmploymentType,
   StaffMember,
   StaffRole,
 } from "@/lib/types"
@@ -59,6 +63,14 @@ const roleLabels: Record<
   cashier: "Caixa / PDV",
   kitchen: "Cozinha",
   courier: "Entregador",
+}
+
+const employmentLabels: Record<StaffEmploymentType, string> = {
+  employee: "Funcionário",
+  contractor: "Prestador / PJ",
+  temporary: "Temporário",
+  partner: "Sócio / parceiro",
+  other: "Outro",
 }
 
 function accessLabel(
@@ -135,6 +147,18 @@ export function TeamPanel({
     useState<number | null>(null)
   const [permissionDraft, setPermissionDraft] =
     useState<OperationalPermission[]>([])
+  const [editorId, setEditorId] =
+    useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    role: "cashier" as StaffRole,
+    active: true,
+    hireDate: "",
+    employmentType: "" as StaffEmploymentType | "",
+    notes: "",
+  })
 
   async function reloadAccess() {
     const response = await fetch(
@@ -184,6 +208,10 @@ export function TeamPanel({
   const permissionEditor = permissionEditorId === null
     ? null
     : staffMembers.find((member) => member.id === permissionEditorId) || null
+
+  const editor = editorId === null
+    ? null
+    : staffMembers.find((member) => member.id === editorId) || null
 
   async function add(
     event: FormEvent,
@@ -471,6 +499,64 @@ export function TeamPanel({
     await reloadAccess()
   }
 
+  function openEditor(member: StaffMember) {
+    setEditorId(member.id)
+    setEditDraft({
+      name: member.name,
+      email: member.email,
+      phone: member.phone,
+      role: member.role,
+      active: member.active,
+      hireDate: member.hireDate || "",
+      employmentType: member.employmentType || "",
+      notes: member.notes || "",
+    })
+    setMessage("")
+  }
+
+  async function saveProfile() {
+    if (!editor || !canManageTeam) return
+
+    setBusyId(editor.id)
+    setMessage("")
+
+    const payload: Record<string, unknown> = {
+      name: editDraft.name,
+      email: editDraft.email,
+      phone: editDraft.phone,
+      active: editDraft.active,
+      hireDate: editDraft.hireDate,
+      employmentType: editDraft.employmentType || null,
+      notes: editDraft.notes,
+    }
+
+    if (canManageAccess) {
+      payload.role = editDraft.role
+    }
+
+    const response = await fetch(`/api/staff/${editor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await response.json()
+    setBusyId(null)
+
+    if (!response.ok) {
+      return setMessage(data.error || "Não foi possível salvar o colaborador.")
+    }
+
+    setStaffMembers((current) =>
+      current.map((item) =>
+        item.id === editor.id ? data.staffMember : item,
+      ),
+    )
+    setEditorId(null)
+    setMessage("Dados do colaborador atualizados.")
+    await reloadAccess()
+  }
+
   function openPermissions(member: StaffMember) {
     const custom = storedPermissionsAreCustom(member.permissions)
     setPermissionEditorId(member.id)
@@ -718,6 +804,18 @@ export function TeamPanel({
                             <button
                               type="button"
                               disabled={busy}
+                              onClick={() => openEditor(member)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
+                            </button>
+                          )}
+
+                          {canManageTeam && (
+                            <button
+                              type="button"
+                              disabled={busy}
                               onClick={() =>
                                 toggle(
                                   member,
@@ -824,6 +922,200 @@ export function TeamPanel({
             </tbody>
           </table>
         </div>
+
+        {editor && canManageTeam && (
+          <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50/40 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="font-black text-gray-900">Editar colaborador</h3>
+                <p className="mt-1 text-xs text-gray-600">
+                  Atualize os dados operacionais de {editor.name}. Alterações de função exigem permissão de gestão de acessos.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditorId(null)}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-600"
+              >
+                <X className="h-3.5 w-3.5" />
+                Fechar
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>Nome</span>
+                <input
+                  required
+                  value={editDraft.name}
+                  onChange={(event) => setEditDraft({ ...editDraft, name: event.target.value })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900"
+                />
+              </label>
+
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>E-mail</span>
+                <input
+                  type="email"
+                  value={editDraft.email}
+                  onChange={(event) => setEditDraft({ ...editDraft, email: event.target.value })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900"
+                  placeholder="Usado para gerar convite de acesso"
+                />
+              </label>
+
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>Telefone</span>
+                <input
+                  value={editDraft.phone}
+                  onChange={(event) => setEditDraft({ ...editDraft, phone: event.target.value })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900"
+                />
+              </label>
+
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>Função</span>
+                <select
+                  value={editDraft.role}
+                  disabled={!canManageAccess}
+                  onChange={(event) => setEditDraft({ ...editDraft, role: event.target.value as StaffRole })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 disabled:bg-gray-100"
+                >
+                  {Object.entries(roleLabels)
+                    .filter(([value]) => canManageAccess || value === editor.role)
+                    .map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>Vínculo</span>
+                <select
+                  value={editDraft.employmentType}
+                  onChange={(event) => setEditDraft({ ...editDraft, employmentType: event.target.value as StaffEmploymentType | "" })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900"
+                >
+                  <option value="">Não informado</option>
+                  {Object.entries(employmentLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>Data de entrada</span>
+                <input
+                  type="date"
+                  value={editDraft.hireDate}
+                  onChange={(event) => setEditDraft({ ...editDraft, hireDate: event.target.value })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900"
+                />
+              </label>
+
+              <label className="space-y-1 text-xs font-bold text-gray-600">
+                <span>Status operacional</span>
+                <select
+                  value={editDraft.active ? "active" : "inactive"}
+                  onChange={(event) => setEditDraft({ ...editDraft, active: event.target.value === "active" })}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900"
+                >
+                  <option value="active">Ativo</option>
+                  <option value="inactive">Inativo</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="mt-3 block space-y-1 text-xs font-bold text-gray-600">
+              <span>Observações internas</span>
+              <textarea
+                value={editDraft.notes}
+                onChange={(event) => setEditDraft({ ...editDraft, notes: event.target.value })}
+                rows={3}
+                maxLength={1200}
+                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-normal text-gray-900"
+                placeholder="Informações internas da gestão. Não são exibidas ao cliente."
+              />
+            </label>
+
+            {(() => {
+              const item = accessByStaff.get(editor.id)
+              const badge = accessLabel(item)
+              return (
+                <div className="mt-4 rounded-xl border border-blue-100 bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-wide text-blue-700">Acesso ao sistema</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className={`rounded-full px-2 py-1 text-xs font-bold ${badge.className}`}>{badge.text}</span>
+                        {item?.email && <span className="text-xs text-gray-500">{item.email}</span>}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {canManageAccess && editor.active && editor.email && editDraft.email === editor.email && item?.membershipStatus !== "active" && (
+                        <button
+                          type="button"
+                          disabled={busyId === editor.id}
+                          onClick={() => void createInvite(editor)}
+                          className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+                        >
+                          {item?.membershipStatus === "invited" ? "Gerar novo convite" : "Gerar login"}
+                        </button>
+                      )}
+                      {canManageAccess && item?.membershipStatus === "active" && item.userId && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busyId === editor.id}
+                            onClick={() => void createReset(editor, item)}
+                            className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-black text-blue-700 disabled:opacity-50"
+                          >
+                            Recuperar senha
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === editor.id}
+                            onClick={() => void disableAccess(editor, item)}
+                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50"
+                          >
+                            Revogar login
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {editDraft.email !== editor.email && (
+                    <p className="mt-2 text-[11px] text-amber-700">
+                      Salve o novo e-mail antes de gerar um convite. Se o login já estiver ativo, alterar o e-mail do perfil não troca automaticamente a credencial existente.
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busyId === editor.id || !editDraft.name.trim()}
+                onClick={() => void saveProfile()}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5" />
+                Salvar alterações
+              </button>
+              {canManageAccess && (
+                <button
+                  type="button"
+                  onClick={() => { setEditorId(null); openPermissions(editor) }}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-white px-4 py-2 text-xs font-black text-violet-700"
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Personalizar permissões
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {permissionEditor && canManageAccess && (
           <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">

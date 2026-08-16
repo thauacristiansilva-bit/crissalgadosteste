@@ -9,7 +9,7 @@ import {
   canManageAccess,
   canManageTeam,
 } from "@/lib/tenant-permissions"
-import type { StaffRole } from "@/lib/types"
+import type { StaffEmploymentType, StaffRole } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 
@@ -48,13 +48,13 @@ export async function PATCH(
   }
 
   if (
-    (body.permissions !== undefined || body.role === "admin") &&
+    (body.permissions !== undefined || body.role !== undefined) &&
     !canManageAccess(session.role)
   ) {
     return NextResponse.json(
       {
         error:
-          "Seu perfil não pode alterar permissões de acesso nem promover administradores.",
+          "Seu perfil não pode alterar função ou permissões de acesso.",
       },
       { status: 403 },
     )
@@ -78,6 +78,19 @@ export async function PATCH(
       : {}),
     ...(body.permissions !== undefined && Array.isArray(body.permissions)
       ? { permissions: body.permissions.map(String) }
+      : {}),
+    ...(body.hireDate !== undefined
+      ? { hireDate: String(body.hireDate) }
+      : {}),
+    ...(body.employmentType !== undefined
+      ? {
+          employmentType: body.employmentType
+            ? (String(body.employmentType) as StaffEmploymentType)
+            : null,
+        }
+      : {}),
+    ...(body.notes !== undefined
+      ? { notes: String(body.notes) }
       : {}),
   }
 

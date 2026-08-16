@@ -12,6 +12,7 @@ export type PaymentStatus = "paid" | "unpaid"
 export type CustomerSegment = "new" | "repeat" | "frequent" | "elite"
 export type CustomerLifecycle = "never" | "active" | "sleeping" | "inactive"
 export type StaffRole = "admin" | "manager" | "cashier" | "kitchen" | "courier"
+export type StaffEmploymentType = "employee" | "contractor" | "temporary" | "partner" | "other"
 export type DeliveryPricingMode = "free" | "fixed" | "distance" | "customAreas" | "distanceBands"
 
 export interface GeoPoint {
@@ -298,6 +299,9 @@ export interface StaffMember {
   role: StaffRole
   active: boolean
   permissions: string[]
+  hireDate?: string
+  employmentType?: StaffEmploymentType | null
+  notes?: string
   createdAt: string
   updatedAt: string
 }
