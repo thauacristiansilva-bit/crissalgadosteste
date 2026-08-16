@@ -3,10 +3,6 @@ import {
   NextResponse,
 } from "next/server"
 import {
-  getDeliveryZones as getLegacyDeliveryZones,
-  getSettings as getLegacySettings,
-} from "@/lib/db"
-import {
   getTenantDeliveryZones,
   isTenantOperationsReady,
 } from "@/lib/operations-db"
@@ -15,15 +11,13 @@ import {
   isTenantRuntimeReady,
 } from "@/lib/organization-db"
 import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
 import {
   calculateDeliveryQuote,
 } from "@/lib/delivery-pricing"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export async function GET(request: NextRequest) {
   const latitude = Number(
@@ -61,54 +55,46 @@ export async function GET(request: NextRequest) {
 
     await assertOrganizationEntitlement(organization.id, "delivery")
 
-    const runtimeReady =
-      await isTenantRuntimeReady(
-        organization.id,
-      ).catch(() => false)
+    return runWithTenantRlsScope(
+      [organization.id],
+      undefined,
+      async () => {
+        const [runtimeReady, operationsReady] = await Promise.all([
+          isTenantRuntimeReady(organization.id).catch(() => false),
+          isTenantOperationsReady(organization.id).catch(() => false),
+        ])
 
-    const operationsReady =
-      await isTenantOperationsReady(
-        organization.id,
-      ).catch(() => false)
-
-    const isCurrent =
-      await isCurrentDeploymentOrganization(
-        organization.id,
-      )
-
-    const settings =
-      runtimeReady
-        ? await getTenantSettings(organization.id)
-        : isCurrent
-          ? await getLegacySettings()
-          : null
-
-    const zones =
-      operationsReady
-        ? await getTenantDeliveryZones(
-            organization.id,
+        if (!runtimeReady || !operationsReady) {
+          throw new Error(
+            "Entrega ainda não foi habilitada para esta empresa.",
           )
-        : isCurrent
-          ? await getLegacyDeliveryZones()
-          : null
+        }
 
-    if (!settings || !zones) {
-      throw new Error(
-        "Entrega ainda não foi habilitada para esta empresa.",
-      )
-    }
+        const [settings, zones] = await Promise.all([
+          getTenantSettings(organization.id),
+          getTenantDeliveryZones(organization.id),
+        ])
 
-    const quote = await calculateDeliveryQuote(
-      settings,
-      zones,
-      latitude,
-      longitude,
-      Number.isFinite(subtotal)
-        ? subtotal
-        : 0,
+        if (!settings) {
+          throw new Error(
+            "Entrega ainda não foi habilitada para esta empresa.",
+          )
+        }
+
+        const quote = await calculateDeliveryQuote(
+          settings,
+          zones,
+          latitude,
+          longitude,
+          Number.isFinite(subtotal)
+            ? subtotal
+            : 0,
+        )
+
+        return NextResponse.json({ quote })
+      },
+      "public-store",
     )
-
-    return NextResponse.json({ quote })
   } catch (error) {
     return NextResponse.json(
       {

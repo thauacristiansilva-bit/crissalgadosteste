@@ -12,6 +12,7 @@ import { isTenantCustomersReady } from "@/lib/customer-db"
 import { isTenantOperationsReady } from "@/lib/operations-db"
 import { isTenantRuntimeReady } from "@/lib/organization-db"
 import { getRlsRolloutStats } from "@/lib/organization-security-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -34,14 +35,20 @@ export async function GET() {
       operationsReady,
       runtimeReady,
       rls,
-    ] = await Promise.all([
-      isTenantCatalogReady(session.organizationId),
-      isTenantOrdersReady(session.organizationId),
-      isTenantCustomersReady(session.organizationId),
-      isTenantOperationsReady(session.organizationId),
-      isTenantRuntimeReady(session.organizationId),
-      getRlsRolloutStats(),
-    ])
+    ] = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () =>
+        Promise.all([
+          isTenantCatalogReady(session.organizationId),
+          isTenantOrdersReady(session.organizationId),
+          isTenantCustomersReady(session.organizationId),
+          isTenantOperationsReady(session.organizationId),
+          isTenantRuntimeReady(session.organizationId),
+          getRlsRolloutStats(),
+        ]),
+      "tenant-session",
+    )
 
     const postgresAuthorityReady =
       catalogReady &&

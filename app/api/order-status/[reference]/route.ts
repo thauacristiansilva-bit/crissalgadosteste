@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server"
 import {
-  getOrderByReference as getLegacyOrderByReference,
-  getSettings as getLegacySettings,
-} from "@/lib/db"
-import {
   getTenantOrderByReference,
   isTenantOrdersReady,
 } from "@/lib/order-db"
@@ -12,11 +8,9 @@ import {
   isTenantRuntimeReady,
 } from "@/lib/organization-db"
 import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
-import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const dynamic = "force-dynamic"
 
@@ -40,60 +34,60 @@ export async function GET(
     )
   }
 
-  const ordersReady =
-    await isTenantOrdersReady(
-      organization.id,
-    ).catch(() => false)
+  return runWithTenantRlsScope(
+    [organization.id],
+    undefined,
+    async () => {
+      const ordersReady =
+        await isTenantOrdersReady(
+          organization.id,
+        ).catch(() => false)
 
-  const isCurrent =
-    await isCurrentDeploymentOrganization(
-      organization.id,
-    )
+      if (!ordersReady) {
+        return NextResponse.json(
+          { error: "Pedido não encontrado." },
+          { status: 404 },
+        )
+      }
 
-  const order = ordersReady
-    ? await getTenantOrderByReference(
+      const order = await getTenantOrderByReference(
         organization.id,
         reference,
       )
-    : isCurrent
-      ? await getLegacyOrderByReference(
-          reference,
+
+      if (!order) {
+        return NextResponse.json(
+          { error: "Pedido não encontrado." },
+          { status: 404 },
         )
-      : null
+      }
 
-  if (!order) {
-    return NextResponse.json(
-      { error: "Pedido não encontrado." },
-      { status: 404 },
-    )
-  }
+      const runtimeReady =
+        await isTenantRuntimeReady(
+          organization.id,
+        ).catch(() => false)
 
-  const runtimeReady =
-    await isTenantRuntimeReady(
-      organization.id,
-    ).catch(() => false)
-
-  const settings =
-    runtimeReady
-      ? await getTenantSettings(organization.id)
-      : isCurrent
-        ? await getLegacySettings()
+      const settings = runtimeReady
+        ? await getTenantSettings(organization.id)
         : null
 
-  if (!settings) {
-    return NextResponse.json(
-      { error: "Loja indisponível." },
-      { status: 503 },
-    )
-  }
+      if (!settings) {
+        return NextResponse.json(
+          { error: "Loja indisponível." },
+          { status: 503 },
+        )
+      }
 
-  return NextResponse.json({
-    order,
-    store: {
-      storeName: settings.storeName,
-      whatsapp: settings.whatsapp,
-      estimatedMinutes:
-        settings.estimatedMinutes,
+      return NextResponse.json({
+        order,
+        store: {
+          storeName: settings.storeName,
+          whatsapp: settings.whatsapp,
+          estimatedMinutes:
+            settings.estimatedMinutes,
+        },
+      })
     },
-  })
+    "public-store",
+  )
 }

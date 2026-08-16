@@ -13,51 +13,59 @@ import {
   type PublicOrganization,
 } from "@/lib/organization-db"
 import { isStoreOpenNow } from "@/lib/operations"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export async function getPublicStoreForOrganization(
   organization: PublicOrganization,
 ) {
-  const [runtimeReady, catalogReady, operationsReady] = await Promise.all([
-    isTenantRuntimeReady(organization.id).catch(() => false),
-    isTenantCatalogReady(organization.id).catch(() => false),
-    isTenantOperationsReady(organization.id).catch(() => false),
-  ])
+  return runWithTenantRlsScope(
+    [organization.id],
+    undefined,
+    async () => {
+      const [runtimeReady, catalogReady, operationsReady] = await Promise.all([
+        isTenantRuntimeReady(organization.id).catch(() => false),
+        isTenantCatalogReady(organization.id).catch(() => false),
+        isTenantOperationsReady(organization.id).catch(() => false),
+      ])
 
-  if (!runtimeReady || !catalogReady || !operationsReady) {
-    throw new Error(
-      "A loja ainda não concluiu a preparação PostgreSQL necessária para publicação.",
-    )
-  }
+      if (!runtimeReady || !catalogReady || !operationsReady) {
+        throw new Error(
+          "A loja ainda não concluiu a preparação PostgreSQL necessária para publicação.",
+        )
+      }
 
-  const [settings, products, categories, deliveryZones] = await Promise.all([
-    getTenantSettings(organization.id),
-    getTenantProducts(organization.id),
-    getTenantCategories(organization.id),
-    getTenantDeliveryZones(organization.id),
-  ])
+      const [settings, products, categories, deliveryZones] = await Promise.all([
+        getTenantSettings(organization.id),
+        getTenantProducts(organization.id),
+        getTenantCategories(organization.id),
+        getTenantDeliveryZones(organization.id),
+      ])
 
-  if (!settings) {
-    throw new Error("Configurações públicas da empresa não foram encontradas.")
-  }
+      if (!settings) {
+        throw new Error("Configurações públicas da empresa não foram encontradas.")
+      }
 
-  const publicSettings = {
-    ...settings,
-    systemName: "SaborFlow",
-    acceptingOrders:
-      settings.acceptingOrders && organization.publicOrderingEnabled,
-  }
+      const publicSettings = {
+        ...settings,
+        systemName: "SaborFlow",
+        acceptingOrders:
+          settings.acceptingOrders && organization.publicOrderingEnabled,
+      }
 
-  return {
-    products,
-    categories,
-    settings: publicSettings,
-    deliveryZones,
-    openNow: isStoreOpenNow(publicSettings),
-    organization: {
-      id: organization.id,
-      name: organization.name,
-      slug: organization.slug,
-      publicOrderingEnabled: organization.publicOrderingEnabled,
+      return {
+        products,
+        categories,
+        settings: publicSettings,
+        deliveryZones,
+        openNow: isStoreOpenNow(publicSettings),
+        organization: {
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          publicOrderingEnabled: organization.publicOrderingEnabled,
+        },
+      }
     },
-  }
+    "public-store",
+  )
 }

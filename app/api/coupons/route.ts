@@ -1,20 +1,11 @@
 import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
 import {
-  createCoupon as createLegacyCoupon,
-  getCoupons as getLegacyCoupons,
-  syncLegacyCouponFromTenant,
-  validateCoupon as validateLegacyCoupon,
-} from "@/lib/db"
-import {
   createTenantCoupon,
   getTenantCoupons,
   isTenantOperationsReady,
   validateTenantCoupon,
 } from "@/lib/operations-db"
-import {
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
 import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
@@ -24,6 +15,7 @@ import {
 import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -34,37 +26,33 @@ export async function GET(request: Request) {
 
   if (code) {
     try {
-      const publicOrganization =
+      const organization =
         await resolvePublicOrganizationForRequest(
           request,
         )
 
-      const postgresResult =
-        publicOrganization &&
-        (await isTenantOperationsReady(
-          publicOrganization.id,
-        ).catch(() => false))
-          ? await validateTenantCoupon(
-              publicOrganization.id,
-              code,
-              subtotal,
-            )
-          : null
+      if (!organization) {
+        throw new Error("Empresa não identificada.")
+      }
 
-      const canFallbackLegacy =
-        !publicOrganization ||
-        (await isCurrentDeploymentOrganization(
-          publicOrganization.id,
-        ))
+      const result = await runWithTenantRlsScope(
+        [organization.id],
+        undefined,
+        async () => {
+          const ready = await isTenantOperationsReady(
+            organization.id,
+          ).catch(() => false)
 
-      const result =
-        postgresResult ||
-        (canFallbackLegacy
-          ? await validateLegacyCoupon(
-              code,
-              subtotal,
-            )
-          : null)
+          if (!ready) return null
+
+          return validateTenantCoupon(
+            organization.id,
+            code,
+            subtotal,
+          )
+        },
+        "public-store",
+      )
 
       if (!result) {
         throw new Error(
@@ -100,24 +88,27 @@ export async function GET(request: Request) {
 
   const session = await getVerifiedTenantSession()
 
-  if (
-    session &&
-    (await isTenantOperationsReady(
-      session.organizationId,
-    ).catch(() => false))
-  ) {
-    return NextResponse.json({
-      coupons: await getTenantCoupons(
-        session.organizationId,
-        { includeInactive: true },
-      ),
-    })
+  if (!session) {
+    return NextResponse.json(
+      { error: "Sessão tenant obrigatória." },
+      { status: 401 },
+    )
+  }
+
+  if (!(await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false))) {
+    return NextResponse.json(
+      { error: "Operações PostgreSQL indisponíveis para esta empresa." },
+      { status: 503 },
+    )
   }
 
   return NextResponse.json({
-    coupons: await getLegacyCoupons({
-      includeInactive: true,
-    }),
+    coupons: await getTenantCoupons(
+      session.organizationId,
+      { includeInactive: true },
+    ),
   })
 }
 
@@ -150,17 +141,21 @@ export async function POST(request: Request) {
 
   try {
     const session = await getVerifiedTenantSession()
-    const ready =
-      session &&
-      (await isTenantOperationsReady(
-        session.organizationId,
-      ).catch(() => false))
-
-    if (!session || !ready) {
-      const coupon = await createLegacyCoupon(input)
+    if (!session) {
       return NextResponse.json(
-        { coupon },
-        { status: 201 },
+        { error: "Sessão tenant obrigatória." },
+        { status: 401 },
+      )
+    }
+
+    const ready = await isTenantOperationsReady(
+      session.organizationId,
+    ).catch(() => false)
+
+    if (!ready) {
+      return NextResponse.json(
+        { error: "Operações PostgreSQL indisponíveis para esta empresa." },
+        { status: 503 },
       )
     }
 
@@ -178,14 +173,6 @@ export async function POST(request: Request) {
       session.organizationId,
       input,
     )
-
-    if (
-      await isCurrentDeploymentOrganization(
-        session.organizationId,
-      )
-    ) {
-      await syncLegacyCouponFromTenant(coupon)
-    }
 
     return NextResponse.json(
       { coupon },

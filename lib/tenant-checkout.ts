@@ -34,6 +34,10 @@ import {
   getPostgresPool,
 } from "@/lib/postgres"
 import {
+  getCurrentRlsContext,
+  runWithTenantRlsScope,
+} from "@/lib/rls-context"
+import {
   consumeIngredientsForOrderWithClient,
   getModifierGroupsForProductsWithClient,
   isTenantFoodCompositionReady,
@@ -317,7 +321,7 @@ function orderReference(id: number) {
   )}-${suffix}`
 }
 
-export async function createTenantCheckoutOrder(
+async function createTenantCheckoutOrderInScope(
   organizationId: string,
   input: TenantCheckoutInput,
 ): Promise<TenantCheckoutResult> {
@@ -1048,4 +1052,18 @@ export async function createTenantCheckoutOrder(
   } finally {
     client.release()
   }
+}
+
+export async function createTenantCheckoutOrder(
+  organizationId: string,
+  input: TenantCheckoutInput,
+): Promise<TenantCheckoutResult> {
+  const current = getCurrentRlsContext()
+
+  return runWithTenantRlsScope(
+    [organizationId],
+    current?.userId,
+    () => createTenantCheckoutOrderInScope(organizationId, input),
+    current?.source ?? "public-store",
+  )
 }

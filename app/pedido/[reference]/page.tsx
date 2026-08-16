@@ -9,6 +9,7 @@ import {
   isTenantRuntimeReady,
 } from "@/lib/organization-db"
 import { resolveServerPublicOrganization } from "@/lib/public-tenant"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const dynamic = "force-dynamic"
 
@@ -24,28 +25,35 @@ export default async function OrderPage({
   // domínio/cookie/referer. Links novos usam /loja/{slug}/pedido/{reference}.
   if (!organization) notFound()
 
-  const [ordersReady, runtimeReady] = await Promise.all([
-    isTenantOrdersReady(organization.id).catch(() => false),
-    isTenantRuntimeReady(organization.id).catch(() => false),
-  ])
+  return runWithTenantRlsScope(
+    [organization.id],
+    undefined,
+    async () => {
+      const [ordersReady, runtimeReady] = await Promise.all([
+        isTenantOrdersReady(organization.id).catch(() => false),
+        isTenantRuntimeReady(organization.id).catch(() => false),
+      ])
 
-  if (!ordersReady || !runtimeReady) notFound()
+      if (!ordersReady || !runtimeReady) notFound()
 
-  const [order, settings] = await Promise.all([
-    getTenantOrderByReference(
-      organization.id,
-      decodeURIComponent(reference),
-    ),
-    getTenantSettings(organization.id),
-  ])
+      const [order, settings] = await Promise.all([
+        getTenantOrderByReference(
+          organization.id,
+          decodeURIComponent(reference),
+        ),
+        getTenantSettings(organization.id),
+      ])
 
-  if (!order || !settings) notFound()
+      if (!order || !settings) notFound()
 
-  return (
-    <OrderTracker
-      initialOrder={order}
-      settings={settings}
-      storePath={`/loja/${encodeURIComponent(organization.slug)}`}
-    />
+      return (
+        <OrderTracker
+          initialOrder={order}
+          settings={settings}
+          storePath={`/loja/${encodeURIComponent(organization.slug)}`}
+        />
+      )
+    },
+    "public-store",
   )
 }

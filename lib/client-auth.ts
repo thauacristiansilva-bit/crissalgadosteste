@@ -8,7 +8,7 @@ import {
   isTenantCustomersReady,
 } from "@/lib/customer-db"
 import type { CustomerAccount } from "@/lib/types"
-import { enterTenantRlsContext } from "@/lib/rls-context"
+import { enterTenantRlsContext, runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const CLIENT_SESSION_COOKIE = "saborflow_client_session"
 // Mantido só para limpeza de cookies antigos.
@@ -109,36 +109,50 @@ export async function getCurrentCustomerContext(): Promise<CurrentCustomerContex
   if (!publicOrganization) return null
 
   const organizationId = publicOrganization.id
-  enterTenantRlsContext(
-    organizationId,
+
+  const context = await runWithTenantRlsScope(
+    [organizationId],
     undefined,
+    async () => {
+      if (!(await isTenantCustomersReady(organizationId).catch(() => false))) {
+        return null
+      }
+
+      const token = parseV2Token(
+        cookieStore.get(CLIENT_SESSION_COOKIE)?.value,
+      )
+
+      if (!token || token.organizationId !== organizationId) {
+        return null
+      }
+
+      const account = await getTenantCustomerAccount(
+        organizationId,
+        token.accountId,
+      )
+
+      if (!account) return null
+
+      return {
+        organizationId,
+        account,
+        sessionMode: "tenant" as const,
+      }
+    },
     "customer-session",
   )
 
-  if (!(await isTenantCustomersReady(organizationId).catch(() => false))) {
-    return null
+  if (context) {
+    // Mantém o tenant ativo para operações executadas pelo chamador depois
+    // da validação da sessão (ex.: atualização de perfil e checkout).
+    enterTenantRlsContext(
+      organizationId,
+      undefined,
+      "customer-session",
+    )
   }
 
-  const token = parseV2Token(
-    cookieStore.get(CLIENT_SESSION_COOKIE)?.value,
-  )
-
-  if (!token || token.organizationId !== organizationId) {
-    return null
-  }
-
-  const account = await getTenantCustomerAccount(
-    organizationId,
-    token.accountId,
-  )
-
-  if (!account) return null
-
-  return {
-    organizationId,
-    account,
-    sessionMode: "tenant",
-  }
+  return context
 }
 
 export async function getCurrentCustomerAccount() {

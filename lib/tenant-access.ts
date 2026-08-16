@@ -5,6 +5,7 @@ import {
   getOrganizationContextForUser,
   type OrganizationRole,
 } from "@/lib/tenant-context"
+import { enterTenantRlsContext } from "@/lib/rls-context"
 
 export type TenantAdminSession = Extract<
   AdminSession,
@@ -42,6 +43,16 @@ export async function getVerifiedTenantSession():
   }
 
   await touchDemoEnvironment(session.organizationId)
+
+  // Reafirma o escopo no fim da verificação. Chamadas intermediárias usam
+  // AsyncLocalStorage.run() e podem restaurar o contexto anterior ao retornar.
+  // As rotas administrativas que chamam este helper devem sair daqui com o
+  // tenant efetivo novamente ativo para todas as consultas PostgreSQL seguintes.
+  enterTenantRlsContext(
+    session.organizationId,
+    session.userId,
+    "tenant-session",
+  )
 
   return {
     mode: "tenant",

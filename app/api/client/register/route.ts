@@ -16,6 +16,7 @@ import {
   LEGACY_CLIENT_SESSION_COOKIE,
   createClientToken,
 } from "@/lib/client-auth"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as
@@ -44,79 +45,86 @@ export async function POST(request: Request) {
     )
   }
 
-  try {
-    const [customersReady, runtimeReady] = await Promise.all([
-      isTenantCustomersReady(organization.id),
-      isTenantRuntimeReady(organization.id),
-    ])
+  return runWithTenantRlsScope(
+    [organization.id],
+    undefined,
+    async () => {
+      try {
+        const [customersReady, runtimeReady] = await Promise.all([
+          isTenantCustomersReady(organization.id),
+          isTenantRuntimeReady(organization.id),
+        ])
 
-    if (!customersReady || !runtimeReady) {
-      return NextResponse.json(
-        { error: "Cadastro de clientes ainda não está disponível nesta empresa." },
-        { status: 503 },
-      )
-    }
+        if (!customersReady || !runtimeReady) {
+          return NextResponse.json(
+            { error: "Cadastro de clientes ainda não está disponível nesta empresa." },
+            { status: 503 },
+          )
+        }
 
-    const settings = await getTenantSettings(organization.id)
-    if (!settings) {
-      return NextResponse.json(
-        { error: "Configurações da empresa ainda não estão disponíveis." },
-        { status: 503 },
-      )
-    }
+        const settings = await getTenantSettings(organization.id)
+        if (!settings) {
+          return NextResponse.json(
+            { error: "Configurações da empresa ainda não estão disponíveis." },
+            { status: 503 },
+          )
+        }
 
-    const account = await createTenantCustomerAccount(
-      organization.id,
-      {
-        cpf: body.cpf || "",
-        pin: body.pin || "",
-        name: body.name || "",
-        phone: body.phone || "",
-        email: body.email || "",
-        defaultCity: settings.city,
-        defaultState: settings.state,
-      },
-    )
+        const account = await createTenantCustomerAccount(
+          organization.id,
+          {
+            cpf: body.cpf || "",
+            pin: body.pin || "",
+            name: body.name || "",
+            phone: body.phone || "",
+            email: body.email || "",
+            defaultCity: settings.city,
+            defaultState: settings.state,
+          },
+        )
 
-    const days = body.remember === false ? 1 : settings.rememberClientDays
-    const response = NextResponse.json(
-      {
-        customer: safeTenantCustomer(account),
-        sessionMode: "tenant",
-      },
-      { status: 201 },
-    )
+        const days = body.remember === false ? 1 : settings.rememberClientDays
+        const response = NextResponse.json(
+          {
+            customer: safeTenantCustomer(account),
+            sessionMode: "tenant",
+          },
+          { status: 201 },
+        )
 
-    response.cookies.set(
-      CLIENT_SESSION_COOKIE,
-      createClientToken(organization.id, account.id, days),
-      {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: days * 86_400,
-      },
-    )
+        response.cookies.set(
+          CLIENT_SESSION_COOKIE,
+          createClientToken(organization.id, account.id, days),
+          {
+            httpOnly: true,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            path: "/",
+            maxAge: days * 86_400,
+          },
+        )
 
-    response.cookies.set(LEGACY_CLIENT_SESSION_COOKIE, "", {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 0,
-    })
+        response.cookies.set(LEGACY_CLIENT_SESSION_COOKIE, "", {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 0,
+        })
 
-    return response
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Não foi possível criar a conta.",
-      },
-      { status: 400 },
-    )
-  }
+        return response
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Não foi possível criar a conta.",
+          },
+          { status: 400 },
+        )
+      }
+    },
+    "customer-session",
+  )
 }

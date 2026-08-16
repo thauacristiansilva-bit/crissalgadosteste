@@ -1,19 +1,10 @@
 import { NextResponse } from "next/server"
 import { isAdminAuthenticated } from "@/lib/auth"
 import {
-  createFeedback as createLegacyFeedback,
-  getFeedbacks as getLegacyFeedbacks,
-  syncLegacyFeedbackFromTenant,
-} from "@/lib/db"
-import {
   createTenantFeedback,
   getTenantFeedbacks,
   isTenantOperationsReady,
 } from "@/lib/operations-db"
-import {
-  getCurrentDeploymentOrganizationId,
-  isCurrentDeploymentOrganization,
-} from "@/lib/catalog-db"
 import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
@@ -23,6 +14,7 @@ import {
 import {
   canViewFeedback,
 } from "@/lib/tenant-permissions"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
@@ -34,31 +26,36 @@ export async function GET() {
 
   const session = await getVerifiedTenantSession()
 
-  if (
-    session &&
-    (await isTenantOperationsReady(
-      session.organizationId,
-    ).catch(() => false))
-  ) {
-    if (!canViewFeedback(session.role)) {
-      return NextResponse.json(
-        {
-          error:
-            "Seu perfil não pode visualizar avaliações.",
-        },
-        { status: 403 },
-      )
-    }
+  if (!session) {
+    return NextResponse.json(
+      { error: "Sessão tenant obrigatória." },
+      { status: 401 },
+    )
+  }
 
-    return NextResponse.json({
-      feedbacks: await getTenantFeedbacks(
-        session.organizationId,
-      ),
-    })
+  if (!(await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false))) {
+    return NextResponse.json(
+      { error: "Operações PostgreSQL indisponíveis para esta empresa." },
+      { status: 503 },
+    )
+  }
+
+  if (!canViewFeedback(session.role)) {
+    return NextResponse.json(
+      {
+        error:
+          "Seu perfil não pode visualizar avaliações.",
+      },
+      { status: 403 },
+    )
   }
 
   return NextResponse.json({
-    feedbacks: await getLegacyFeedbacks(),
+    feedbacks: await getTenantFeedbacks(
+      session.organizationId,
+    ),
   })
 }
 
@@ -79,65 +76,46 @@ export async function POST(request: Request) {
   }
 
   try {
-    const publicOrganization =
+    const organization =
       await resolvePublicOrganizationForRequest(
         request,
       )
 
-    const organizationId =
-      publicOrganization?.id ||
-      (await getCurrentDeploymentOrganizationId())
+    if (!organization) {
+      throw new Error(
+        "Empresa não identificada. Abra a loja pelo link /loja/{slug}.",
+      )
+    }
 
-    const ready =
-      organizationId &&
-      (await isTenantOperationsReady(
-        organizationId,
-      ).catch(() => false))
+    return runWithTenantRlsScope(
+      [organization.id],
+      undefined,
+      async () => {
+        const ready = await isTenantOperationsReady(
+          organization.id,
+        ).catch(() => false)
 
-    if (!organizationId || !ready) {
-      if (
-        organizationId &&
-        !(await isCurrentDeploymentOrganization(
-          organizationId,
-        ))
-      ) {
-        throw new Error(
-          "Avaliações ainda não foram habilitadas para esta empresa.",
+        if (!ready) {
+          throw new Error(
+            "Avaliações ainda não foram habilitadas para esta empresa.",
+          )
+        }
+
+        const feedback = await createTenantFeedback(
+          organization.id,
+          {
+            orderReference: body.orderReference,
+            rating: body.rating,
+            comment: body.comment,
+          },
         )
-      }
 
-      const feedback = await createLegacyFeedback({
-        orderReference: body.orderReference,
-        rating: body.rating,
-        comment: body.comment,
-      })
-
-      return NextResponse.json(
-        { feedback },
-        { status: 201 },
-      )
-    }
-
-    const feedback = await createTenantFeedback(
-      organizationId,
-      {
-        orderReference: body.orderReference,
-        rating: body.rating,
-        comment: body.comment,
+        return NextResponse.json(
+          { feedback },
+          { status: 201 },
+        )
       },
-    )
-
-    if (
-      await isCurrentDeploymentOrganization(
-        organizationId,
-      )
-    ) {
-      await syncLegacyFeedbackFromTenant(feedback)
-    }
-
-    return NextResponse.json(
-      { feedback },
-      { status: 201 },
+      "public-store",
     )
   } catch (error) {
     return NextResponse.json(
