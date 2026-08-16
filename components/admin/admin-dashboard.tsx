@@ -85,6 +85,14 @@ interface DashboardData {
   staffMembers: StaffMember[]
 }
 
+interface DashboardRefreshPayload extends Partial<DashboardData> {
+  sessionContext?: {
+    email: string
+    role: OrganizationRole
+    workspace: string
+  }
+}
+
 type Section = AdminSection
 
 const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
@@ -154,10 +162,26 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
   )
 
   useEffect(() => {
+    let active = true
+
     const refresh = async () => {
       const response = await fetch("/api/dashboard", { cache: "no-store" }).catch(() => null)
-      if (!response?.ok) return
-      const data = (await response.json()) as Partial<DashboardData>
+      if (!active || !response?.ok) return
+      const data = (await response.json()) as DashboardRefreshPayload
+
+      const sessionChanged =
+        Boolean(data.sessionContext) &&
+        (data.sessionContext?.role !== adminRole ||
+          data.sessionContext?.email.trim().toLowerCase() !==
+            adminEmail.trim().toLowerCase())
+
+      if (sessionChanged && data.sessionContext) {
+        active = false
+        router.replace(data.sessionContext.workspace)
+        router.refresh()
+        return
+      }
+
       if (Array.isArray(data.orders)) setOrders(data.orders)
       if (Array.isArray(data.products)) setProducts(data.products)
       if (Array.isArray(data.customers)) setCustomers(data.customers)
@@ -165,9 +189,14 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
       if (Array.isArray(data.cashSessions)) setCashSessions(data.cashSessions)
       if (Array.isArray(data.financialEntries)) setFinancialEntries(data.financialEntries)
     }
-    const id = window.setInterval(refresh, 5000)
-    return () => window.clearInterval(id)
-  }, [])
+
+    void refresh()
+    const id = window.setInterval(() => void refresh(), 5000)
+    return () => {
+      active = false
+      window.clearInterval(id)
+    }
+  }, [adminEmail, adminRole, router])
 
   const summary = useMemo<DashboardSummary>(() => {
     const valid = orders.filter((order) => order.status !== "cancelled")

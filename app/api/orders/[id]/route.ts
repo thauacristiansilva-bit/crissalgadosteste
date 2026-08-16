@@ -174,6 +174,18 @@ export async function PATCH(
       }
 
       if (session.role === "courier" && body.status) {
+        if (body.status === "cancelled") {
+          return NextResponse.json(
+            {
+              error:
+                "Sua sessão atual é de entregador. O cancelamento deve ser feito no Admin ou Caixa por uma conta autorizada. Pedidos agendados podem ser cancelados normalmente por uma sessão de gestão.",
+              code: "COURIER_CANNOT_CANCEL_ORDER",
+              workspace: "/entregador",
+            },
+            { status: 403 },
+          )
+        }
+
         try {
           await getCourierIdentityForOrderOperation({
             organizationId: session.organizationId,
@@ -201,7 +213,9 @@ export async function PATCH(
           return NextResponse.json(
             {
               error:
-                "A entrega só pode avançar de pronto para em rota e depois para concluído.",
+                "Sua sessão atual é de entregador. No app do entregador, o pedido só pode avançar de pronto para em rota e depois para concluído. Para aceitar, preparar ou cancelar, use uma sessão de gestão no Admin/Caixa.",
+              code: "COURIER_STATUS_TRANSITION_RESTRICTED",
+              workspace: "/entregador",
             },
             { status: 403 },
           )

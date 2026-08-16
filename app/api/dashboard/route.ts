@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getCourierWorkspaceSnapshot } from "@/lib/delivery-dispatch-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
+import { getDefaultOperationalPath } from "@/lib/operational-home"
 
 export const dynamic = "force-dynamic"
 
@@ -19,9 +20,20 @@ export async function GET() {
     session,
     session.operationalPermissions,
   )
+  const sessionContext = {
+    email: session.email,
+    role: session.role,
+    workspace: getDefaultOperationalPath(
+      session.role,
+      session.operationalPermissions,
+    ),
+  }
 
   if (session.role !== "courier") {
-    return NextResponse.json(data)
+    return NextResponse.json({
+      ...data,
+      sessionContext,
+    })
   }
 
   const dispatch = await getCourierWorkspaceSnapshot({
@@ -35,6 +47,7 @@ export async function GET() {
 
   return NextResponse.json({
     ...data,
+    sessionContext,
     orders: data.orders.filter((order) => visibleOrderIds.has(order.id)),
     couriers: dispatch.courier ? [dispatch.courier] : [],
     courierIdentity: dispatch.courier
