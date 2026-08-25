@@ -22,7 +22,7 @@ export default async function AdminPage() {
     demoEnvironment = await getDemoEnvironmentForOrganization(session.organizationId)
   }
 
-  if (session.mode === "tenant" && !demoEnvironment && !(await hasCurrentLegalAcceptance(session.userId))) {
+  if (session.mode === "tenant" && !demoEnvironment && !(await hasCurrentLegalAcceptance(session.userId, session.organizationId))) {
     redirect("/legal/aceite")
   }
 

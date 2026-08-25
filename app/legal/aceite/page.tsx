@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic"
 export default async function LegalAcceptancePage() {
   const session = await getVerifiedTenantSession()
   if (!session) redirect("/login")
-  if (await hasCurrentLegalAcceptance(session.userId)) redirect("/admin")
+  if (await hasCurrentLegalAcceptance(session.userId, session.organizationId)) redirect("/admin")
 
   return (
     <main className="min-h-screen bg-[#fffaf3] px-4 py-10 sm:px-6">
