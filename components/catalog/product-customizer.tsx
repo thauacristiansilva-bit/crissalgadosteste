@@ -110,14 +110,21 @@ export function ProductCustomizer({
       <div className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-gray-400">Monte do seu jeito</p>
+            <p className="text-xs font-black uppercase tracking-wide text-gray-400">{groups.length ? "Monte do seu jeito" : "Detalhes do produto"}</p>
             <h2 className="mt-1 text-2xl font-black text-gray-950">{product.name}</h2>
-            <p className="mt-1 text-sm text-gray-500">A partir de {money(product.price)}</p>
+            <p className="mt-1 text-sm font-bold text-gray-700">{groups.length ? `A partir de ${money(product.price)}` : money(product.price)}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-gray-100 p-2" aria-label="Fechar">
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {(product.image || product.description) && <div className="mt-5 overflow-hidden rounded-2xl border border-gray-100 bg-gray-50">
+          {product.image && <div className="aspect-[16/9] overflow-hidden bg-gray-100"><img src={product.image} alt={product.name} className="h-full w-full object-cover" /></div>}
+          {product.description && <p className="p-4 text-sm leading-relaxed text-gray-600">{product.description}</p>}
+        </div>}
+
+        {!groups.length && <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4"><p className="text-xs font-black uppercase text-emerald-700">Pronto para adicionar</p><p className="mt-1 text-sm text-emerald-900">Este produto não exige escolhas extras. Você pode adicioná-lo ao carrinho agora.</p></div>}
 
         <div className="mt-5 space-y-5">
           {groups.map((group) => {
