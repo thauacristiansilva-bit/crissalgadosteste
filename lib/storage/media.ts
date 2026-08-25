@@ -6,7 +6,10 @@ import {
   mediaStorageMode,
   putR2Object,
 } from "@/lib/storage/r2"
-import { safeImageExtension } from "@/lib/security/image-validation"
+import {
+  safeImageExtension,
+  type SafeImageType,
+} from "@/lib/security/image-validation"
 
 export type MediaArea = "products" | "brand"
 
@@ -22,7 +25,7 @@ export async function storeImage(input: {
   organizationId: string
   area: MediaArea
   bytes: Uint8Array
-  contentType: string
+  contentType: SafeImageType
   filenamePrefix?: string
 }) {
   const extension = safeImageExtension(input.contentType)

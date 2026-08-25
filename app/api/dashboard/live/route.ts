@@ -31,7 +31,7 @@ export async function GET() {
     [session.organizationId],
     session.userId,
     () => getTenantRecentOrders(session.organizationId, 120),
-    "dashboard-live",
+    "tenant-session",
   )
 
   if (session.role !== "courier") {
