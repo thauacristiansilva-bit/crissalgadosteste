@@ -295,6 +295,25 @@ function normalizedSettings(
     businessHours: Array.isArray(patch.businessHours)
       ? patch.businessHours
       : current.businessHours,
+    aboutTitle:
+      patch.aboutTitle !== undefined
+        ? String(patch.aboutTitle).trim().slice(0, 140)
+        : current.aboutTitle,
+    aboutText:
+      patch.aboutText !== undefined
+        ? String(patch.aboutText).trim().slice(0, 2400)
+        : current.aboutText,
+    galleryTitle:
+      patch.galleryTitle !== undefined
+        ? String(patch.galleryTitle).trim().slice(0, 140)
+        : current.galleryTitle,
+    galleryImages: Array.isArray(patch.galleryImages)
+      ? patch.galleryImages
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim().slice(0, 800))
+          .filter(Boolean)
+          .slice(0, 8)
+      : current.galleryImages,
     deliveryPricingMode: [
       "free",
       "fixed",

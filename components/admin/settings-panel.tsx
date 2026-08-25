@@ -1,7 +1,7 @@
 "use client"
 
 import { ChangeEvent, FormEvent, useState } from "react"
-import { Clock3, CreditCard, Globe2, Image as ImageIcon, Link2, MonitorSmartphone, Palette, Printer, Save, ShieldCheck, Star, Store, Upload } from "lucide-react"
+import { Clock3, CreditCard, Globe2, Image as ImageIcon, Images, Link2, MonitorSmartphone, Palette, Printer, Save, ShieldCheck, Star, Store, Trash2, Upload } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
 import type { BusinessHour, Courier, DeliveryZone, StaffMember, StoreSettings } from "@/lib/types"
 import { DeliverySettings } from "@/components/admin/delivery-settings"
@@ -17,6 +17,7 @@ export function SettingsPanel({ settings, deliveryZones, couriers, staffMembers,
   const [draft, setDraft] = useState(settings)
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState<"logo" | "cover" | null>(null)
+  const [galleryUploading, setGalleryUploading] = useState(false)
   const [message, setMessage] = useState("")
   const input = "h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
 
@@ -28,12 +29,60 @@ export function SettingsPanel({ settings, deliveryZones, couriers, staffMembers,
 
   async function uploadBrand(event: ChangeEvent<HTMLInputElement>, target: "logo" | "cover") { const file = event.target.files?.[0]; if (!file) return; setUploading(target); try { const form = new FormData(); form.append("file", file); const response = await fetch("/api/uploads/store-image", { method: "POST", body: form }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Erro no upload."); setDraft((current) => ({ ...current, [target === "logo" ? "logoImage" : "coverImage"]: data.url })); setMessage("Imagem enviada. Clique em Salvar configurações para publicar.") } catch (error) { setMessage(error instanceof Error ? error.message : "Erro ao enviar imagem.") } finally { setUploading(null); event.target.value = "" } }
 
+  async function uploadGallery(event: ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(event.target.files || [])
+    const remaining = Math.max(0, 8 - (draft.galleryImages?.length || 0))
+    const files = selected.slice(0, remaining)
+    if (!files.length) { event.target.value = ""; return }
+    setGalleryUploading(true); setMessage("")
+    try {
+      const urls: string[] = []
+      for (const file of files) {
+        const form = new FormData(); form.append("file", file)
+        const response = await fetch("/api/uploads/store-image", { method: "POST", body: form })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || `Erro ao enviar ${file.name}.`)
+        urls.push(String(data.url || ""))
+      }
+      setDraft((current) => ({ ...current, galleryImages: [...(current.galleryImages || []), ...urls].filter(Boolean).slice(0, 8) }))
+      setMessage(`${urls.length} foto(s) adicionada(s). Clique em Salvar configurações para publicar.`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro ao enviar fotos da galeria.")
+    } finally {
+      setGalleryUploading(false); event.target.value = ""
+    }
+  }
+
   return <div className="mx-auto max-w-6xl space-y-5">
     <form onSubmit={submit} className="space-y-5">
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="mb-5 flex items-center gap-3"><div className="rounded-xl bg-violet-50 p-2.5 text-violet-700"><Palette className="h-5 w-5"/></div><div><h2 className="text-lg font-black">Personalização do site de pedidos</h2><p className="text-sm text-gray-500">Cores, logo, capa estilo YouTube e textos da página do cliente.</p></div></div>
+        <div className="mb-5 flex items-center gap-3"><div className="rounded-xl bg-violet-50 p-2.5 text-violet-700"><Palette className="h-5 w-5"/></div><div><h2 className="text-lg font-black">Identidade visual da empresa</h2><p className="text-sm text-gray-500">Logo, capa, cores e mensagem principal exibidas no site público.</p></div></div>
         <div className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><img src="/saborflow-brand.png" alt="SaborFlow" className="h-12 w-12 rounded-xl object-contain"/><div><p className="text-xs font-black uppercase tracking-[0.2em] text-amber-700">Marca da plataforma protegida</p><p className="text-sm font-bold text-gray-900">SaborFlow™ é fixa no painel administrativo e não pode ser removida pelas configurações da empresa.</p></div></div><div className="grid gap-4 md:grid-cols-2"><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Título da capa</span><input className={input} value={draft.welcomeTitle} onChange={(e) => setDraft({ ...draft, welcomeTitle: e.target.value })}/></label><label className="md:col-span-2"><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Texto da capa</span><textarea rows={3} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm" value={draft.welcomeText} onChange={(e) => setDraft({ ...draft, welcomeText: e.target.value })}/></label><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Cor principal</span><div className="flex gap-2"><input type="color" value={draft.primaryColor} onChange={(e) => setDraft({ ...draft, primaryColor: e.target.value })} className="h-11 w-16 rounded-xl border border-gray-200 p-1"/><input className={input} value={draft.primaryColor} onChange={(e) => setDraft({ ...draft, primaryColor: e.target.value })}/></div></label><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Cor secundária</span><div className="flex gap-2"><input type="color" value={draft.secondaryColor} onChange={(e) => setDraft({ ...draft, secondaryColor: e.target.value })} className="h-11 w-16 rounded-xl border border-gray-200 p-1"/><input className={input} value={draft.secondaryColor} onChange={(e) => setDraft({ ...draft, secondaryColor: e.target.value })}/></div></label><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Fundo do site</span><div className="flex gap-2"><input type="color" value={draft.backgroundColor} onChange={(e) => setDraft({ ...draft, backgroundColor: e.target.value })} className="h-11 w-16 rounded-xl border border-gray-200 p-1"/><input className={input} value={draft.backgroundColor} onChange={(e) => setDraft({ ...draft, backgroundColor: e.target.value })}/></div></label></div>
         <div className="mt-4 grid gap-4 md:grid-cols-2"><div className="rounded-2xl border border-dashed border-gray-300 p-4"><div className="flex items-center gap-2"><ImageIcon className="h-4 w-4 text-violet-600"/><strong className="text-sm">Logo</strong></div>{draft.logoImage && <img src={draft.logoImage} alt="Logo" className="mt-3 h-24 w-24 rounded-2xl object-cover"/>}<label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs font-black text-violet-700"><Upload className="h-4 w-4"/>{uploading === "logo" ? "Enviando..." : "Escolher arquivo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => uploadBrand(e, "logo")} className="hidden"/></label></div><div className="rounded-2xl border border-dashed border-gray-300 p-4"><div className="flex items-center gap-2"><ImageIcon className="h-4 w-4 text-violet-600"/><strong className="text-sm">Capa horizontal</strong></div>{draft.coverImage && <img src={draft.coverImage} alt="Capa" className="mt-3 h-28 w-full rounded-2xl object-cover"/>}<label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs font-black text-violet-700"><Upload className="h-4 w-4"/>{uploading === "cover" ? "Enviando..." : "Escolher capa"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => uploadBrand(e, "cover")} className="hidden"/></label></div></div>
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mb-5 flex items-center gap-3">
+          <div className="rounded-xl bg-rose-50 p-2.5 text-rose-700"><Images className="h-5 w-5"/></div>
+          <div><h2 className="text-lg font-black">Página de apresentação da empresa</h2><p className="text-sm text-gray-500">Conte sua história e mostre fotos do ambiente, produtos e experiência da loja.</p></div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Título da seção Sobre nós</span><input className={input} value={draft.aboutTitle || ""} onChange={(e) => setDraft({ ...draft, aboutTitle: e.target.value })} placeholder={`Sobre a ${draft.storeName}`}/></label>
+          <label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Título da galeria</span><input className={input} value={draft.galleryTitle || ""} onChange={(e) => setDraft({ ...draft, galleryTitle: e.target.value })} placeholder="Conheça nosso espaço"/></label>
+          <label className="md:col-span-2"><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">História / apresentação</span><textarea rows={6} maxLength={2400} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" value={draft.aboutText || ""} onChange={(e) => setDraft({ ...draft, aboutText: e.target.value })} placeholder="Conte de forma breve como a empresa nasceu, o que torna o atendimento especial e o que o cliente encontrará no local."/><span className="mt-1 block text-right text-[11px] text-gray-400">{(draft.aboutText || "").length}/2400</span></label>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-dashed border-gray-300 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div><strong className="text-sm">Galeria da empresa</strong><p className="mt-1 text-xs text-gray-500">Até 8 fotos. Prefira imagens reais do ambiente, fachada, equipe e produtos.</p></div>
+            <label className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black ${(draft.galleryImages?.length || 0) >= 8 ? "pointer-events-none bg-gray-100 text-gray-400" : "bg-rose-50 text-rose-700"}`}><Upload className="h-4 w-4"/>{galleryUploading ? "Enviando..." : "Adicionar fotos"}<input type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={galleryUploading || (draft.galleryImages?.length || 0) >= 8} onChange={uploadGallery} className="hidden"/></label>
+          </div>
+          {(draft.galleryImages?.length || 0) > 0 ? (
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(draft.galleryImages || []).map((image, index) => <div key={`${image}-${index}`} className="group relative overflow-hidden rounded-2xl bg-gray-100"><img src={image} alt={`Galeria ${index + 1}`} className="aspect-[4/3] h-full w-full object-cover"/><button type="button" onClick={() => setDraft((current) => ({ ...current, galleryImages: (current.galleryImages || []).filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-lg bg-black/70 text-white opacity-100 shadow sm:opacity-0 sm:group-hover:opacity-100" aria-label={`Remover foto ${index + 1}`}><Trash2 className="h-4 w-4"/></button></div>)}
+            </div>
+          ) : <div className="mt-4 flex min-h-28 items-center justify-center rounded-2xl bg-gray-50 text-center text-xs text-gray-400">Adicione fotos para criar a galeria pública da empresa.</div>}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -98,7 +147,7 @@ export function SettingsPanel({ settings, deliveryZones, couriers, staffMembers,
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="mb-5 flex items-center gap-3"><div className="rounded-xl bg-fuchsia-50 p-2.5 text-fuchsia-700"><MonitorSmartphone className="h-5 w-5"/></div><div><h2 className="text-lg font-black">Totem, fiscal e rastreamento</h2><p className="text-sm text-gray-500">Módulos preparados para integrações externas.</p></div></div><div className="grid gap-4 md:grid-cols-2"><label className="flex items-center justify-between rounded-xl border border-gray-200 p-4"><span className="font-bold">Modo totem / autoatendimento</span><input type="checkbox" checked={draft.totemEnabled} onChange={(e) => setDraft({ ...draft, totemEnabled: e.target.checked })} className="h-5 w-5"/></label><label className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-4"><span><strong className="block text-sm">Rastreamento ao vivo da entrega</strong><small className="text-gray-500">O cliente vê o GPS somente quando o pedido dele é a entrega ativa do entregador.</small></span><input type="checkbox" checked={draft.deliveryTrackingEnabled !== false} onChange={(e) => setDraft({ ...draft, deliveryTrackingEnabled: e.target.checked })} className="h-5 w-5"/></label><label className="flex items-center justify-between rounded-xl border border-gray-200 p-4"><span className="font-bold">Integração fiscal</span><input type="checkbox" checked={draft.fiscalEnabled} onChange={(e) => setDraft({ ...draft, fiscalEnabled: e.target.checked })} className="h-5 w-5"/></label><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">URL/provedor fiscal</span><input className={input} value={draft.fiscalProviderUrl} onChange={(e) => setDraft({ ...draft, fiscalProviderUrl: e.target.value })} placeholder="Configurar após escolher provedor de NF-e/NFC-e"/></label><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Google Analytics ID</span><input className={input} value={draft.googleAnalyticsId} onChange={(e) => setDraft({ ...draft, googleAnalyticsId: e.target.value })} placeholder="G-XXXXXXXXXX"/></label><label><span className="mb-1.5 block text-xs font-bold uppercase text-gray-500">Meta Pixel ID</span><input className={input} value={draft.metaPixelId} onChange={(e) => setDraft({ ...draft, metaPixelId: e.target.value })}/></label></div></section>
 
       {message && <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">{message}</div>}
-      <button disabled={busy || uploading !== null} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-700 px-6 text-sm font-black text-white shadow-sm hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4"/>{busy ? "Salvando..." : "Salvar configurações"}</button>
+      <button disabled={busy || uploading !== null || galleryUploading} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-700 px-6 text-sm font-black text-white shadow-sm hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4"/>{busy ? "Salvando..." : "Salvar configurações"}</button>
     </form>
     <DeliverySettings settings={draft} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={(next) => { setDraft(next); onSettingsChanged(next) }} onDeliveryZonesChanged={onDeliveryZonesChanged} onCouriersChanged={onCouriersChanged}/>
   </div>

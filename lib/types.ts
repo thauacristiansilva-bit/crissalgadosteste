@@ -369,6 +369,11 @@ export interface StoreSettings {
   backgroundColor: string
   logoImage: string
   coverImage: string
+  /** Conteúdo opcional da landing page pública da empresa. */
+  aboutTitle?: string
+  aboutText?: string
+  galleryTitle?: string
+  galleryImages?: string[]
   googleReviewUrl: string
   googleBusinessUrl: string
   checkoutAfterSubmit: "ask" | "whatsapp" | "site"

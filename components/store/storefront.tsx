@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Info, LogIn, MapPin, MessageCircle, Minus, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
+import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
 import { isStoreOpenNow, zonedDateString, zonedDateTime } from "@/lib/operations"
 import { IMMEDIATE_DELIVERY_MIN_MINUTES, IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
@@ -52,12 +52,16 @@ export function Storefront({
   deliveryZones,
   openNow,
   organization,
+  pageMode = "catalog",
+  publicBasePath,
 }: {
   products: Product[]
   categories: Category[]
   settings: StoreSettings
   deliveryZones: DeliveryZone[]
   openNow: boolean
+  pageMode?: "catalog" | "order"
+  publicBasePath?: string
   organization?: {
     id: string
     name: string
@@ -69,12 +73,19 @@ export function Storefront({
   const cartStorageKey = organization?.slug
     ? `saborflow_cart_v2:${organization.slug}`
     : "saborflow_cart_v2:default"
+  const resolvedBasePath =
+    publicBasePath !== undefined
+      ? publicBasePath.replace(/\/$/, "")
+      : organization?.slug
+        ? `/loja/${encodeURIComponent(organization.slug)}`
+        : ""
+  const landingPath = resolvedBasePath || "/"
+  const catalogPath = `${resolvedBasePath}/cardapio` || "/cardapio"
+  const directOrderPath = `${resolvedBasePath}/pedir` || "/pedir"
 
   const orderPath = (reference: string) =>
-    organization?.slug
-      ? `/loja/${encodeURIComponent(
-          organization.slug,
-        )}/pedido/${encodeURIComponent(reference)}`
+    resolvedBasePath
+      ? `${resolvedBasePath}/pedido/${encodeURIComponent(reference)}`
       : `/pedido/${encodeURIComponent(reference)}`
   const [isOpen, setIsOpen] = useState(openNow)
   const [search, setSearch] = useState("")
@@ -577,13 +588,21 @@ export function Storefront({
 
   return (
     <div style={{ ...themeStyle, backgroundColor: settings.backgroundColor }} className="min-h-screen text-gray-950">
-      {settings.clientAccountsEnabled && (
-        <header className="border-b border-black/5 bg-white/95 backdrop-blur">
-          <div className="mx-auto flex max-w-7xl items-center justify-end gap-2 px-4 py-2 sm:px-6">
-            <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{customer.loyaltyPoints} pts</span>}</button>
+      <header className="sticky top-0 z-40 border-b border-black/5 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
+          <a href={landingPath} className="inline-flex min-w-0 items-center gap-2 rounded-xl px-1 py-1 text-sm font-black text-gray-800">
+            <Home className="h-4 w-4 shrink-0" />
+            <span className="hidden truncate sm:inline">{settings.storeName}</span>
+          </a>
+          <div className="flex items-center gap-2">
+            <a href={catalogPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "catalog" ? "bg-gray-950 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Cardápio</a>
+            <a href={directOrderPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "order" ? "text-white" : "text-gray-600 hover:bg-gray-100"}`} style={pageMode === "order" ? { backgroundColor: settings.primaryColor } : undefined}>Fazer pedido</a>
+            {settings.clientAccountsEnabled && (
+              <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{customer.loyaltyPoints} pts</span>}</button>
+            )}
           </div>
-        </header>
-      )}
+        </div>
+      </header>
 
       <main className="mx-auto max-w-7xl px-4 pb-28 sm:px-6">
         <section className="pt-4 sm:pt-5">
@@ -619,7 +638,18 @@ export function Storefront({
           </div>
         </section>
 
-        <section className="sticky top-0 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        <section className="mt-6 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em]" style={{ color: settings.primaryColor }}>{pageMode === "order" ? "Pedido online" : "Cardápio digital"}</p>
+              <h2 className="mt-1 text-2xl font-black">{pageMode === "order" ? "Monte seu pedido" : "Escolha seus favoritos"}</h2>
+              <p className="mt-1 text-sm text-gray-500">{pageMode === "order" ? "Adicione os itens ao carrinho e finalize com entrega ou retirada." : "Veja produtos, preços, adicionais e disponibilidade em tempo real."}</p>
+            </div>
+            {pageMode === "catalog" && <a href={directOrderPath} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-white" style={{ backgroundColor: settings.primaryColor }}><ShoppingBag className="h-4 w-4" />Fazer pedido</a>}
+          </div>
+        </section>
+
+        <section className="sticky top-14 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
             <label className="relative min-w-[190px] max-w-xs flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="O que você procura?" className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-orange-100"/></label>
             <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={category === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`h-11 whitespace-nowrap border-b-2 px-3 text-sm font-black ${category === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}>{item}</button>)}</div>

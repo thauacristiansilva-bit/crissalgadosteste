@@ -17,17 +17,31 @@ export function LinksPanel({
 
   useEffect(() => setOrigin(window.location.origin), [])
 
-  const welcome = useMemo(() => {
+  const base = useMemo(() => {
     if (!origin) return "https://seu-dominio.com"
-
-    if (demoMode && organizationSlug) {
-      return `${origin}/loja/${encodeURIComponent(organizationSlug)}`
-    }
-
+    if (organizationSlug) return `${origin}/loja/${encodeURIComponent(organizationSlug)}`
     return origin
-  }, [demoMode, organizationSlug, origin])
+  }, [organizationSlug, origin])
 
-  const products = `${welcome}#cardapio`
+  const links = useMemo(() => {
+    const site = base
+    const catalog = `${base}/cardapio`
+    const order = `${base}/pedir`
+
+    return demoMode
+      ? [
+          ["Página DEMO", site, "Apresentação da empresa no ambiente temporário."],
+          ["Cardápio DEMO", catalog, "Abre diretamente os produtos da DEMO."],
+          ["Pedido DEMO", order, "Link direto para começar um pedido na DEMO."],
+        ]
+      : [
+          ["Site da empresa", site, "Landing page com fotos, história, localização, redes e botões de pedido."],
+          ["Cardápio", catalog, "Ideal para bio, Google ou clientes que querem consultar produtos."],
+          ["Pedido direto", order, "Ideal para WhatsApp, campanhas e clientes que já querem comprar."],
+          ["Link para Instagram", `${site}?origem=instagram`, "Use na bio ou em campanhas para identificar a origem futuramente."],
+          ["Link para WhatsApp", `${order}?origem=whatsapp`, "Leva direto ao fluxo de pedido vindo do WhatsApp."],
+        ]
+  }, [base, demoMode])
 
   function qr(url: string) {
     return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(url)}`
@@ -41,10 +55,6 @@ export function LinksPanel({
     }
   }
 
-  const links = demoMode
-    ? [["Página DEMO", welcome], ["Cardápio DEMO", products]]
-    : [["Página de boas-vindas", welcome], ["Página de produtos", products]]
-
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -52,12 +62,17 @@ export function LinksPanel({
         <p className="mt-1 text-sm text-gray-500">
           {demoMode
             ? "Todos os links abaixo pertencem exclusivamente a este ambiente DEMO temporário."
-            : "Compartilhe seu cardápio em WhatsApp, Instagram, cartões e mesas."}
+            : "Agora sua empresa tem página de apresentação, cardápio e pedido direto separados."}
         </p>
+        {!demoMode && (
+          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-800">
+            Em domínio próprio, a estrutura fica ainda mais simples: <strong>/</strong> para o site, <strong>/cardapio</strong> para produtos e <strong>/pedir</strong> para pedido direto.
+          </div>
+        )}
       </section>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {links.map(([title, url]) => (
+        {links.map(([title, url, description]) => (
           <section key={title} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="grid gap-5 sm:grid-cols-[180px_1fr]">
               <div className="flex items-center justify-center rounded-2xl bg-gray-50 p-3">
@@ -68,6 +83,7 @@ export function LinksPanel({
                   <QrCode className="h-5 w-5 text-blue-700" />
                   <h2 className="text-lg font-black">{title}</h2>
                 </div>
+                <p className="mt-2 text-xs leading-5 text-gray-500">{description}</p>
                 <a href={url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 break-all text-sm font-bold text-blue-700">
                   {url}
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -80,11 +96,6 @@ export function LinksPanel({
                     <Share2 className="h-4 w-4" />Compartilhar
                   </button>
                 </div>
-                <p className="mt-4 text-xs text-gray-400">
-                  {demoMode
-                    ? "QR temporário da DEMO. Ele deixa de funcionar quando o ambiente expirar."
-                    : "Você também pode baixar o QR pela própria imagem usando o navegador."}
-                </p>
               </div>
             </div>
           </section>

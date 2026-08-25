@@ -83,7 +83,7 @@ export default async function TenantOrderPage({
           settings={settings}
           storePath={`/loja/${encodeURIComponent(
             organization.slug,
-          )}`}
+          )}/cardapio`}
         />
       )
     },

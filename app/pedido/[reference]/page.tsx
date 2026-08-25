@@ -50,7 +50,7 @@ export default async function OrderPage({
         <OrderTracker
           initialOrder={order}
           settings={settings}
-          storePath={`/loja/${encodeURIComponent(organization.slug)}`}
+          storePath="/cardapio"
         />
       )
     },
