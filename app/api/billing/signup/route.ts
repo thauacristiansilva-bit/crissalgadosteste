@@ -31,15 +31,21 @@ export async function POST(request: Request) {
     name?: string
     email?: string
     password?: string
+    cpf?: string
+    hasCnpj?: boolean
+    cnpj?: string
   } | null
-  if (!body?.name || !body.email || !body.password) {
-    return NextResponse.json({ error: "Nome, e-mail e senha são obrigatórios." }, { status: 400 })
+  if (!body?.name || !body.email || !body.password || !body.cpf) {
+    return NextResponse.json({ error: "Nome, e-mail, senha e CPF do responsável são obrigatórios." }, { status: 400 })
   }
   try {
     const account = await registerCommercialUser({
       name: body.name,
       email: body.email,
       password: body.password,
+      cpf: body.cpf,
+      hasCnpj: Boolean(body.hasCnpj),
+      cnpj: body.cnpj || "",
     })
     const response = NextResponse.json({ ok: true, email: account.email }, { status: 201 })
     response.cookies.set(

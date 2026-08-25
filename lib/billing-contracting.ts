@@ -13,6 +13,11 @@ import type {
   SubscriptionStatus,
 } from "@/lib/billing-types"
 import { getPostgresPool } from "@/lib/postgres"
+import {
+  commercialRegistrationMetadata,
+  normalizeCommercialRegistration,
+  type CommercialRegistrationInput,
+} from "@/lib/commercial-registration"
 
 const emptyEntitlements: PlanEntitlements = {
   maxOrganizations: 0,
@@ -110,13 +115,14 @@ export async function registerCommercialUser(input: {
   name: string
   email: string
   password: string
-}) {
+} & CommercialRegistrationInput) {
   const name = input.name.trim()
   const email = normalizeEmail(input.email)
   if (name.length < 2) throw new Error("Informe seu nome.")
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("Informe um e-mail válido.")
   if (input.password.length < 12) throw new Error("A senha deve ter pelo menos 12 caracteres.")
 
+  const registration = normalizeCommercialRegistration(input)
   const client = await getPostgresPool().connect()
   try {
     await client.query("BEGIN")
@@ -125,17 +131,31 @@ export async function registerCommercialUser(input: {
     if (existing.rowCount) {
       throw new Error("Já existe uma conta com este e-mail. Use a opção de entrar para continuar a contratação.")
     }
+
+    const documentOwner = await client.query(
+      `SELECT id FROM sf_users WHERE cpf = $1 OR cpf = $2 LIMIT 1`,
+      [registration.cpfHash, registration.cpfDigits],
+    )
+    if (documentOwner.rowCount) {
+      throw new Error("Este CPF já está vinculado a uma conta SaborFlow.")
+    }
+
     const userId = randomUUID()
     const billingAccountId = randomUUID()
     await client.query(`
-      INSERT INTO sf_users (id, name, email, password_hash, password_updated_at, status)
-      VALUES ($1, $2, $3, $4, now(), 'active')
-    `, [userId, name, email, hashAdminPassword(input.password)])
+      INSERT INTO sf_users (id, name, email, cpf, password_hash, password_updated_at, status)
+      VALUES ($1, $2, $3, $4, $5, now(), 'active')
+    `, [userId, name, email, registration.cpfHash, hashAdminPassword(input.password)])
     await client.query(`
       INSERT INTO sf_billing_accounts (
         id, owner_user_id, billing_email, status, entitlement_overrides, metadata
       ) VALUES ($1, $2, $3, 'active', '{}'::jsonb, $4::jsonb)
-    `, [billingAccountId, userId, email, JSON.stringify({ signup: "phase-14", source: "public-contracting" })])
+    `, [
+      billingAccountId,
+      userId,
+      email,
+      JSON.stringify(commercialRegistrationMetadata(registration, "public-contracting-password")),
+    ])
     await client.query("COMMIT")
     return { userId, billingAccountId, email }
   } catch (error) {
@@ -143,6 +163,108 @@ export async function registerCommercialUser(input: {
     throw error
   } finally {
     client.release()
+  }
+}
+
+export async function registerCommercialGoogleUser(input: {
+  name: string
+  email: string
+  googleSubject: string
+} & CommercialRegistrationInput) {
+  const name = input.name.trim()
+  const email = normalizeEmail(input.email)
+  const googleSubject = input.googleSubject.trim()
+  if (name.length < 2 || !googleSubject) throw new Error("Conta Google inválida.")
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("Conta Google sem e-mail válido.")
+
+  const registration = normalizeCommercialRegistration(input)
+  const client = await getPostgresPool().connect()
+  try {
+    await client.query("BEGIN")
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`saborflow-google-signup:${googleSubject}`])
+
+    const googleExisting = await client.query<{ id: string; email: string | null }>(
+      `SELECT id, email FROM sf_users WHERE google_subject = $1 LIMIT 1`,
+      [googleSubject],
+    )
+    if (googleExisting.rowCount) {
+      throw new Error("Esta Conta Google já está vinculada ao SaborFlow. Use a opção de entrar.")
+    }
+
+    const emailExisting = await client.query<{ google_subject: string | null }>(
+      `SELECT google_subject FROM sf_users WHERE lower(email) = lower($1) LIMIT 1`,
+      [email],
+    )
+    if (emailExisting.rowCount) {
+      throw new Error("Já existe uma conta SaborFlow com este e-mail. Entre com sua senha; a vinculação do Google será feita pela área de segurança.")
+    }
+
+    const documentOwner = await client.query(
+      `SELECT id FROM sf_users WHERE cpf = $1 OR cpf = $2 LIMIT 1`,
+      [registration.cpfHash, registration.cpfDigits],
+    )
+    if (documentOwner.rowCount) {
+      throw new Error("Este CPF já está vinculado a uma conta SaborFlow.")
+    }
+
+    const userId = randomUUID()
+    const billingAccountId = randomUUID()
+    await client.query(`
+      INSERT INTO sf_users (id, name, email, cpf, google_subject, password_hash, status, last_login_at)
+      VALUES ($1, $2, $3, $4, $5, NULL, 'active', now())
+    `, [userId, name, email, registration.cpfHash, googleSubject])
+    await client.query(`
+      INSERT INTO sf_billing_accounts (
+        id, owner_user_id, billing_email, status, entitlement_overrides, metadata
+      ) VALUES ($1, $2, $3, 'active', '{}'::jsonb, $4::jsonb)
+    `, [
+      billingAccountId,
+      userId,
+      email,
+      JSON.stringify(commercialRegistrationMetadata(registration, "public-contracting-google")),
+    ])
+    await client.query("COMMIT")
+    return { userId, billingAccountId, email }
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+export async function authenticateCommercialGoogleUser(input: {
+  googleSubject: string
+  email: string
+}) {
+  const result = await getPostgresPool().query<{
+    id: string
+    email: string
+    status: string
+  }>(
+    `
+      SELECT id, email, status
+      FROM sf_users
+      WHERE google_subject = $1
+      LIMIT 1
+    `,
+    [input.googleSubject.trim()],
+  )
+  const user = result.rows[0]
+  if (!user || user.status !== "active") return null
+  if (normalizeEmail(user.email) !== normalizeEmail(input.email)) return null
+
+  await getPostgresPool().query(
+    `UPDATE sf_users SET last_login_at = now(), updated_at = now() WHERE id = $1`,
+    [user.id],
+  )
+
+  const account = await getBillingAccountForUser(user.id)
+  if (!account) return null
+  return {
+    userId: user.id,
+    billingAccountId: account.id,
+    email: user.email,
   }
 }
 

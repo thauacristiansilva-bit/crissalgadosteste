@@ -1,7 +1,8 @@
 "use client"
 
-import { FormEvent, useEffect, useMemo, useState } from "react"
-import { Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, UserRound } from "lucide-react"
+import Script from "next/script"
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
+import { Building2, Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, ShieldCheck, UserRound } from "lucide-react"
 import type { BillingCycle, CommercialBillingStatus, CommercialPlan } from "@/lib/billing-types"
 
 function money(cents: number | null, currency: string) {
@@ -11,6 +12,27 @@ function money(cents: number | null, currency: string) {
 
 function limit(value: number | null) {
   return value === null ? "Ilimitado" : String(value)
+}
+
+function onlyDigits(value: string, max: number) {
+  return value.replace(/\D/g, "").slice(0, max)
+}
+
+function formatCpf(value: string) {
+  const digits = onlyDigits(value, 11)
+  return digits
+    .replace(/^(\d{3})(\d)/, "$1.$2")
+    .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1-$2")
+}
+
+function formatCnpj(value: string) {
+  const digits = onlyDigits(value, 14)
+  return digits
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2")
+    .replace(/(\/\d{4})(\d)/, "$1-$2")
 }
 
 export function CommercialCheckout() {
@@ -23,7 +45,18 @@ export function CommercialCheckout() {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [cpf, setCpf] = useState("")
+  const [hasCnpj, setHasCnpj] = useState(true)
+  const [cnpj, setCnpj] = useState("")
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
+  const [googleReady, setGoogleReady] = useState(false)
+  const googleButtonRef = useRef<HTMLDivElement | null>(null)
+  const googleFlowRef = useRef({ mode, cpf, hasCnpj, cnpj })
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
+
+  useEffect(() => {
+    googleFlowRef.current = { mode, cpf, hasCnpj, cnpj }
+  }, [mode, cpf, hasCnpj, cnpj])
 
   async function load() {
     setLoading(true)
@@ -57,7 +90,11 @@ export function CommercialCheckout() {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "signup" ? { name, email, password } : { email, password }),
+        body: JSON.stringify(
+          mode === "signup"
+            ? { name, email, password, cpf, hasCnpj, cnpj }
+            : { email, password },
+        ),
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || "Não foi possível continuar.")
@@ -68,6 +105,49 @@ export function CommercialCheckout() {
       setBusy(false)
     }
   }
+
+  async function authenticateWithGoogle(credential: string) {
+    const flow = googleFlowRef.current
+    setBusy(true)
+    setError("")
+    try {
+      const response = await fetch("/api/billing/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: flow.mode,
+          credential,
+          cpf: flow.cpf,
+          hasCnpj: flow.hasCnpj,
+          cnpj: flow.cnpj,
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || "Não foi possível continuar com Google.")
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível continuar com Google.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!googleReady || !googleClientId || !googleButtonRef.current || !window.google) return
+    googleButtonRef.current.innerHTML = ""
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: (response: { credential: string }) => void authenticateWithGoogle(response.credential),
+    })
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      width: 400,
+      shape: "rectangular",
+      text: "continue_with",
+      locale: "pt-BR",
+    })
+  }, [googleReady, googleClientId])
 
   async function checkout(planCode: string) {
     setBusy(true)
@@ -94,6 +174,7 @@ export function CommercialCheckout() {
 
   return (
     <div className="space-y-6">
+      {googleClientId && <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={() => setGoogleReady(true)} />}
       {error && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}
 
       {!status?.authenticated ? (
@@ -102,10 +183,51 @@ export function CommercialCheckout() {
             <button type="button" onClick={() => setMode("signup")} className={`flex-1 rounded-lg px-3 py-2 text-sm font-black ${mode === "signup" ? "bg-white shadow-sm" : "text-gray-500"}`}>Criar conta</button>
             <button type="button" onClick={() => setMode("signin")} className={`flex-1 rounded-lg px-3 py-2 text-sm font-black ${mode === "signin" ? "bg-white shadow-sm" : "text-gray-500"}`}>Já tenho conta</button>
           </div>
-          <form onSubmit={authenticate} className="mt-6 space-y-4">
+
+          {mode === "signup" && (
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                <div>
+                  <p className="text-sm font-black text-gray-900">Identificação do responsável</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-600">O CPF é obrigatório para o dono ou administrador responsável pela conta. Nesta etapa validamos os dígitos do documento; a consulta oficial à base cadastral será conectada separadamente.</p>
+                </div>
+              </div>
+
+              <label className="mt-4 block">
+                <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">CPF do responsável</span>
+                <input required inputMode="numeric" autoComplete="off" value={cpf} onChange={(event) => setCpf(formatCpf(event.target.value))} placeholder="000.000.000-00" className="h-12 w-full rounded-xl border border-gray-200 bg-white px-3 outline-none focus:border-amber-500" />
+              </label>
+
+              <div className="mt-4">
+                <span className="mb-2 block text-xs font-black uppercase tracking-wide text-gray-500">A empresa possui CNPJ?</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setHasCnpj(true)} className={`h-11 rounded-xl border text-sm font-black ${hasCnpj ? "border-amber-500 bg-white text-amber-800 shadow-sm" : "border-gray-200 bg-white/60 text-gray-500"}`}>Sim, possui</button>
+                  <button type="button" onClick={() => { setHasCnpj(false); setCnpj("") }} className={`h-11 rounded-xl border text-sm font-black ${!hasCnpj ? "border-amber-500 bg-white text-amber-800 shadow-sm" : "border-gray-200 bg-white/60 text-gray-500"}`}>Ainda não</button>
+                </div>
+              </div>
+
+              {hasCnpj && (
+                <label className="mt-4 block">
+                  <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">CNPJ da empresa</span>
+                  <div className="relative"><Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required inputMode="numeric" value={cnpj} onChange={(event) => setCnpj(formatCnpj(event.target.value))} placeholder="00.000.000/0000-00" className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 outline-none focus:border-amber-500" /></div>
+                </label>
+              )}
+            </div>
+          )}
+
+          {googleClientId && (
+            <div className="mt-6">
+              <div ref={googleButtonRef} className="flex min-h-11 justify-center" />
+              {mode === "signup" && <p className="mt-2 text-center text-[11px] leading-4 text-gray-500">Preencha CPF/CNPJ acima antes de continuar com Google.</p>}
+              <div className="my-5 flex items-center gap-3"><div className="h-px flex-1 bg-gray-200" /><span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">ou use e-mail e senha</span><div className="h-px flex-1 bg-gray-200" /></div>
+            </div>
+          )}
+
+          <form onSubmit={authenticate} className={googleClientId ? "space-y-4" : "mt-6 space-y-4"}>
             {mode === "signup" && (
               <label className="block">
-                <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">Nome</span>
+                <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">Nome do responsável</span>
                 <div className="relative"><UserRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required value={name} onChange={(event) => setName(event.target.value)} className="h-12 w-full rounded-xl border border-gray-200 pl-9 pr-3 outline-none focus:border-amber-500" /></div>
               </label>
             )}

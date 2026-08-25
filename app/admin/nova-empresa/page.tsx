@@ -3,6 +3,7 @@ import { getAdminSession } from "@/lib/auth"
 import { getCommercialBillingSession } from "@/lib/billing-commercial-session"
 import { getBillingSnapshotForUser } from "@/lib/billing-db"
 import { OrganizationOnboardingForm } from "@/components/admin/organization-onboarding-form"
+import { getCommercialRegistrationProfile } from "@/lib/commercial-registration"
 
 export const dynamic = "force-dynamic"
 
@@ -27,10 +28,15 @@ export default async function NewOrganizationPage() {
     redirect("/contratar/retorno")
   }
 
+  const registration = billing.usage.organizations === 0
+    ? await getCommercialRegistrationProfile(commercial.userId)
+    : null
+
   return (
     <OrganizationOnboardingForm
       mode={billing.usage.organizations === 0 ? "first" : "additional"}
       initialBilling={billing}
+      initialRegistration={registration}
     />
   )
 }

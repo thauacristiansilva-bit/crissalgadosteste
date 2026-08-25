@@ -16,19 +16,22 @@ import {
   LoaderCircle,
 } from "lucide-react"
 import type { BillingSnapshot } from "@/lib/billing-types"
+import type { CommercialRegistrationProfile } from "@/lib/commercial-registration"
 
 export function OrganizationOnboardingForm({
   mode = "additional",
   initialBilling = null,
+  initialRegistration = null,
 }: {
   mode?: "first" | "additional"
   initialBilling?: BillingSnapshot | null
+  initialRegistration?: CommercialRegistrationProfile | null
 }) {
   const router = useRouter()
   const [personType, setPersonType] =
-    useState<"PF" | "PJ">("PJ")
+    useState<"PF" | "PJ">(initialRegistration?.companyPersonType || "PJ")
   const [document, setDocument] =
-    useState("")
+    useState(initialRegistration?.companyDocument || "")
   const [tradeName, setTradeName] =
     useState("")
   const [legalName, setLegalName] =
@@ -162,6 +165,13 @@ export function OrganizationOnboardingForm({
           <div className={`mt-5 rounded-xl border px-4 py-3 text-sm font-semibold ${billing.capacity.canCreateOrganization ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
             Lojas utilizadas: {billing.usage.organizations} / {billing.entitlements.maxOrganizations === null ? "∞" : billing.entitlements.maxOrganizations}.
             {!billing.capacity.canCreateOrganization && " O limite atual foi atingido. Faça upgrade do plano antes de adicionar outra loja."}
+          </div>
+        )}
+
+        {mode === "first" && initialRegistration && (
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <p className="font-black">Dados do cadastro reaproveitados</p>
+            <p className="mt-1 text-xs leading-5">CPF do responsável terminado em <strong>{initialRegistration.responsibleCpfLast4 || "••••"}</strong>. {initialRegistration.companyPersonType === "PJ" && initialRegistration.companyDocument ? "O CNPJ informado no cadastro já foi preenchido abaixo." : "Como esta conta foi criada sem CNPJ, confirme o CPF da empresa individual abaixo."}</p>
           </div>
         )}
 

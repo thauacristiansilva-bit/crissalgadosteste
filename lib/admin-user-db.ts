@@ -165,6 +165,46 @@ export async function authenticateAdminUser(
   }
 }
 
+
+export async function authenticateAdminGoogleUser(
+  googleSubject: string,
+  email: string,
+): Promise<AuthenticatedAdminUser | null> {
+  const result = await getPostgresPool().query<AdminUserCredentialRow>(
+    `
+      SELECT id, name, email, password_hash, status
+      FROM sf_users
+      WHERE google_subject = $1
+      LIMIT 1
+    `,
+    [googleSubject.trim()],
+  )
+
+  const row = result.rows[0]
+  if (
+    !row ||
+    row.status !== "active" ||
+    row.email.trim().toLowerCase() !== email.trim().toLowerCase()
+  ) {
+    return null
+  }
+
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET last_login_at = now(), updated_at = now()
+      WHERE id = $1
+    `,
+    [row.id],
+  )
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+  }
+}
+
 export async function upgradeLegacyAdminPassword(
   email: string,
   password: string,

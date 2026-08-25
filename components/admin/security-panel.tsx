@@ -1,15 +1,18 @@
 "use client"
 
+import Script from "next/script"
 import {
   FormEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import type {
   OrganizationRole,
 } from "@/lib/tenant-context"
 import { HelpLabel } from "@/components/admin/help-tip"
+
 
 type DomainStatus = {
   domain: string
@@ -118,6 +121,12 @@ export function SecurityPanel({
     setPasswordBusy,
   ] = useState(false)
 
+  const [googleLink, setGoogleLink] = useState<{ configured: boolean; linked: boolean; email: string } | null>(null)
+  const [googleMessage, setGoogleMessage] = useState("")
+  const [googleReady, setGoogleReady] = useState(false)
+  const googleButtonRef = useRef<HTMLDivElement | null>(null)
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
+
   const [
     timeZone,
     setTimeZone,
@@ -180,9 +189,49 @@ export function SecurityPanel({
     setTimeZone(next.timeZone)
   }
 
+  async function reloadGoogle() {
+    const response = await fetch("/api/admin/google-link", { cache: "no-store" })
+    const result = await response.json().catch(() => null)
+    if (response.ok && result) setGoogleLink(result)
+  }
+
+  async function linkGoogle(credential: string) {
+    setGoogleMessage("")
+    const response = await fetch("/api/admin/google-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok) {
+      setGoogleMessage(result?.error || "Não foi possível vincular o Google.")
+      return
+    }
+    setGoogleMessage("Conta Google vinculada. No próximo login você já poderá usar o Google.")
+    await reloadGoogle()
+  }
+
   useEffect(() => {
     void reload()
+    void reloadGoogle()
   }, [])
+
+  useEffect(() => {
+    if (!googleReady || !googleClientId || !googleButtonRef.current || !window.google || googleLink?.linked) return
+    googleButtonRef.current.innerHTML = ""
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: (response: { credential: string }) => void linkGoogle(response.credential),
+    })
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      width: 360,
+      shape: "rectangular",
+      text: "continue_with",
+      locale: "pt-BR",
+    })
+  }, [googleReady, googleClientId, googleLink?.linked])
 
   const printCommand =
     useMemo(() => {
@@ -490,6 +539,7 @@ export function SecurityPanel({
 
   return (
     <div className="space-y-5">
+      {googleClientId && <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={() => setGoogleReady(true)} />}
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 className="text-lg font-black">
           Minha conta
@@ -559,6 +609,32 @@ export function SecurityPanel({
           <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
             {passwordMessage}
           </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-black">Login com Google</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Vincule a mesma Conta Google do seu e-mail SaborFlow para entrar no painel sem digitar a senha.
+        </p>
+
+        {!googleClientId || googleLink?.configured === false ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Login com Google ainda não foi habilitado nas variáveis do Railway.
+          </div>
+        ) : googleLink?.linked ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            Conta Google vinculada a <strong>{googleLink.email}</strong>.
+          </div>
+        ) : (
+          <div className="mt-4">
+            <div ref={googleButtonRef} className="min-h-11 max-w-sm" />
+            <p className="mt-2 text-xs leading-5 text-gray-500">Use exatamente a Conta Google com o e-mail <strong>{googleLink?.email || "da sua conta SaborFlow"}</strong>.</p>
+          </div>
+        )}
+
+        {googleMessage && (
+          <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{googleMessage}</p>
         )}
       </section>
 
