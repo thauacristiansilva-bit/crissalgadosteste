@@ -1,187 +1,127 @@
-# CrisFlow / Cris Salgados — plataforma de pedidos e operação
+# SaborFlow
 
-Sistema Next.js 16 que reúne **site do cliente, delivery, retirada, PDV, cozinha/KDS, estoque, clientes, caixa, marketing e administração** no mesmo servidor.
+SaborFlow é uma plataforma SaaS multiempresa para pedidos, cardápio digital, PDV, cozinha, estoque, clientes, financeiro, marketing, entregas e gestão.
 
-> Nome padrão nesta versão: **CrisFlow**. Em Admin → Configurações você pode trocar o nome do sistema, cores, logo e capa sem editar código.
+A aplicação usa **Next.js 16 + React 19 + PostgreSQL** e mantém os dados operacionais separados por organização/empresa.
 
-## O que já está incluído
+## Principais áreas
 
-### Site do cliente
-- Capa horizontal configurável (estilo banner/capa), logo, cores e textos editáveis pelo admin.
-- Cardápio, categorias, busca, destaques, fotos, carrinho e cupom.
-- Retirada ou delivery.
-- Agendamento por dia e horário, respeitando o expediente.
-- Delivery com Google Maps, GPS de alta precisão, pino arrastável e clique/toque para ajustar o ponto.
-- CEP **opcional**: quando usado, ViaCEP preenche rua, bairro, cidade e estado; o cliente informa o número.
-- Geocodificação/reversa pelo Google Maps para refinar o endereço quando o pino muda.
-- Taxa calculada pela área de entrega cadastrada no mapa do admin.
-- PIX, dinheiro, cartão, troco e observações.
-- Login de cliente com CPF + PIN e opção “manter login salvo”. O CPF é usado como identificador; o PIN evita que qualquer pessoa que saiba o CPF consiga entrar.
-- Dados do cliente logado preenchem pedidos futuros.
-- Pontos de fidelidade.
-- Depois do pedido: escolha entre abrir WhatsApp com o resumo pronto ou acompanhar pelo site.
-- Página de acompanhamento por referência.
-- Feedback de 1 a 5 com emojis após conclusão.
-- Chatbot rápido para horário, entrega, pagamento e WhatsApp.
+### Loja do cliente
+- Cardápio online com busca, categorias, complementos e carrinho.
+- Delivery, retirada e agendamento.
+- Cálculo de entrega e endereço com Google Maps.
+- PIX, dinheiro, cartão, cupons e observações.
+- Conta opcional de cliente, fidelidade e acompanhamento do pedido.
+- Informações da loja, redes sociais, horários e atendimento rápido.
 
-### Admin
-- Dashboard com indicadores e alerta de caixa fechado.
-- Pedidos em tempo real, filtros, pagamento, entregador e status.
-- Impressão manual de ticket de cozinha e cliente.
-- Download do ticket do cliente em PDF.
-- Fila para impressão automática com agente Windows.
-- PDV/balcão com o mesmo cardápio e estoque.
-- Cozinha/KDS com relógio, ordem por horário prometido e prioridade verde/amarela/vermelha.
-- Inventário: disponibilidade, estoque, estoque mínimo e alertas.
-- Cardápio: criar/editar produtos, foto por arquivo local, destaque, disponibilidade e estoque.
-- Categorias.
-- Clientes: busca, segmentação automática, status, pontos, WhatsApp, novo cliente, importação CSV e exportação CSV.
-- Vendas e caixa: abertura/fechamento, lançamentos financeiros, histórico e CSV.
-- Marketing: cupons, fidelidade, segmentos, mensagens de WhatsApp, links do Google e rastreamento.
-- Avaliações internas e atalho para o link oficial de avaliação no Google.
-- QR Codes para página principal e cardápio.
-- Equipe e funções (cadastro de colaboradores e papéis operacionais).
-- Configurações de pagamentos, negócio, horários, login do cliente, impressão, Google, fiscal e totem.
-- Cadastro de entregadores.
-- Áreas/taxas de delivery no Google Maps.
-- Totem/autoatendimento em `/totem` quando habilitado.
+### Painel administrativo
+- Visão geral e indicadores.
+- Pedidos, PDV e cozinha/KDS.
+- Caixa, financeiro e DRE.
+- Produtos, categorias e estoque.
+- Clientes, CRM, fidelidade, avaliações, cupons e campanhas.
+- QR Codes e links públicos.
+- Equipe, funções e permissões.
+- Integrações, grupo empresarial, relatórios e operação alimentar.
+- Plano, cobrança e Mercado Pago.
+- Domínios personalizados e estrutura multiempresa.
 
-## Limites de integrações externas desta versão
+## Requisitos locais
 
-Algumas funções dependem de credenciais/serviços de terceiros e por isso ficam preparadas, mas não podem ser “inventadas” dentro do ZIP:
+- Node.js 22 recomendado.
+- npm.
+- PostgreSQL acessível pela variável `DATABASE_URL`.
 
-- **Avaliação Google:** o sistema registra a nota interna e abre o link configurado para o cliente publicar a avaliação no Google. Ele não publica a nota no Google sem a ação do cliente.
-- **WhatsApp em massa:** abre conversas com mensagem pronta. Envio servidor-a-servidor em massa exige sua conta/API oficial do WhatsApp Business e regras próprias da Meta.
-- **NF-e/NFC-e:** há campo para provedor fiscal e atalho por pedido. Emissão fiscal real exige escolher um provedor, certificado/credenciais e dados tributários da empresa.
-- **Equipe:** o módulo cadastra funções e permissões-base. Nesta entrega, o login do painel continua sendo o login administrativo principal; autenticação individual de cada funcionário pode ser ligada depois sem mudar os cadastros.
+## Instalação local
 
-## Configuração local
-
-Abra a pasta que contém `package.json` e rode:
+Na pasta que contém `package.json`:
 
 ```powershell
-npm install
+npm ci
+Copy-Item .env.example .env.local
 npm run dev
 ```
 
-- Cliente: `http://localhost:3000`
-- Admin: `http://localhost:3000/admin`
-- Totem: `http://localhost:3000/totem`
+No CMD, use:
 
-### `.env.local`
+```bat
+npm ci
+copy .env.example .env.local
+npm run dev
+```
 
-Crie `.env.local` na raiz:
+Depois abra `http://localhost:3000`.
+
+## Variáveis de ambiente
+
+Use `.env.example` como referência. Para a aplicação principal, mantenha pelo menos:
 
 ```env
-ADMIN_EMAIL=admin@crissalgados.com
-ADMIN_PASSWORD=troque-por-uma-senha-forte
-SESSION_SECRET=gere-uma-chave-longa-e-aleatoria
-CLIENT_SESSION_SECRET=gere-outra-chave-longa-e-aleatoria
-
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=sua-chave-restrita-do-google
-NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=seu-map-id
-
-PRINT_AGENT_TOKEN=gere-um-token-forte-para-a-impressora
+DATABASE_URL=
+SESSION_SECRET=
+CLIENT_SESSION_SECRET=
+APP_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-Nunca envie `.env.local` para o GitHub.
+Google Maps, Mercado Pago, integrações e recursos de demonstração possuem variáveis opcionais próprias no `.env.example`.
 
-## Google Maps
+Nunca envie `.env`, `.env.local`, tokens ou chaves privadas para o Git.
 
-No Google Cloud, use seu projeto do Maps e habilite as APIs usadas pelo sistema:
+## Validação antes do deploy
 
-- Maps JavaScript API
-- Geocoding API
-
-Restrinja a chave aos seus sites, por exemplo:
-
-```text
-http://localhost:3000/*
-http://127.0.0.1:3000/*
-https://SEU-DOMINIO.up.railway.app/*
+```powershell
+npm run typecheck
+npm run build
 ```
 
-O mapa do cliente e o mapa de áreas do admin usam a mesma chave. Um Map ID próprio é recomendado para os marcadores avançados; durante testes o projeto possui fallback de demonstração.
+Se ambos concluírem sem erro, faça o commit.
 
-## Dados e privacidade
+## Git + Railway
 
-- Arquivo operacional local: `data/store.json` (ignorado pelo Git).
-- Seed inicial versionado: `data/store.seed.json`.
-- O CPF completo **não é salvo em texto puro**: a conta guarda hash do CPF e somente os 4 últimos dígitos para identificação visual.
-- O PIN é salvo com hash derivado por scrypt.
-- Antes de uso comercial, publique política de privacidade/LGPD, termos e canais para correção/exclusão de dados.
+Se o projeto do GitHub já estiver conectado ao Railway, normalmente basta enviar o commit:
 
-## Railway — persistência recomendada
-
-Para não perder pedidos/fotos em redeploy, crie um **Volume** e monte em:
-
-```text
-/data
+```powershell
+git status
+git add .
+git commit -m "Etapa 1 - reorganiza interface e textos do SaborFlow"
+git push origin main
 ```
 
-No Railway → Variables configure:
+O Railway detecta o push e inicia o deploy automaticamente.
+
+Se a branch conectada no Railway tiver outro nome, substitua `main` pelo nome correto.
+
+## Railway
+
+No serviço web, confira principalmente:
 
 ```env
-DATA_FILE=/data/store.json
+DATABASE_URL=...
+SESSION_SECRET=...
+CLIENT_SESSION_SECRET=...
+APP_BASE_URL=https://SEU-DOMINIO
+NEXT_PUBLIC_APP_URL=https://SEU-DOMINIO
+```
+
+O domínio `*.up.railway.app` pode ser fornecido automaticamente pelo Railway através de `RAILWAY_PUBLIC_DOMAIN`.
+
+### Imagens
+
+Na arquitetura atual, uploads podem usar `UPLOAD_DIR` em um Volume do Railway:
+
+```env
 UPLOAD_DIR=/data/uploads
 ```
 
-Na primeira inicialização em um volume vazio, o servidor copia o conteúdo de `data/store.seed.json` para o arquivo operacional.
+Enquanto as imagens dependerem desse Volume no mesmo serviço web, mantenha a aplicação em uma única réplica. A migração das imagens para storage/CDN externo será tratada em uma etapa posterior de escalabilidade.
 
-Também configure no Railway:
+## Banco de dados
 
-```env
-ADMIN_EMAIL=...
-ADMIN_PASSWORD=...
-SESSION_SECRET=...
-CLIENT_SESSION_SECRET=...
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=...
-NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=...
-PRINT_AGENT_TOKEN=...
-```
+A aplicação atual usa PostgreSQL como fonte principal para autenticação, organizações e módulos operacionais modernos. Alguns scripts antigos de importação ainda aceitam `ADMIN_EMAIL`, `ADMIN_PASSWORD` e `DATA_FILE` apenas para migração/bootstrap de versões anteriores; eles não devem ser tratados como o modelo principal de autenticação da aplicação.
 
-Depois faça novo deploy.
+## Etapa 1 de reorganização
 
-> Com armazenamento JSON, mantenha **1 réplica** do serviço. Para crescimento real, múltiplas unidades/alto volume ou integrações complexas, migre a persistência para PostgreSQL/Supabase.
+Esta versão reorganiza a navegação administrativa, melhora nomes e mensagens da interface, limpa elementos desnecessários da loja pública e mantém as rotas, permissões e estrutura de banco existentes.
 
-## Impressão automática
-
-O navegador não é usado para impressão silenciosa. O ZIP inclui um agente Windows que consulta pedidos novos e imprime na impressora configurada:
-
-```text
-INICIAR-IMPRESSAO-AUTOMATICA.ps1
-CONFIGURAR-IMPRESSAO-AUTOMATICA.md
-```
-
-Configure o mesmo `PRINT_AGENT_TOKEN` no Railway e no agente. Deixe o computador da loja e a impressora ligados durante o atendimento.
-
-## Importação de clientes
-
-Use `IMPORTAR-CLIENTES-EXEMPLO.csv` como modelo. Colunas obrigatórias:
-
-```text
-Nome;Telefone;CPF;PIN;Email
-```
-
-O PIN precisa ter de 4 a 6 números.
-
-## Atualizar o sistema que já está no GitHub/Railway
-
-Leia `ATUALIZAR-NO-RAILWAY.md` antes de copiar esta versão sobre o projeto atual.
-
-## Sugestões de nomes
-
-- **CrisFlow** — melhor para manter a marca Cris e transmitir operação integrada.
-- **PedidoCris** — mais simples e direto para o cliente final.
-- **CrisHub** — bom se o produto crescer para vários módulos.
-- **SaborFlow** — bom se futuramente quiser vender o sistema para outros negócios.
-- **PedidoFlow** — nome genérico para produto SaaS.
-- **SalgadoHub** — muito ligado ao nicho atual.
-- **CrisPOS** — forte para PDV, mas reduz a percepção do delivery/site.
-- **ComandaFlow** — bom para restaurantes, mesas e atendimento presencial.
-
-Antes de adotar um nome comercial fora da Cris Salgados, confira disponibilidade de domínio, redes sociais e registro de marca.
-
-## Mapa e entrega automatizados
-
-O sistema usa Google Maps Platform para localizar a empresa e os clientes sem cadastro operacional de bairros. O Admin pode escolher preço fixo, entrega grátis, distância percorrida, faixas por distância ou áreas personalizadas desenhadas no mapa. Consulte `MAPA-E-ENTREGA-AUTOMATIZADOS.md`.
+Não há migration nova nem dependência npm nova nesta etapa.

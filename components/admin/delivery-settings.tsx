@@ -290,7 +290,7 @@ export function DeliverySettings({
       }
       onDeliveryZonesChanged(deliveryZones.filter((item) => item.id !== zone.id))
       if (editingZoneId === zone.id) clearZoneEditor()
-      setZoneMessage("Área excluída do PostgreSQL.")
+      setZoneMessage("Área de entrega excluída.")
     } catch (error) {
       setZoneMessage(error instanceof Error ? error.message : "Erro ao excluir área.")
     }

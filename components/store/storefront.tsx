@@ -562,7 +562,7 @@ export function Storefront({
       })) }) })
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível enviar o pedido.")
       if (customer) await fetch("/api/client/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: checkout.name, phone: checkout.phone, defaultAddress: checkout.address, defaultNumber: checkout.number, defaultDistrict: checkout.district, defaultCity: checkout.city, defaultState: checkout.state, defaultZipCode: checkout.zipCode, defaultComplement: checkout.complement, defaultLatitude: checkout.latitude, defaultLongitude: checkout.longitude }) }).catch(() => null)
-      localStorage.setItem("cris_last_order", data.order.reference); localStorage.removeItem("crisflow_cart_v1"); localStorage.removeItem(cartStorageKey); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order)
+      localStorage.setItem("saborflow_last_order", data.order.reference); localStorage.removeItem("cris_last_order"); localStorage.removeItem("crisflow_cart_v1"); localStorage.removeItem(cartStorageKey); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order)
       if (settings.checkoutAfterSubmit === "whatsapp") window.location.href = whatsappOrderUrl(data.order)
       else if (settings.checkoutAfterSubmit === "site") router.push(orderPath(data.order.reference))
     } catch (err) { setError(err instanceof Error ? err.message : "Erro ao enviar pedido.") } finally { setSending(false) }
@@ -577,12 +577,13 @@ export function Storefront({
 
   return (
     <div style={{ ...themeStyle, backgroundColor: settings.backgroundColor }} className="min-h-screen text-gray-950">
-      <header className="border-b border-black/5 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-end gap-2 px-4 py-2 sm:px-6">
-          {settings.clientAccountsEnabled && <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{customer.loyaltyPoints} pts</span>}</button>}
-          <a href="/login" className="hidden rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50 md:inline-flex">Admin</a>
-        </div>
-      </header>
+      {settings.clientAccountsEnabled && (
+        <header className="border-b border-black/5 bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-7xl items-center justify-end gap-2 px-4 py-2 sm:px-6">
+            <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{customer.loyaltyPoints} pts</span>}</button>
+          </div>
+        </header>
+      )}
 
       <main className="mx-auto max-w-7xl px-4 pb-28 sm:px-6">
         <section className="pt-4 sm:pt-5">
@@ -612,7 +613,7 @@ export function Storefront({
                 {settings.tiktokUrl && <a href={externalUrl(settings.tiktokUrl)} target="_blank" rel="noreferrer" aria-label="TikTok" className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-white text-base font-black text-gray-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow">♪</a>}
                 {settings.youtubeUrl && <a href={externalUrl(settings.youtubeUrl)} target="_blank" rel="noreferrer" aria-label="YouTube" className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow"><YouTubeBrandIcon className="h-5 w-5"/></a>}
                 {settings.websiteUrl && <a href={externalUrl(settings.websiteUrl)} target="_blank" rel="noreferrer" aria-label="Site" className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow"><Globe2 className="h-5 w-5"/></a>}
-                <button type="button" onClick={() => setInfoOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 shadow-sm"><Info className="h-4 w-4"/>Informações</button>
+                <button type="button" onClick={() => setInfoOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 shadow-sm"><Info className="h-4 w-4"/>Sobre a loja</button>
               </div>
             </div>
           </div>
@@ -620,13 +621,13 @@ export function Storefront({
 
         <section className="sticky top-0 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
-            <label className="relative min-w-[190px] max-w-xs flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar" className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-orange-100"/></label>
-            <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={category === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`h-11 whitespace-nowrap border-b-2 px-3 text-sm font-black ${category === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}>{item === "Todos" ? "Destaques" : item}</button>)}</div>
+            <label className="relative min-w-[190px] max-w-xs flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="O que você procura?" className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-orange-100"/></label>
+            <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={category === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`h-11 whitespace-nowrap border-b-2 px-3 text-sm font-black ${category === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}>{item}</button>)}</div>
           </div>
         </section>
 
         <section className="mt-5">
-          <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Destaques" : category}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
+          <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : category}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {filtered.map((product) => {
               const quantity = quantityFor(product.id)
@@ -770,10 +771,10 @@ export function Storefront({
       </div></form></div>}
 
       {infoOpen && <div className="fixed inset-0 z-[92] bg-slate-950/50">
-        <button aria-label="Fechar informações" className="absolute inset-0" onClick={() => setInfoOpen(false)}/>
+        <button aria-label="Fechar informações da loja" className="absolute inset-0" onClick={() => setInfoOpen(false)}/>
         <aside className="absolute inset-y-0 right-0 flex w-full max-w-lg flex-col bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-6">
-            <h2 className="text-xl font-black">Informação</h2>
+            <h2 className="text-xl font-black">Sobre a loja</h2>
             <button onClick={() => setInfoOpen(false)} aria-label="Fechar" className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-gray-100"><X className="h-5 w-5"/></button>
           </div>
           <div className="flex-1 overflow-y-auto px-5 pb-8 sm:px-6">

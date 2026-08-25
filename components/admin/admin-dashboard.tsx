@@ -95,26 +95,45 @@ interface DashboardRefreshPayload extends Partial<DashboardData> {
 
 type Section = AdminSection
 
-const navItems: Array<{ key: Section; label: string; icon: LucideIcon }> = [
-  { key: "overview", label: "Visão geral", icon: LayoutDashboard },
-  { key: "pdv", label: "Pedidos PDV", icon: ShoppingCart },
-  { key: "sales", label: "Vendas e caixa", icon: WalletCards },
-  { key: "dre", label: "DRE gerencial", icon: DollarSign },
-  { key: "orders", label: "Pedidos", icon: ClipboardList },
-  { key: "kitchen", label: "Cozinha", icon: ChefHat },
-  { key: "inventory", label: "Inventário", icon: PackageSearch },
-  { key: "products", label: "Cardápio", icon: BookOpen },
-  { key: "categories", label: "Categorias", icon: FolderTree },
-  { key: "customers", label: "Clientes", icon: Users },
-  { key: "marketing", label: "Cupons e divulgação", icon: Megaphone },
-  { key: "reviews", label: "Avaliações", icon: Star },
-  { key: "links", label: "QR e links", icon: Link2 },
-  { key: "chatbot", label: "Chatbot", icon: Bot },
-  { key: "team", label: "Equipe e funções", icon: Users },
-  { key: "settings", label: "Configurações", icon: Settings },
-  { key: "security", label: "Conta e segurança", icon: ShieldCheck },
-  { key: "billing", label: "Plano e assinatura", icon: CreditCard },
+type NavGroup = "inicio" | "vendas" | "catalogo" | "clientes" | "gestao"
+
+type NavItem = {
+  key: Section
+  label: string
+  icon: LucideIcon
+  group: NavGroup
+}
+
+const navItems: NavItem[] = [
+  { key: "overview", label: "Visão geral", icon: LayoutDashboard, group: "inicio" },
+  { key: "orders", label: "Pedidos", icon: ClipboardList, group: "vendas" },
+  { key: "pdv", label: "Nova venda / PDV", icon: ShoppingCart, group: "vendas" },
+  { key: "kitchen", label: "Cozinha", icon: ChefHat, group: "vendas" },
+  { key: "sales", label: "Caixa e financeiro", icon: WalletCards, group: "vendas" },
+  { key: "dre", label: "Resultado / DRE", icon: DollarSign, group: "vendas" },
+  { key: "products", label: "Produtos", icon: BookOpen, group: "catalogo" },
+  { key: "categories", label: "Categorias", icon: FolderTree, group: "catalogo" },
+  { key: "inventory", label: "Estoque", icon: PackageSearch, group: "catalogo" },
+  { key: "customers", label: "Clientes", icon: Users, group: "clientes" },
+  { key: "marketing", label: "Cupons e campanhas", icon: Megaphone, group: "clientes" },
+  { key: "reviews", label: "Avaliações", icon: Star, group: "clientes" },
+  { key: "links", label: "Links e QR Codes", icon: Link2, group: "clientes" },
+  { key: "chatbot", label: "Atendimento", icon: Bot, group: "clientes" },
+  { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
+  { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
+  { key: "security", label: "Segurança da conta", icon: ShieldCheck, group: "gestao" },
+  { key: "billing", label: "Plano e cobrança", icon: CreditCard, group: "gestao" },
 ]
+
+const navGroupLabels: Record<NavGroup, string> = {
+  inicio: "Início",
+  vendas: "Vendas",
+  catalogo: "Cardápio e estoque",
+  clientes: "Clientes e marketing",
+  gestao: "Gestão",
+}
+
+const navGroupOrder: NavGroup[] = ["inicio", "vendas", "catalogo", "clientes", "gestao"]
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
@@ -238,7 +257,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
     router.refresh()
   }
 
-  const title = visibleNavItems.find((item) => item.key === section)?.label || "Admin"
+  const title = visibleNavItems.find((item) => item.key === section)?.label || "Painel"
   const operatingNow = isStoreOpenNow(settings)
   const openCash = cashSessions.find((session) => !session.closedAt)
 
@@ -253,86 +272,77 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
         </div>
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-3">
-        <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Operação</p>
-        {visibleNavItems.map((item) => {
-          const Icon = item.icon
-          const active = section === item.key
+      <nav className="flex-1 overflow-y-auto px-3 py-3">
+        {navGroupOrder.map((group, groupIndex) => {
+          const groupItems = visibleNavItems.filter((item) => item.group === group)
+          const showFoodOperations = group === "catalogo" && permissionListHas(operationalPermissions, "food_operations.manage")
+          const showCrm = group === "clientes" && permissionListHas(operationalPermissions, "crm.manage")
+          const showReports = group === "gestao" && permissionListHas(operationalPermissions, "reports.view")
+          const showIntegrations = group === "gestao" && !demoEnvironment && permissionListHas(operationalPermissions, "integrations.manage")
+          const showCorporate = group === "gestao" && !demoEnvironment && ["owner", "admin", "manager"].includes(adminRole)
+          const hasExternalItems = showFoodOperations || showCrm || showReports || showIntegrations || showCorporate
+
+          if (!groupItems.length && !hasExternalItems) return null
+
           return (
-            <button
-              key={item.key}
-              onClick={() => changeSection(item.key)}
-              type="button"
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold transition"
-              style={active ? { backgroundColor: saborFlowBrand.cream, color: saborFlowBrand.brown, boxShadow: "0 8px 20px rgba(0,0,0,.13)" } : { color: "#fff7ee" }}
-            >
-              <Icon className="h-4 w-4" style={active ? { color: saborFlowBrand.orangeStrong } : { color: "#ffd39f" }} />
-              <span className="truncate">{item.label}</span>
-              {item.key === "orders" && <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold" style={active ? { backgroundColor: saborFlowBrand.orangeStrong, color: "#fff" } : { backgroundColor: "rgba(255,255,255,.10)", color: "#fff" }}>{summary.openOrders + summary.readyOrders}</span>}
-              {item.key === "inventory" && products.some((product) => product.trackStock && product.stock <= product.minStock) && <span className="ml-auto h-2.5 w-2.5 rounded-full bg-amber-300" />}
-            </button>
+            <div key={group} className={groupIndex === 0 ? "" : "mt-4"}>
+              <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "#ffd39f" }}>
+                {navGroupLabels[group]}
+              </p>
+              <div className="space-y-0.5">
+                {groupItems.map((item) => {
+                  const Icon = item.icon
+                  const active = section === item.key
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => changeSection(item.key)}
+                      type="button"
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold transition"
+                      style={active ? { backgroundColor: saborFlowBrand.cream, color: saborFlowBrand.brown, boxShadow: "0 8px 20px rgba(0,0,0,.13)" } : { color: "#fff7ee" }}
+                    >
+                      <Icon className="h-4 w-4" style={active ? { color: saborFlowBrand.orangeStrong } : { color: "#ffd39f" }} />
+                      <span className="truncate">{item.label}</span>
+                      {item.key === "orders" && <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold" style={active ? { backgroundColor: saborFlowBrand.orangeStrong, color: "#fff" } : { backgroundColor: "rgba(255,255,255,.10)", color: "#fff" }}>{summary.openOrders + summary.readyOrders}</span>}
+                      {item.key === "inventory" && products.some((product) => product.trackStock && product.stock <= product.minStock) && <span className="ml-auto h-2.5 w-2.5 rounded-full bg-amber-300" />}
+                    </button>
+                  )
+                })}
+
+                {showFoodOperations && (
+                  <a href="/admin/operacao-alimentar" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
+                    <Factory className="h-4 w-4 text-[#ffd39f]" />
+                    <span className="truncate">Produção e fichas técnicas</span>
+                  </a>
+                )}
+                {showCrm && (
+                  <a href="/admin/crm" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
+                    <HeartHandshake className="h-4 w-4 text-[#ffd39f]" />
+                    <span className="truncate">CRM e fidelidade</span>
+                  </a>
+                )}
+                {showReports && (
+                  <a href="/admin/relatorios" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
+                    <ReceiptText className="h-4 w-4 text-[#ffd39f]" />
+                    <span className="truncate">Relatórios</span>
+                  </a>
+                )}
+                {showIntegrations && (
+                  <a href="/admin/integracoes" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
+                    <Link2 className="h-4 w-4 text-[#ffd39f]" />
+                    <span className="truncate">Integrações</span>
+                  </a>
+                )}
+                {showCorporate && (
+                  <a href="/admin/grupo" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
+                    <Building2 className="h-4 w-4 text-[#ffd39f]" />
+                    <span className="truncate">Matriz e filiais</span>
+                  </a>
+                )}
+              </div>
+            </div>
           )
         })}
-        {permissionListHas(operationalPermissions, "food_operations.manage") && (
-          <>
-            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Produção</p>
-            <a
-              href="/admin/operacao-alimentar"
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
-            >
-              <Factory className="h-4 w-4 text-[#ffd39f]" />
-              <span className="truncate">Operação alimentar</span>
-            </a>
-          </>
-        )}
-        {permissionListHas(operationalPermissions, "reports.view") && (
-          <>
-            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Inteligência</p>
-            <a
-              href="/admin/relatorios"
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
-            >
-              <ReceiptText className="h-4 w-4 text-[#ffd39f]" />
-              <span className="truncate">Relatórios avançados</span>
-            </a>
-          </>
-        )}
-        {permissionListHas(operationalPermissions, "crm.manage") && (
-          <>
-            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Crescimento</p>
-            <a
-              href="/admin/crm"
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
-            >
-              <HeartHandshake className="h-4 w-4 text-[#ffd39f]" />
-              <span className="truncate">CRM e fidelidade</span>
-            </a>
-          </>
-        )}
-        {!demoEnvironment && permissionListHas(operationalPermissions, "integrations.manage") && (
-          <>
-            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Automação</p>
-            <a
-              href="/admin/integracoes"
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
-            >
-              <Link2 className="h-4 w-4 text-[#ffd39f]" />
-              <span className="truncate">Integrações</span>
-            </a>
-          </>
-        )}
-        {!demoEnvironment && ["owner", "admin", "manager"].includes(adminRole) && (
-          <>
-            <p className="mt-4 px-3 pb-1 text-[10px] font-black uppercase tracking-[0.28em]" style={{ color: "#ffd39f" }}>Corporativo</p>
-            <a
-              href="/admin/grupo"
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10"
-            >
-              <Building2 className="h-4 w-4 text-[#ffd39f]" />
-              <span className="truncate">Matriz e filiais</span>
-            </a>
-          </>
-        )}
       </nav>
 
       <div className="border-t p-3" style={{ borderColor: "rgba(255,255,255,.10)" }}>

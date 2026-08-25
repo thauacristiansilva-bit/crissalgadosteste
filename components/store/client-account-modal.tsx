@@ -3,6 +3,9 @@
 import { FormEvent, useEffect, useState } from "react"
 import { LogIn, ShieldCheck, UserPlus, X } from "lucide-react"
 
+const LAST_CLIENT_CPF_KEY = "saborflow_client_last_cpf"
+const LEGACY_LAST_CLIENT_CPF_KEY = "cris-client-last-cpf"
+
 type CustomerPublic = {
   id: number
   cpfLast4: string
@@ -60,7 +63,10 @@ export function ClientAccountModal({
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível entrar.")
       onCustomer(data.customer)
-      try { localStorage.setItem("cris-client-last-cpf", cpf.replace(/\D/g, "")) } catch {}
+      try {
+        localStorage.setItem(LAST_CLIENT_CPF_KEY, cpf.replace(/\D/g, ""))
+        localStorage.removeItem(LEGACY_LAST_CLIENT_CPF_KEY)
+      } catch {}
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao entrar.")
@@ -78,8 +84,12 @@ export function ClientAccountModal({
   useEffect(() => {
     if (customer) return
     try {
-      const last = localStorage.getItem("cris-client-last-cpf")
-      if (last) setCpf(last)
+      const last = localStorage.getItem(LAST_CLIENT_CPF_KEY) || localStorage.getItem(LEGACY_LAST_CLIENT_CPF_KEY)
+      if (last) {
+        setCpf(last)
+        localStorage.setItem(LAST_CLIENT_CPF_KEY, last)
+        localStorage.removeItem(LEGACY_LAST_CLIENT_CPF_KEY)
+      }
     } catch {}
   }, [customer])
 
@@ -126,7 +136,7 @@ export function ClientAccountModal({
               <label className="flex items-start gap-2 rounded-xl bg-gray-50 p-3 text-xs text-gray-600"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="mt-0.5 h-4 w-4" /><span><strong className="text-gray-800">Manter meu login salvo</strong><br/>Neste aparelho, você não precisará informar CPF e PIN toda vez.</span></label>
             </div>
             <button disabled={busy} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-orange-500 text-sm font-black text-white disabled:opacity-50">{mode === "login" ? <LogIn className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}{busy ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar e entrar"}</button>
-            <p className="mt-3 text-center text-[11px] leading-relaxed text-gray-400">O CPF identifica sua conta; o PIN protege o acesso. Ao criar a conta, seus dados ficam salvos para pedidos e fidelidade. Inclua sua política de privacidade antes do uso comercial.</p>
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-gray-400">O CPF identifica sua conta e o PIN protege o acesso. Seus dados podem ser usados para agilizar pedidos e recursos de fidelidade da loja.</p>
           </form>
         )}
       </div>

@@ -281,8 +281,8 @@ export function SalesPanel({
         kind: "success",
         text:
           entryType === "expense"
-            ? "Despesa salva no PostgreSQL."
-            : "Receita salva no PostgreSQL.",
+            ? "Despesa salva."
+            : "Receita salva.",
       })
     } catch {
       setFinanceFeedback({
@@ -535,7 +535,7 @@ export function SalesPanel({
             <div>
               <h2 className="font-black">Histórico de lançamentos</h2>
               <p className="text-sm text-gray-500">
-                Consulte despesas e receitas avulsas registradas no PostgreSQL.
+                Consulte despesas e receitas avulsas registradas no financeiro.
               </p>
             </div>
 
