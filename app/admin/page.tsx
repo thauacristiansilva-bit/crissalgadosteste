@@ -22,7 +22,9 @@ export default async function AdminPage() {
     demoEnvironment = await getDemoEnvironmentForOrganization(session.organizationId)
   }
 
-  if (!demoEnvironment && !(await hasCurrentLegalAcceptance(session.userId))) redirect("/legal/aceite")
+  if (session.mode === "tenant" && !demoEnvironment && !(await hasCurrentLegalAcceptance(session.userId))) {
+    redirect("/legal/aceite")
+  }
 
   if (session.mode === "tenant" && session.role === "owner") {
     const onboarding = await getCommercialOnboardingSnapshot(session.organizationId)
