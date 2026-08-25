@@ -7,6 +7,12 @@ import { getPostgresPool } from "@/lib/postgres"
 import { consumeAuthToken, getValidAuthToken, revokeOutstandingAuthTokens } from "@/lib/security-tokens"
 
 const PREFIX = "scrypt$v1"
+const MIN_ADMIN_PASSWORD_LENGTH = 12
+const DUMMY_PASSWORD_HASH = `${PREFIX}$saborflow-auth-dummy$${scryptSync(
+  "__saborflow_invalid_password__",
+  "saborflow-auth-dummy",
+  32,
+).toString("hex")}`
 
 type AdminUserCredentialRow = {
   id: string
@@ -23,9 +29,9 @@ export type AuthenticatedAdminUser = {
 }
 
 export function hashAdminPassword(password: string) {
-  if (password.length < 8) {
+  if (password.length < MIN_ADMIN_PASSWORD_LENGTH) {
     throw new Error(
-      "A senha administrativa deve ter pelo menos 8 caracteres.",
+      "A senha administrativa deve ter pelo menos 12 caracteres.",
     )
   }
 
@@ -129,15 +135,14 @@ export async function authenticateAdminUser(
     )
 
   const row = result.rows[0]
+  const passwordHash = row?.password_hash || DUMMY_PASSWORD_HASH
+  const passwordMatches = verifyAdminPassword(password, passwordHash)
 
   if (
     !row ||
     row.status !== "active" ||
     !row.password_hash ||
-    !verifyAdminPassword(
-      password,
-      row.password_hash,
-    )
+    !passwordMatches
   ) {
     return null
   }

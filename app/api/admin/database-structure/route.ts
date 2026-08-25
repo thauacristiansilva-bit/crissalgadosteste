@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
-import { isAdminAuthenticated } from "@/lib/auth"
 import { getPostgresPool } from "@/lib/postgres"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { canManageSecurity } from "@/lib/admin-access"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -15,10 +16,18 @@ const expectedTables = [
 ]
 
 export async function GET() {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+  if (!session) {
     return NextResponse.json(
       { ok: false, error: "Não autorizado." },
       { status: 401 },
+    )
+  }
+
+  if (!canManageSecurity(session.role, session.operationalPermissions)) {
+    return NextResponse.json(
+      { ok: false, error: "Seu perfil não pode acessar diagnósticos de segurança." },
+      { status: 403 },
     )
   }
 
@@ -27,18 +36,16 @@ export async function GET() {
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = 'public'
-        AND table_name LIKE 'sf_%'
-      ORDER BY table_name
-    `)
+        AND table_name = ANY($1::text[])
+    `, [expectedTables])
 
-    const tables = result.rows.map((row) => row.table_name)
-    const missing = expectedTables.filter((table) => !tables.includes(table))
+    const available = new Set(result.rows.map((row) => row.table_name))
+    const missingCount = expectedTables.filter((table) => !available.has(table)).length
 
     return NextResponse.json({
-      ok: missing.length === 0,
-      tables,
-      expectedTables,
-      missing,
+      ok: missingCount === 0,
+      expectedCount: expectedTables.length,
+      missingCount,
     })
   } catch (error) {
     console.error(

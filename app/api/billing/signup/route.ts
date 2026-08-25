@@ -5,11 +5,28 @@ import {
   createCommercialBillingSessionToken,
 } from "@/lib/billing-commercial-session"
 import { registerCommercialUser } from "@/lib/billing-contracting"
+import { authRateLimitKey, checkAuthRateLimit, registerAuthFailure } from "@/lib/security/rate-limit"
+import { requestIp } from "@/lib/security/request-security"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+const SIGNUP_LIMIT = 8
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000
+
 export async function POST(request: Request) {
+  const signupKey = authRateLimitKey("ip", `billing-signup:${requestIp(request)}`)
+  const signupState = checkAuthRateLimit(signupKey, SIGNUP_LIMIT, SIGNUP_WINDOW_MS)
+  if (!signupState.allowed) {
+    const response = NextResponse.json(
+      { error: "Muitas tentativas de cadastro. Tente novamente mais tarde." },
+      { status: 429 },
+    )
+    response.headers.set("Retry-After", String(signupState.retryAfterSeconds))
+    return response
+  }
+  registerAuthFailure(signupKey, SIGNUP_WINDOW_MS)
+
   const body = await request.json().catch(() => null) as {
     name?: string
     email?: string

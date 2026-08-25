@@ -145,6 +145,12 @@ function validPin(pin: string, stored: string) {
   )
 }
 
+const DUMMY_PIN_HASH = `saborflow-client-dummy:${scryptSync(
+  "__saborflow_invalid_pin__",
+  "saborflow-client-dummy",
+  32,
+).toString("hex")}`
+
 function normalizePhone(phone: string) {
   return phone.replace(/\D/g, "")
 }
@@ -313,7 +319,8 @@ export async function authenticateTenantCustomer(
   )
 
   const row = result.rows[0]
-  if (!row || !validPin(pin, row.pin_hash)) return null
+  const pinMatches = validPin(pin, row?.pin_hash || DUMMY_PIN_HASH)
+  if (!row || !pinMatches) return null
 
   return mapAccount(row)
 }

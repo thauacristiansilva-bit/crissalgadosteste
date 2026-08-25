@@ -115,7 +115,7 @@ export async function registerCommercialUser(input: {
   const email = normalizeEmail(input.email)
   if (name.length < 2) throw new Error("Informe seu nome.")
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("Informe um e-mail válido.")
-  if (input.password.length < 8) throw new Error("A senha deve ter pelo menos 8 caracteres.")
+  if (input.password.length < 12) throw new Error("A senha deve ter pelo menos 12 caracteres.")
 
   const client = await getPostgresPool().connect()
   try {

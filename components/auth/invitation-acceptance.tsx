@@ -92,9 +92,9 @@ export function InvitationAcceptance({
     if (
       invitation?.passwordRequired
     ) {
-      if (password.length < 8) {
+      if (password.length < 12) {
         return setMessage(
-          "A senha precisa ter pelo menos 8 caracteres.",
+          "A senha precisa ter pelo menos 12 caracteres.",
         )
       }
 
@@ -200,7 +200,7 @@ export function InvitationAcceptance({
                   <input
                     type="password"
                     autoComplete="new-password"
-                    minLength={8}
+                    minLength={12}
                     required
                     value={password}
                     onChange={(event) =>
@@ -219,7 +219,7 @@ export function InvitationAcceptance({
                   <input
                     type="password"
                     autoComplete="new-password"
-                    minLength={8}
+                    minLength={12}
                     required
                     value={
                       confirmPassword

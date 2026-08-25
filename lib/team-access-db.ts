@@ -675,10 +675,10 @@ export async function acceptTeamInvitation(
 
   if (
     !preview.passwordReady &&
-    nextPassword.length < 8
+    nextPassword.length < 12
   ) {
     throw new Error(
-      "Crie uma senha com pelo menos 8 caracteres.",
+      "Crie uma senha com pelo menos 12 caracteres.",
     )
   }
 

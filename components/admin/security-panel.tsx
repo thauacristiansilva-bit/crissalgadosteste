@@ -204,9 +204,9 @@ export function SecurityPanel({
     event.preventDefault()
     setPasswordMessage("")
 
-    if (newPassword.length < 8) {
+    if (newPassword.length < 12) {
       return setPasswordMessage(
-        "A nova senha precisa ter pelo menos 8 caracteres.",
+        "A nova senha precisa ter pelo menos 12 caracteres.",
       )
     }
 
@@ -519,7 +519,7 @@ export function SecurityPanel({
           <input
             type="password"
             autoComplete="new-password"
-            minLength={8}
+            minLength={12}
             required
             placeholder="Nova senha"
             value={newPassword}
@@ -533,7 +533,7 @@ export function SecurityPanel({
           <input
             type="password"
             autoComplete="new-password"
-            minLength={8}
+            minLength={12}
             required
             placeholder="Confirmar nova senha"
             value={confirmPassword}

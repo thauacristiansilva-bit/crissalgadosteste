@@ -115,7 +115,7 @@ export function CommercialCheckout() {
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">Senha</span>
-              <div className="relative"><LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-12 w-full rounded-xl border border-gray-200 pl-9 pr-3 outline-none focus:border-amber-500" /></div>
+              <div className="relative"><LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required minLength={12} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-12 w-full rounded-xl border border-gray-200 pl-9 pr-3 outline-none focus:border-amber-500" /></div>
             </label>
             <button disabled={busy} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50">{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}{mode === "signup" ? "Criar conta e escolher plano" : "Entrar para contratar"}</button>
           </form>

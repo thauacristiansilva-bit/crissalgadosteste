@@ -17,8 +17,31 @@ import {
   createClientToken,
 } from "@/lib/client-auth"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
+import { authRateLimitKey, checkAuthRateLimit, registerAuthFailure } from "@/lib/security/rate-limit"
+import { requestIp } from "@/lib/security/request-security"
+
+const REGISTER_LIMIT = 12
+const REGISTER_WINDOW_MS = 60 * 60 * 1000
 
 export async function POST(request: Request) {
+  const registerKey = authRateLimitKey("ip", `client-register:${requestIp(request)}`)
+  const registerState = checkAuthRateLimit(
+    registerKey,
+    REGISTER_LIMIT,
+    REGISTER_WINDOW_MS,
+  )
+
+  if (!registerState.allowed) {
+    const response = NextResponse.json(
+      { error: "Muitas tentativas de cadastro. Tente novamente mais tarde." },
+      { status: 429 },
+    )
+    response.headers.set("Retry-After", String(registerState.retryAfterSeconds))
+    return response
+  }
+
+  registerAuthFailure(registerKey, REGISTER_WINDOW_MS)
+
   const body = (await request.json().catch(() => null)) as
     | {
         cpf?: string
@@ -101,6 +124,7 @@ export async function POST(request: Request) {
             secure: process.env.NODE_ENV === "production",
             path: "/",
             maxAge: days * 86_400,
+            priority: "high",
           },
         )
 
