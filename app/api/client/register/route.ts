@@ -19,6 +19,7 @@ import {
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import { authRateLimitKey, checkAuthRateLimit, registerAuthFailure } from "@/lib/security/rate-limit"
 import { requestIp } from "@/lib/security/request-security"
+import { recordCustomerPrivacyAcknowledgement } from "@/lib/legal-db"
 
 const REGISTER_LIMIT = 12
 const REGISTER_WINDOW_MS = 60 * 60 * 1000
@@ -50,12 +51,20 @@ export async function POST(request: Request) {
         phone?: string
         email?: string
         remember?: boolean
+        privacyAcknowledged?: boolean
       }
     | null
 
   if (!body) {
     return NextResponse.json(
       { error: "Dados inválidos." },
+      { status: 400 },
+    )
+  }
+
+  if (body.privacyAcknowledged !== true) {
+    return NextResponse.json(
+      { error: "Leia o Aviso de Privacidade para criar sua conta de cliente." },
       { status: 400 },
     )
   }
@@ -105,6 +114,14 @@ export async function POST(request: Request) {
             defaultState: settings.state,
           },
         )
+
+        await recordCustomerPrivacyAcknowledgement({
+          organizationId: organization.id,
+          customerId: account.id,
+          source: "store-customer-register",
+          ipAddress: requestIp(request),
+          userAgent: request.headers.get("user-agent") || "",
+        })
 
         const days = body.remember === false ? 1 : settings.rememberClientDays
         const response = NextResponse.json(

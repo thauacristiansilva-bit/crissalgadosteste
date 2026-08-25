@@ -56,6 +56,7 @@ export default async function LoginPage() {
           <div className="mt-7 rounded-2xl border px-4 py-3 text-center" style={{ borderColor: "#f0d0aa", backgroundColor: "#fff9f1" }}>
             <p className="text-xs font-black" style={{ color: "#3c2415" }}>Plataforma SaborFlow</p>
             <p className="mt-1 text-[11px] text-gray-500">Gestão de negócios com acesso individual e seguro.</p>
+            <p className="mt-2 text-[11px] text-gray-400"><a href="/termos" className="font-bold underline">Termos de Uso</a> · <a href="/privacidade" className="font-bold underline">Privacidade</a></p>
           </div>
         </section>
       </div>

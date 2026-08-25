@@ -46,6 +46,7 @@ export async function POST(request: Request) {
     cpf?: string
     hasCnpj?: boolean
     cnpj?: string
+    legalAccepted?: boolean
   } | null
 
   if (!body?.credential || !body.mode) {
@@ -55,6 +56,9 @@ export async function POST(request: Request) {
 
   try {
     const google = await verifyGoogleCredential(body.credential)
+    if (body.mode === "signup" && body.legalAccepted !== true) {
+      return error("Leia e aceite os Termos de Uso e o Aviso de Privacidade para criar a conta.", 400)
+    }
     const account = body.mode === "signup"
       ? await registerCommercialGoogleUser({
           name: google.name,
@@ -63,6 +67,9 @@ export async function POST(request: Request) {
           cpf: body.cpf || "",
           hasCnpj: Boolean(body.hasCnpj),
           cnpj: body.cnpj || "",
+          legalAccepted: true,
+          ipAddress: requestIp(request),
+          userAgent: request.headers.get("user-agent") || "",
         })
       : await authenticateCommercialGoogleUser({
           googleSubject: google.subject,

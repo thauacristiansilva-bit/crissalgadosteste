@@ -34,9 +34,13 @@ export async function POST(request: Request) {
     cpf?: string
     hasCnpj?: boolean
     cnpj?: string
+    legalAccepted?: boolean
   } | null
   if (!body?.name || !body.email || !body.password || !body.cpf) {
     return NextResponse.json({ error: "Nome, e-mail, senha e CPF do responsável são obrigatórios." }, { status: 400 })
+  }
+  if (body.legalAccepted !== true) {
+    return NextResponse.json({ error: "Leia e aceite os Termos de Uso e o Aviso de Privacidade para criar a conta." }, { status: 400 })
   }
   try {
     const account = await registerCommercialUser({
@@ -46,6 +50,9 @@ export async function POST(request: Request) {
       cpf: body.cpf,
       hasCnpj: Boolean(body.hasCnpj),
       cnpj: body.cnpj || "",
+      legalAccepted: true,
+      ipAddress: requestIp(request),
+      userAgent: request.headers.get("user-agent") || "",
     })
     const response = NextResponse.json({ ok: true, email: account.email }, { status: 201 })
     response.cookies.set(

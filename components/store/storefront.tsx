@@ -698,6 +698,11 @@ export function Storefront({
         </section>
       </main>
 
+      <footer className="border-t border-gray-100 bg-white px-4 py-6 text-center text-[11px] text-gray-400">
+        <p>Pedidos processados com tecnologia SaborFlow.</p>
+        <p className="mt-2"><a href="/termos" target="_blank" className="font-bold text-gray-500 underline">Termos de Uso</a><span className="mx-2">·</span><a href="/privacidade" target="_blank" className="font-bold text-gray-500 underline">Privacidade</a></p>
+      </footer>
+
       {totalItems > 0 && <button onClick={() => setCartOpen(true)} className="fixed bottom-4 left-1/2 z-30 flex w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 items-center justify-between rounded-2xl bg-gray-950 px-4 py-3 text-white shadow-2xl"><span className="flex items-center gap-3"><span style={{ backgroundColor: settings.primaryColor }} className="flex h-9 min-w-9 items-center justify-center rounded-xl px-2 text-sm font-black">{totalItems}</span><span className="text-left"><small className="block text-[10px] uppercase tracking-wide text-gray-400">Seu pedido</small><strong>{money(subtotal)}</strong></span></span><span className="flex items-center gap-1 text-sm font-bold">Ver carrinho <ChevronRight className="h-4 w-4" /></span></button>}
 
       {cartOpen && (
@@ -767,6 +772,7 @@ export function Storefront({
         <section><h3 className="mb-2 font-black">Cupom</h3><div className="flex gap-2"><input value={checkout.couponCode} onChange={(e) => { setCheckout({ ...checkout, couponCode: e.target.value.toUpperCase() }); setCouponDiscount(0); setCouponMessage("") }} placeholder="Ex.: BEMVINDO10" className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 px-3 text-sm uppercase"/><button type="button" onClick={applyCoupon} disabled={couponBusy || !checkout.couponCode.trim()} className="rounded-xl bg-gray-100 px-4 text-sm font-black">{couponBusy ? "..." : "Aplicar"}</button></div>{couponMessage && <p className={`mt-2 text-xs font-bold ${couponDiscount > 0 ? "text-emerald-700" : "text-red-600"}`}>{couponMessage}</p>}</section>
         <section><h3 className="mb-2 font-black">Observações</h3><textarea value={checkout.notes} onChange={(e) => setCheckout({ ...checkout, notes: e.target.value })} placeholder="Ex.: sem molho, tocar interfone..." rows={3} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm"/></section>
         <section className="rounded-2xl bg-gray-50 p-4"><div className="flex justify-between text-sm text-gray-600"><span>Produtos</span><span>{money(subtotal)}</span></div>{couponDiscount > 0 && <div className="mt-2 flex justify-between text-sm font-bold text-emerald-700"><span>Desconto</span><span>-{money(couponDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-2 flex justify-between text-sm text-gray-600"><span>Taxa de entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}<div className="mt-3 flex justify-between border-t border-gray-200 pt-3"><strong>Total</strong><strong className="text-xl">{money(total)}</strong></div></section>
+        <p className="text-center text-[11px] leading-5 text-gray-400">Seus dados serão utilizados para processar e acompanhar este pedido. Consulte o <a href="/privacidade" target="_blank" className="font-bold text-gray-500 underline">Aviso de Privacidade</a>.</p>
         <button disabled={sending || !settings.acceptingOrders || (!isOpen && checkout.timing !== "scheduled") || (checkout.timing === "scheduled" && (!selectedDate || !selectedTime)) || (checkout.type === "delivery" && !deliveryQuote)} style={{ backgroundColor: settings.primaryColor }} className="h-12 w-full rounded-xl font-black text-white disabled:opacity-50">{sending ? "Enviando pedido..." : `Confirmar pedido · ${money(total)}`}</button>
       </div></form></div>}
 

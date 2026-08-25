@@ -1,6 +1,7 @@
 "use client"
 
 import Script from "next/script"
+import Link from "next/link"
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Building2, Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, ShieldCheck, UserRound } from "lucide-react"
 import type { BillingCycle, CommercialBillingStatus, CommercialPlan } from "@/lib/billing-types"
@@ -48,15 +49,16 @@ export function CommercialCheckout() {
   const [cpf, setCpf] = useState("")
   const [hasCnpj, setHasCnpj] = useState(true)
   const [cnpj, setCnpj] = useState("")
+  const [legalAccepted, setLegalAccepted] = useState(false)
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
   const [googleReady, setGoogleReady] = useState(false)
   const googleButtonRef = useRef<HTMLDivElement | null>(null)
-  const googleFlowRef = useRef({ mode, cpf, hasCnpj, cnpj })
+  const googleFlowRef = useRef({ mode, cpf, hasCnpj, cnpj, legalAccepted })
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
 
   useEffect(() => {
-    googleFlowRef.current = { mode, cpf, hasCnpj, cnpj }
-  }, [mode, cpf, hasCnpj, cnpj])
+    googleFlowRef.current = { mode, cpf, hasCnpj, cnpj, legalAccepted }
+  }, [mode, cpf, hasCnpj, cnpj, legalAccepted])
 
   async function load() {
     setLoading(true)
@@ -92,7 +94,7 @@ export function CommercialCheckout() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           mode === "signup"
-            ? { name, email, password, cpf, hasCnpj, cnpj }
+            ? { name, email, password, cpf, hasCnpj, cnpj, legalAccepted }
             : { email, password },
         ),
       })
@@ -108,6 +110,10 @@ export function CommercialCheckout() {
 
   async function authenticateWithGoogle(credential: string) {
     const flow = googleFlowRef.current
+    if (flow.mode === "signup" && !flow.legalAccepted) {
+      setError("Leia e aceite os Termos de Uso e o Aviso de Privacidade para criar a conta.")
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -120,6 +126,7 @@ export function CommercialCheckout() {
           cpf: flow.cpf,
           hasCnpj: flow.hasCnpj,
           cnpj: flow.cnpj,
+          legalAccepted: flow.legalAccepted,
         }),
       })
       const payload = await response.json()
@@ -216,10 +223,17 @@ export function CommercialCheckout() {
             </div>
           )}
 
+          {mode === "signup" && (
+            <label className="mt-4 flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 text-xs leading-5 text-gray-600">
+              <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600" />
+              <span>Li e concordo com os <Link href="/termos" target="_blank" className="font-black text-amber-700 underline">Termos de Uso</Link> e declaro ciência do <Link href="/privacidade" target="_blank" className="font-black text-amber-700 underline">Aviso de Privacidade</Link>.</span>
+            </label>
+          )}
+
           {googleClientId && (
             <div className="mt-6">
               <div ref={googleButtonRef} className="flex min-h-11 justify-center" />
-              {mode === "signup" && <p className="mt-2 text-center text-[11px] leading-4 text-gray-500">Preencha CPF/CNPJ acima antes de continuar com Google.</p>}
+              {mode === "signup" && <p className="mt-2 text-center text-[11px] leading-4 text-gray-500">Preencha CPF/CNPJ e confirme os documentos legais antes de continuar com Google.</p>}
               <div className="my-5 flex items-center gap-3"><div className="h-px flex-1 bg-gray-200" /><span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">ou use e-mail e senha</span><div className="h-px flex-1 bg-gray-200" /></div>
             </div>
           )}
@@ -239,7 +253,7 @@ export function CommercialCheckout() {
               <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">Senha</span>
               <div className="relative"><LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required minLength={12} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-12 w-full rounded-xl border border-gray-200 pl-9 pr-3 outline-none focus:border-amber-500" /></div>
             </label>
-            <button disabled={busy} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50">{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}{mode === "signup" ? "Criar conta e escolher plano" : "Entrar para contratar"}</button>
+            <button disabled={busy || (mode === "signup" && !legalAccepted)} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50">{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}{mode === "signup" ? "Criar conta e escolher plano" : "Entrar para contratar"}</button>
           </form>
         </section>
       ) : (

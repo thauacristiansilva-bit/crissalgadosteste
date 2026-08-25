@@ -13,6 +13,7 @@ import type {
   SubscriptionStatus,
 } from "@/lib/billing-types"
 import { getPostgresPool } from "@/lib/postgres"
+import { recordCurrentLegalAcceptanceWithClient } from "@/lib/legal-db"
 import {
   commercialRegistrationMetadata,
   normalizeCommercialRegistration,
@@ -115,12 +116,16 @@ export async function registerCommercialUser(input: {
   name: string
   email: string
   password: string
+  legalAccepted: boolean
+  ipAddress?: string
+  userAgent?: string
 } & CommercialRegistrationInput) {
   const name = input.name.trim()
   const email = normalizeEmail(input.email)
   if (name.length < 2) throw new Error("Informe seu nome.")
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("Informe um e-mail válido.")
   if (input.password.length < 12) throw new Error("A senha deve ter pelo menos 12 caracteres.")
+  if (input.legalAccepted !== true) throw new Error("Leia e aceite os Termos de Uso e o Aviso de Privacidade para criar a conta.")
 
   const registration = normalizeCommercialRegistration(input)
   const client = await getPostgresPool().connect()
@@ -156,6 +161,13 @@ export async function registerCommercialUser(input: {
       email,
       JSON.stringify(commercialRegistrationMetadata(registration, "public-contracting-password")),
     ])
+    await recordCurrentLegalAcceptanceWithClient(client, {
+      userId,
+      organizationId: null,
+      source: "public-contracting-password",
+      ipAddress: input.ipAddress || null,
+      userAgent: input.userAgent || null,
+    })
     await client.query("COMMIT")
     return { userId, billingAccountId, email }
   } catch (error) {
@@ -170,12 +182,16 @@ export async function registerCommercialGoogleUser(input: {
   name: string
   email: string
   googleSubject: string
+  legalAccepted: boolean
+  ipAddress?: string
+  userAgent?: string
 } & CommercialRegistrationInput) {
   const name = input.name.trim()
   const email = normalizeEmail(input.email)
   const googleSubject = input.googleSubject.trim()
   if (name.length < 2 || !googleSubject) throw new Error("Conta Google inválida.")
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("Conta Google sem e-mail válido.")
+  if (input.legalAccepted !== true) throw new Error("Leia e aceite os Termos de Uso e o Aviso de Privacidade para criar a conta.")
 
   const registration = normalizeCommercialRegistration(input)
   const client = await getPostgresPool().connect()
@@ -223,6 +239,13 @@ export async function registerCommercialGoogleUser(input: {
       email,
       JSON.stringify(commercialRegistrationMetadata(registration, "public-contracting-google")),
     ])
+    await recordCurrentLegalAcceptanceWithClient(client, {
+      userId,
+      organizationId: null,
+      source: "public-contracting-google",
+      ipAddress: input.ipAddress || null,
+      userAgent: input.userAgent || null,
+    })
     await client.query("COMMIT")
     return { userId, billingAccountId, email }
   } catch (error) {

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation"
+import { hasCurrentLegalAcceptance } from "@/lib/legal-db"
 import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { getAdminEmail, getAdminSession } from "@/lib/auth"
 import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
@@ -20,6 +21,8 @@ export default async function AdminPage() {
     }
     demoEnvironment = await getDemoEnvironmentForOrganization(session.organizationId)
   }
+
+  if (!demoEnvironment && !(await hasCurrentLegalAcceptance(session.userId))) redirect("/legal/aceite")
 
   if (session.mode === "tenant" && session.role === "owner") {
     const onboarding = await getCommercialOnboardingSnapshot(session.organizationId)

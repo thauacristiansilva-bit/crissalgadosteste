@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { FormEvent, useEffect, useState } from "react"
 import { LogIn, ShieldCheck, UserPlus, X } from "lucide-react"
 
@@ -42,6 +43,7 @@ export function ClientAccountModal({
   const [phone, setPhone] = useState("")
   const [email, setEmail] = useState("")
   const [remember, setRemember] = useState(true)
+  const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
 
@@ -58,7 +60,7 @@ export function ClientAccountModal({
       const response = await fetch(mode === "login" ? "/api/client/login" : "/api/client/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "login" ? { cpf, pin, remember } : { cpf, pin, name, phone, email, remember }),
+        body: JSON.stringify(mode === "login" ? { cpf, pin, remember } : { cpf, pin, name, phone, email, remember, privacyAcknowledged }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível entrar.")
@@ -134,9 +136,10 @@ export function ClientAccountModal({
               <input required inputMode="numeric" value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="CPF (somente números) *" className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-orange-400" />
               <input required inputMode="numeric" type="password" minLength={4} maxLength={6} value={pin} onChange={(e) => setPin(e.target.value)} placeholder={mode === "register" ? "Crie um PIN de 4 a 6 números *" : "Seu PIN *"} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-orange-400" />
               <label className="flex items-start gap-2 rounded-xl bg-gray-50 p-3 text-xs text-gray-600"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="mt-0.5 h-4 w-4" /><span><strong className="text-gray-800">Manter meu login salvo</strong><br/>Neste aparelho, você não precisará informar CPF e PIN toda vez.</span></label>
+              {mode === "register" && <label className="flex items-start gap-2 rounded-xl border border-orange-100 bg-orange-50/50 p-3 text-xs leading-5 text-gray-600"><input required type="checkbox" checked={privacyAcknowledged} onChange={(e) => setPrivacyAcknowledged(e.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" /><span>Declaro que li o <Link href="/privacidade" target="_blank" className="font-black text-orange-700 underline">Aviso de Privacidade</Link> sobre o uso dos meus dados para conta, pedidos, segurança e recursos da loja.</span></label>}
             </div>
-            <button disabled={busy} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-orange-500 text-sm font-black text-white disabled:opacity-50">{mode === "login" ? <LogIn className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}{busy ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar e entrar"}</button>
-            <p className="mt-3 text-center text-[11px] leading-relaxed text-gray-400">O CPF identifica sua conta e o PIN protege o acesso. Seus dados podem ser usados para agilizar pedidos e recursos de fidelidade da loja.</p>
+            <button disabled={busy || (mode === "register" && !privacyAcknowledged)} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-orange-500 text-sm font-black text-white disabled:opacity-50">{mode === "login" ? <LogIn className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}{busy ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar e entrar"}</button>
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-gray-400">O CPF identifica sua conta e o PIN protege o acesso. Consulte o Aviso de Privacidade para entender como seus dados são utilizados.</p>
           </form>
         )}
       </div>

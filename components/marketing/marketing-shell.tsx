@@ -77,6 +77,10 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             <div className="mt-4 grid gap-2 text-sm font-bold text-stone-600">
               <Link href="/demo">Testar demonstração</Link><Link href="/contratar">Contratar</Link><Link href="/entrar">Entrar no painel</Link><Link href="/faq">Perguntas frequentes</Link>
             </div>
+            <p className="mt-6 text-xs font-black uppercase tracking-[0.18em] text-stone-400">Legal</p>
+            <div className="mt-3 grid gap-2 text-sm font-bold text-stone-600">
+              <Link href="/termos">Termos de Uso</Link><Link href="/privacidade">Aviso de Privacidade</Link>
+            </div>
           </div>
         </div>
         <div className="border-t border-stone-100 px-4 py-5 text-center text-xs font-semibold text-stone-400">SaborFlow · Plataforma de gestão para alimentação</div>
