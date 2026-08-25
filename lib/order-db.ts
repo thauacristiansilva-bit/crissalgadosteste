@@ -259,6 +259,31 @@ export async function getTenantOrders(
   )
 }
 
+export async function getTenantRecentOrders(
+  organizationId: string,
+  limit = 120,
+): Promise<Order[]> {
+  const safeLimit = Math.max(10, Math.min(300, Math.floor(Number(limit) || 120)))
+  const result = await getPostgresPool().query<OrderRow>(
+    `
+      ${orderSelect}
+      WHERE organization_id = $1
+      ORDER BY created_at DESC, id DESC
+      LIMIT $2
+    `,
+    [organizationId, safeLimit],
+  )
+
+  const items = await getItemsForOrderIds(
+    organizationId,
+    result.rows.map((row) => Number(row.id)),
+  )
+
+  return result.rows.map((row) =>
+    mapOrder(row, items.get(Number(row.id)) || []),
+  )
+}
+
 export async function getTenantOrdersForCustomerAccount(
   organizationId: string,
   accountId: number,

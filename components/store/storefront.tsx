@@ -166,6 +166,7 @@ export function Storefront({
     if (!storedReference) return
 
     const refresh = async () => {
+      if (document.visibilityState !== "visible") return
       const response = await fetch(`/api/order-status/${encodeURIComponent(storedReference)}`, { cache: "no-store" }).catch(() => null)
       if (disposed) return
       if (!response?.ok) {
@@ -191,10 +192,13 @@ export function Storefront({
     }
 
     void refresh()
-    intervalId = window.setInterval(refresh, 10000)
+    intervalId = window.setInterval(refresh, 15000)
+    const onFocus = () => void refresh()
+    window.addEventListener("focus", onFocus)
     return () => {
       disposed = true
       if (intervalId !== null) window.clearInterval(intervalId)
+      window.removeEventListener("focus", onFocus)
     }
   }, [lastOrderStorageKey])
 

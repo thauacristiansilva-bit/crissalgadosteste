@@ -31,6 +31,15 @@ type PrintAgent = {
   createdAt: string
 }
 
+type StorageStatus = {
+  mode: "local" | "r2"
+  r2Configured: boolean
+  publicHost: string | null
+  localFileCount: number
+  uploadDirConfigured: boolean
+  replicaReady: boolean
+}
+
 type SecurityData = {
   organization: {
     id: string
@@ -124,6 +133,9 @@ export function SecurityPanel({
   const [googleLink, setGoogleLink] = useState<{ configured: boolean; linked: boolean; email: string } | null>(null)
   const [googleMessage, setGoogleMessage] = useState("")
   const [googleReady, setGoogleReady] = useState(false)
+  const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null)
+  const [storageMessage, setStorageMessage] = useState("")
+  const [storageBusy, setStorageBusy] = useState(false)
   const googleButtonRef = useRef<HTMLDivElement | null>(null)
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
 
@@ -195,6 +207,37 @@ export function SecurityPanel({
     if (response.ok && result) setGoogleLink(result)
   }
 
+  async function reloadStorage() {
+    const response = await fetch("/api/admin/storage", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return
+    const result = await response.json().catch(() => null)
+    if (result) setStorageStatus(result)
+  }
+
+  async function migrateStorageBatch() {
+    setStorageBusy(true)
+    setStorageMessage("")
+    const response = await fetch("/api/admin/storage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    }).catch(() => null)
+    const result = await response?.json().catch(() => null)
+    setStorageBusy(false)
+
+    if (!response?.ok) {
+      setStorageMessage(result?.error || "Não foi possível migrar as imagens.")
+      return
+    }
+
+    setStorageMessage(
+      result?.complete
+        ? `Migração concluída. ${result.uploaded || 0} arquivo(s) enviados neste lote e as cópias locais já podem deixar de ser usadas.`
+        : `Lote concluído: ${result.uploaded || 0} enviado(s), ${result.alreadyStored || 0} já estavam no R2. Restam ${result.remainingLocal || 0} arquivo(s) locais. Clique novamente para continuar.`,
+    )
+    await reloadStorage()
+  }
+
   async function linkGoogle(credential: string) {
     setGoogleMessage("")
     const response = await fetch("/api/admin/google-link", {
@@ -214,6 +257,7 @@ export function SecurityPanel({
   useEffect(() => {
     void reload()
     void reloadGoogle()
+    void reloadStorage()
   }, [])
 
   useEffect(() => {
@@ -654,6 +698,61 @@ export function SecurityPanel({
 
       {canManage && (
         <>
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">Storage e CDN</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Imagens no Cloudflare R2 deixam a aplicação independente do disco do Railway e preparam o serviço para múltiplas réplicas.
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">Modo atual</p>
+                <p className="mt-1 font-black">{storageStatus?.mode === "r2" ? "Cloudflare R2" : "Disco / Volume"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">CDN pública</p>
+                <p className="mt-1 break-all font-black">{storageStatus?.publicHost || "Não configurada"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">Arquivos legados locais</p>
+                <p className="mt-1 font-black">{storageStatus?.localFileCount ?? "—"}</p>
+              </div>
+            </div>
+
+            {storageStatus?.mode === "r2" && storageStatus.r2Configured ? (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">R2 configurado e ativo.</p>
+                <p className="mt-1 text-xs leading-5 text-emerald-800">
+                  Novos uploads já vão para o R2. Enquanto ainda existirem arquivos locais, mantenha o Volume do Railway conectado e migre os arquivos antigos.
+                </p>
+                {(storageStatus.localFileCount || 0) > 0 && (
+                  <button
+                    type="button"
+                    disabled={storageBusy}
+                    onClick={migrateStorageBatch}
+                    className="mt-3 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-60"
+                  >
+                    {storageBusy ? "Migrando..." : "Migrar próximo lote de imagens"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Configure as variáveis R2 no Railway e defina <code className="font-black">MEDIA_STORAGE_MODE=r2</code>. Até lá, o sistema continua usando o armazenamento local atual.
+              </div>
+            )}
+
+            {storageMessage && (
+              <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{storageMessage}</p>
+            )}
+
+            {storageStatus?.replicaReady && (
+              <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                O serviço está sem arquivos locais detectados e com R2 ativo. Depois de confirmar que todas as imagens abrem corretamente, você pode remover o Volume para liberar o uso de réplicas.
+              </p>
+            )}
+          </section>
+
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-black">
               <HelpLabel helpKey="security.timezone">Timezone da empresa</HelpLabel>

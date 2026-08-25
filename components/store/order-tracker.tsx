@@ -53,6 +53,7 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
     let disposed = false
 
     const refresh = async () => {
+      if (document.visibilityState !== "visible") return
       const response = await fetch(
         `/api/order-status/${encodeURIComponent(order.reference)}`,
         { cache: "no-store" },
@@ -73,9 +74,12 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
     }
 
     const id = window.setInterval(refresh, 5000)
+    const onFocus = () => void refresh()
+    window.addEventListener("focus", onFocus)
     return () => {
       disposed = true
       window.clearInterval(id)
+      window.removeEventListener("focus", onFocus)
     }
   }, [order.reference, order.status])
 

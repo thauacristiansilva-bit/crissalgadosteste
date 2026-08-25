@@ -12,6 +12,12 @@ let roleCache:
   | { available: boolean; checkedAt: number }
   | undefined
 
+function integerEnv(name: string, fallback: number, min: number, max: number) {
+  const parsed = Number(process.env[name])
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(parsed)))
+}
+
 function createRawPool() {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
@@ -20,9 +26,9 @@ function createRawPool() {
 
   return new Pool({
     connectionString,
-    max: 5,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+    max: integerEnv("POSTGRES_POOL_MAX", 5, 1, 30),
+    idleTimeoutMillis: integerEnv("POSTGRES_IDLE_TIMEOUT_MS", 30_000, 5_000, 120_000),
+    connectionTimeoutMillis: integerEnv("POSTGRES_CONNECT_TIMEOUT_MS", 5_000, 1_000, 30_000),
   })
 }
 

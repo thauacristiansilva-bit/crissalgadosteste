@@ -1,12 +1,7 @@
-import { promises as fs } from "node:fs"
-import path from "node:path"
-import crypto from "node:crypto"
 import { NextResponse } from "next/server"
 import { getVerifiedTenantSession, canManageCatalog } from "@/lib/tenant-access"
-import {
-  detectSafeImageType,
-  safeImageExtension,
-} from "@/lib/security/image-validation"
+import { detectSafeImageType } from "@/lib/security/image-validation"
+import { storeImage } from "@/lib/storage/media"
 
 export async function POST(request: Request) {
   const session = await getVerifiedTenantSession().catch(() => null)
@@ -51,12 +46,27 @@ export async function POST(request: Request) {
     )
   }
 
-  const directory =
-    process.env.UPLOAD_DIR || path.join(process.cwd(), "public", "uploads")
-  await fs.mkdir(directory, { recursive: true })
+  try {
+    const stored = await storeImage({
+      organizationId: session.organizationId,
+      area: "products",
+      bytes,
+      contentType: detectedType,
+      filenamePrefix: "product",
+    })
 
-  const filename = `${Date.now()}-${crypto.randomUUID()}.${safeImageExtension(detectedType)}`
-  await fs.writeFile(path.join(directory, filename), bytes)
-
-  return NextResponse.json({ url: `/api/media/${filename}` }, { status: 201 })
+    return NextResponse.json(
+      { url: stored.url, storage: stored.storage },
+      { status: 201 },
+    )
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Falha no upload de imagem de produto:",
+      error instanceof Error ? error.message : error,
+    )
+    return NextResponse.json(
+      { error: "Não foi possível salvar a imagem agora." },
+      { status: 503 },
+    )
+  }
 }

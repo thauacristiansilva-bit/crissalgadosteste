@@ -182,25 +182,49 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
 
   useEffect(() => {
     let active = true
+    let lastFullRefresh = 0
 
-    const refresh = async () => {
+    const sessionChanged = (data: DashboardRefreshPayload) =>
+      Boolean(data.sessionContext) &&
+      (data.sessionContext?.role !== adminRole ||
+        data.sessionContext?.email.trim().toLowerCase() !==
+          adminEmail.trim().toLowerCase())
+
+    const redirectIfSessionChanged = (data: DashboardRefreshPayload) => {
+      if (!sessionChanged(data) || !data.sessionContext) return false
+      active = false
+      router.replace(data.sessionContext.workspace)
+      router.refresh()
+      return true
+    }
+
+    const mergeRecentOrders = (incoming: Order[]) => {
+      setOrders((current) => {
+        const incomingIds = new Set(incoming.map((order) => order.id))
+        return [
+          ...incoming,
+          ...current.filter((order) => !incomingIds.has(order.id)),
+        ]
+      })
+    }
+
+    const refreshLive = async () => {
+      if (document.visibilityState !== "visible") return
+      const response = await fetch("/api/dashboard/live", { cache: "no-store" }).catch(() => null)
+      if (!active || !response?.ok) return
+      const data = (await response.json()) as DashboardRefreshPayload
+      if (redirectIfSessionChanged(data)) return
+      if (Array.isArray(data.orders)) mergeRecentOrders(data.orders)
+    }
+
+    const refreshFull = async () => {
+      if (document.visibilityState !== "visible") return
       const response = await fetch("/api/dashboard", { cache: "no-store" }).catch(() => null)
       if (!active || !response?.ok) return
       const data = (await response.json()) as DashboardRefreshPayload
+      if (redirectIfSessionChanged(data)) return
 
-      const sessionChanged =
-        Boolean(data.sessionContext) &&
-        (data.sessionContext?.role !== adminRole ||
-          data.sessionContext?.email.trim().toLowerCase() !==
-            adminEmail.trim().toLowerCase())
-
-      if (sessionChanged && data.sessionContext) {
-        active = false
-        router.replace(data.sessionContext.workspace)
-        router.refresh()
-        return
-      }
-
+      lastFullRefresh = Date.now()
       if (Array.isArray(data.orders)) setOrders(data.orders)
       if (Array.isArray(data.products)) setProducts(data.products)
       if (Array.isArray(data.customers)) setCustomers(data.customers)
@@ -209,13 +233,27 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
       if (Array.isArray(data.financialEntries)) setFinancialEntries(data.financialEntries)
     }
 
-    void refresh()
-    const id = window.setInterval(() => void refresh(), 5000)
+    const liveIntervalMs = ["overview", "orders", "kitchen"].includes(section)
+      ? 8_000
+      : 20_000
+
+    void refreshLive()
+    const liveId = window.setInterval(() => void refreshLive(), liveIntervalMs)
+    const fullId = window.setInterval(() => void refreshFull(), 60_000)
+
+    const refreshOnFocus = () => {
+      void refreshLive()
+      if (Date.now() - lastFullRefresh > 30_000) void refreshFull()
+    }
+    window.addEventListener("focus", refreshOnFocus)
+
     return () => {
       active = false
-      window.clearInterval(id)
+      window.clearInterval(liveId)
+      window.clearInterval(fullId)
+      window.removeEventListener("focus", refreshOnFocus)
     }
-  }, [adminEmail, adminRole, router])
+  }, [adminEmail, adminRole, router, section])
 
   const summary = useMemo<DashboardSummary>(() => {
     const valid = orders.filter((order) => order.status !== "cancelled")
