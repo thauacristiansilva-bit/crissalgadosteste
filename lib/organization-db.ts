@@ -234,6 +234,8 @@ export async function getTenantSettings(
     systemName: "SaborFlow",
     timeZone: row.timezone || "America/Sao_Paulo",
     deliveryTrackingEnabled: settings.deliveryTrackingEnabled !== false,
+    orderAcceptanceMode:
+      settings.orderAcceptanceMode === "manual" ? "manual" : "automatic",
   }
 }
 
@@ -246,6 +248,14 @@ function normalizedSettings(
     ...patch,
     systemName: "SaborFlow",
     deliveryFee: 0,
+    orderAcceptanceMode:
+      patch.orderAcceptanceMode === "manual"
+        ? "manual"
+        : patch.orderAcceptanceMode === "automatic"
+          ? "automatic"
+          : current.orderAcceptanceMode === "manual"
+            ? "manual"
+            : "automatic",
     deliveryTrackingEnabled:
       patch.deliveryTrackingEnabled !== undefined
         ? Boolean(patch.deliveryTrackingEnabled)

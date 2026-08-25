@@ -1,11 +1,26 @@
 "use client"
 
 import Link from "next/link"
+import type { Order } from "@/lib/types"
 import { FormEvent, useEffect, useState } from "react"
-import { LogIn, ShieldCheck, UserPlus, X } from "lucide-react"
+import { Clock3, LogIn, PackageCheck, ShieldCheck, UserPlus, X } from "lucide-react"
 
 const LAST_CLIENT_CPF_KEY = "saborflow_client_last_cpf"
 const LEGACY_LAST_CLIENT_CPF_KEY = "cris-client-last-cpf"
+
+
+const ORDER_STATUS_LABEL: Record<Order["status"], string> = {
+  pending: "Aguardando confirmação",
+  accepted: "Aceito",
+  preparing: "Em preparação",
+  ready: "Pronto",
+  "in-route": "Em rota",
+  completed: "Concluído",
+  cancelled: "Cancelado",
+}
+
+const money = (value: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
 type CustomerPublic = {
   id: number
@@ -30,11 +45,13 @@ export function ClientAccountModal({
   onClose,
   customer,
   onCustomer,
+  orderBasePath = "",
 }: {
   open: boolean
   onClose: () => void
   customer: CustomerPublic | null
   onCustomer: (customer: CustomerPublic | null) => void
+  orderBasePath?: string
 }) {
   const [mode, setMode] = useState<"login" | "register">("login")
   const [cpf, setCpf] = useState("")
@@ -46,11 +63,31 @@ export function ClientAccountModal({
   const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const [orders, setOrders] = useState<Order[]>([])
+  const [ordersBusy, setOrdersBusy] = useState(false)
 
   useEffect(() => {
     if (!open) return
     setError("")
   }, [open])
+
+  useEffect(() => {
+    if (!open || !customer) {
+      if (!customer) setOrders([])
+      return
+    }
+    let disposed = false
+    setOrdersBusy(true)
+    fetch("/api/client/orders", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || "Não foi possível carregar seus pedidos.")
+        if (!disposed) setOrders(Array.isArray(data.orders) ? data.orders : [])
+      })
+      .catch(() => { if (!disposed) setOrders([]) })
+      .finally(() => { if (!disposed) setOrdersBusy(false) })
+    return () => { disposed = true }
+  }, [open, customer])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -79,6 +116,7 @@ export function ClientAccountModal({
 
   async function logout() {
     await fetch("/api/client/logout", { method: "POST" })
+    setOrders([])
     onCustomer(null)
     onClose()
   }
@@ -118,6 +156,10 @@ export function ClientAccountModal({
               <div className="rounded-2xl border border-gray-200 p-4"><p className="text-xs text-gray-500">CPF</p><p className="mt-1 font-black">•••.•••.•••-{customer.cpfLast4}</p></div>
               <div className="rounded-2xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Pontos</p><p className="mt-1 text-xl font-black text-orange-600">{customer.loyaltyPoints}</p></div>
             </div>
+            <section className="rounded-2xl border border-gray-200 p-4">
+              <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-black text-gray-950">Meus pedidos</p><p className="text-xs text-gray-500">Acompanhe pedidos atuais e consulte os últimos pedidos desta loja.</p></div><PackageCheck className="h-5 w-5 text-orange-500" /></div>
+              {ordersBusy ? <p className="mt-3 text-xs text-gray-500">Carregando pedidos...</p> : orders.length ? <div className="mt-3 space-y-2">{orders.slice(0, 8).map((order) => { const href = orderBasePath ? `${orderBasePath}/pedido/${encodeURIComponent(order.reference)}` : `/pedido/${encodeURIComponent(order.reference)}`; return <a key={order.reference} href={href} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-3 py-3 transition hover:bg-orange-50"><div className="min-w-0"><p className="font-black text-gray-900">{order.code} <span className="font-semibold text-gray-500">· {ORDER_STATUS_LABEL[order.status]}</span></p><p className="mt-1 flex items-center gap-1 text-[11px] text-gray-500"><Clock3 className="h-3 w-3" />{new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(order.createdAt))}</p></div><strong className="shrink-0 text-sm text-gray-900">{money(order.total)}</strong></a> })}</div> : <p className="mt-3 text-xs text-gray-500">Nenhum pedido vinculado a esta conta ainda.</p>}
+            </section>
             <button type="button" onClick={logout} className="h-11 w-full rounded-xl border border-gray-200 text-sm font-bold text-gray-700">Sair desta conta</button>
           </div>
         ) : (

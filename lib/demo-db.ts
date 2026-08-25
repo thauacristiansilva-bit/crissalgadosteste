@@ -58,6 +58,7 @@ function demoSettings(storeName: string) {
     storeLatitude: -23.55052,
     storeLongitude: -46.633308,
     acceptingOrders: true,
+    orderAcceptanceMode: "automatic",
     pickupEnabled: true,
     deliveryEnabled: true,
     dineInEnabled: false,

@@ -1,5 +1,6 @@
 export type PaymentMethod = "card" | "cash" | "pix"
 export type OrderType = "pickup" | "delivery"
+export type OrderAcceptanceMode = "automatic" | "manual"
 export type OrderStatus =
   | "pending"
   | "accepted"
@@ -339,6 +340,8 @@ export interface StoreSettings {
   storeLatitude: number
   storeLongitude: number
   acceptingOrders: boolean
+  /** automatic = entra aceito; manual = aguarda aceite da equipe. */
+  orderAcceptanceMode?: OrderAcceptanceMode
   pickupEnabled: boolean
   deliveryEnabled: boolean
   /** Compartilha GPS somente enquanto o pedido do cliente é a entrega ativa. */

@@ -200,6 +200,7 @@ function starterSettings(
     storeLatitude: 0,
     storeLongitude: 0,
     acceptingOrders: false,
+    orderAcceptanceMode: "automatic",
     pickupEnabled: true,
     deliveryEnabled: false,
     dineInEnabled: false,

@@ -767,7 +767,10 @@ async function createTenantCheckoutOrderInScope(
       code: `#${id}`,
       reference,
       type: input.type,
-      status: "accepted",
+      status:
+        channel === "PDV" || settings.orderAcceptanceMode !== "manual"
+          ? "accepted"
+          : "pending",
       channel,
       subtotal,
       discount:

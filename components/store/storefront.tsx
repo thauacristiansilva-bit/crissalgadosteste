@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
+import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, PackageCheck, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
 import { isStoreOpenNow, zonedDateString, zonedDateTime } from "@/lib/operations"
 import { IMMEDIATE_DELIVERY_MIN_MINUTES, IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
@@ -20,6 +20,16 @@ import {
 import type { Category, DeliveryZone, Order, OrderItemModifier, Product, StoreSettings } from "@/lib/types"
 
 const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
+
+const compactOrderStatus: Record<Order["status"], string> = {
+  pending: "Aguardando confirmação",
+  accepted: "Aceito",
+  preparing: "Em preparo",
+  ready: "Pronto",
+  "in-route": "Em rota",
+  completed: "Concluído",
+  cancelled: "Cancelado",
+}
 
 type CartItem = {
   key: string
@@ -89,6 +99,9 @@ export function Storefront({
   const landingPath = resolvedBasePath || "/"
   const catalogPath = `${resolvedBasePath}/cardapio` || "/cardapio"
   const directOrderPath = `${resolvedBasePath}/pedir` || "/pedir"
+  const lastOrderStorageKey = organization?.slug
+    ? `saborflow_last_order:${organization.slug}`
+    : "saborflow_last_order:custom-domain"
 
   const orderPath = (reference: string) =>
     resolvedBasePath
@@ -122,6 +135,7 @@ export function Storefront({
   const [couponDiscount, setCouponDiscount] = useState(0)
   const [couponMessage, setCouponMessage] = useState("")
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null)
+  const [lastOrder, setLastOrder] = useState<Order | null>(null)
   const [checkout, setCheckout] = useState<Checkout>({
     name: "", phone: "", type: settings.pickupEnabled ? "pickup" : "delivery", timing: openNow ? "now" : "scheduled", scheduleDate: "", scheduleTime: "", zipCode: "", address: "", number: "", district: "", city: settings.city, state: settings.state, complement: "", latitude: null, longitude: null, paymentMethod: settings.pixEnabled ? "pix" : settings.cashEnabled ? "cash" : "card", changeFor: "", notes: "", couponCode: "",
   })
@@ -136,6 +150,53 @@ export function Storefront({
     )
   }, [isOpen, settings.acceptingOrders])
   useEffect(() => { fetch("/api/client/me", { cache: "no-store" }).then((r) => r.json()).then((data) => { if (data.customer) setCustomer(data.customer) }).catch(() => undefined) }, [])
+
+  useEffect(() => {
+    let disposed = false
+    let intervalId: number | null = null
+
+    const storedReference = (() => {
+      try {
+        return window.localStorage.getItem(lastOrderStorageKey) || window.localStorage.getItem("saborflow_last_order") || window.localStorage.getItem("cris_last_order") || ""
+      } catch {
+        return ""
+      }
+    })()
+
+    if (!storedReference) return
+
+    const refresh = async () => {
+      const response = await fetch(`/api/order-status/${encodeURIComponent(storedReference)}`, { cache: "no-store" }).catch(() => null)
+      if (disposed) return
+      if (!response?.ok) {
+        if (response?.status === 404) {
+          try {
+            window.localStorage.removeItem(lastOrderStorageKey)
+            window.localStorage.removeItem("saborflow_last_order")
+            window.localStorage.removeItem("cris_last_order")
+          } catch {}
+          setLastOrder(null)
+        }
+        return
+      }
+      const data = await response.json() as { order?: Order }
+      if (data.order) {
+        setLastOrder(data.order)
+        try {
+          window.localStorage.setItem(lastOrderStorageKey, data.order.reference)
+          window.localStorage.removeItem("saborflow_last_order")
+          window.localStorage.removeItem("cris_last_order")
+        } catch {}
+      }
+    }
+
+    void refresh()
+    intervalId = window.setInterval(refresh, 10000)
+    return () => {
+      disposed = true
+      if (intervalId !== null) window.clearInterval(intervalId)
+    }
+  }, [lastOrderStorageKey])
 
   useEffect(() => {
     if (cartLoadedKeyRef.current === cartStorageKey) return
@@ -618,8 +679,8 @@ export function Storefront({
       })) }) })
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível enviar o pedido.")
       if (customer) await fetch("/api/client/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: checkout.name, phone: checkout.phone, defaultAddress: checkout.address, defaultNumber: checkout.number, defaultDistrict: checkout.district, defaultCity: checkout.city, defaultState: checkout.state, defaultZipCode: checkout.zipCode, defaultComplement: checkout.complement, defaultLatitude: checkout.latitude, defaultLongitude: checkout.longitude }) }).catch(() => null)
-      localStorage.setItem("saborflow_last_order", data.order.reference); localStorage.removeItem("cris_last_order"); localStorage.removeItem("crisflow_cart_v1"); localStorage.removeItem(cartStorageKey); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order)
-      if (settings.checkoutAfterSubmit === "whatsapp") window.location.href = whatsappOrderUrl(data.order)
+      localStorage.setItem(lastOrderStorageKey, data.order.reference); localStorage.removeItem("saborflow_last_order"); localStorage.removeItem("cris_last_order"); localStorage.removeItem("crisflow_cart_v1"); localStorage.removeItem(cartStorageKey); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order); setLastOrder(data.order)
+      if (settings.checkoutAfterSubmit === "whatsapp") router.push(`${orderPath(data.order.reference)}#whatsapp`)
       else if (settings.checkoutAfterSubmit === "site") router.push(orderPath(data.order.reference))
     } catch (err) { setError(err instanceof Error ? err.message : "Erro ao enviar pedido.") } finally { setSending(false) }
   }
@@ -640,8 +701,9 @@ export function Storefront({
             <span className="hidden truncate sm:inline">{settings.storeName}</span>
           </a>
           <div className="flex items-center gap-2">
-            <a href={catalogPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "catalog" ? "bg-gray-950 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Cardápio</a>
+            <a href={catalogPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "catalog" ? "bg-gray-950 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Ver cardápio</a>
             <a href={directOrderPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "order" ? "text-white" : "text-gray-600 hover:bg-gray-100"}`} style={pageMode === "order" ? { backgroundColor: settings.primaryColor } : undefined}>Fazer pedido</a>
+            {lastOrder && <a href={orderPath(lastOrder.reference)} className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-black shadow-sm ${["completed", "cancelled"].includes(lastOrder.status) ? "border-gray-200 bg-white text-gray-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}><PackageCheck className="h-4 w-4"/><span>{["completed", "cancelled"].includes(lastOrder.status) ? "Último pedido" : "Meu pedido"}</span><span className="hidden rounded-full bg-white/80 px-2 py-0.5 text-[10px] sm:inline">{compactOrderStatus[lastOrder.status]}</span></a>}
             {settings.clientAccountsEnabled && (
               <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{customer.loyaltyPoints} pts</span>}</button>
             )}
@@ -693,6 +755,8 @@ export function Storefront({
             {pageMode === "catalog" && <a href={directOrderPath} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-white" style={{ backgroundColor: settings.primaryColor }}><ShoppingBag className="h-4 w-4" />Fazer pedido</a>}
           </div>
         </section>
+
+        {lastOrder && !["completed", "cancelled"].includes(lastOrder.status) && <a href={orderPath(lastOrder.reference)} className="mt-4 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><div className="rounded-xl bg-white p-2 text-emerald-700"><PackageCheck className="h-5 w-5"/></div><div><p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Pedido em andamento</p><p className="mt-1 font-black text-gray-950">{lastOrder.code} · {compactOrderStatus[lastOrder.status]}</p><p className="mt-1 text-xs text-gray-600">O pedido continua no SaborFlow mesmo quando você conversa com a loja pelo WhatsApp.</p></div></div><span className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-700 px-4 text-xs font-black text-white">Acompanhar pedido</span></a>}
 
         <section className="sticky top-14 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
@@ -973,11 +1037,11 @@ export function Storefront({
         }}
       />
 
-      <ClientAccountModal open={accountOpen} onClose={() => setAccountOpen(false)} customer={customer} onCustomer={setCustomer} />
+      <ClientAccountModal open={accountOpen} onClose={() => setAccountOpen(false)} customer={customer} onCustomer={setCustomer} orderBasePath={resolvedBasePath} />
 
       <StoreChatbot settings={settings} />
 
-      {createdOrder && settings.checkoutAfterSubmit === "ask" && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido confirmado!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · escolha como quer continuar.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(orderPath(createdOrder.reference))} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar pedido no site</button></div></div></div>}
+      {createdOrder && settings.checkoutAfterSubmit === "ask" && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido recebido!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · seu pedido já está salvo no SaborFlow e continuará disponível para acompanhamento.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} target="_blank" rel="noreferrer" className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(orderPath(createdOrder.reference))} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar meu pedido</button></div><p className="mt-3 text-center text-[11px] text-gray-400">O WhatsApp abre separadamente; seu pedido não sai do sistema.</p></div></div>}
     </div>
   )
 }

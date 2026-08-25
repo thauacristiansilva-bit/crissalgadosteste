@@ -24,7 +24,7 @@ import { printOrder } from "@/lib/print-order"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
 const statusLabels: Record<OrderStatus, string> = {
-  pending: "Pendente legado",
+  pending: "Aguardando aceite",
   accepted: "Aceito",
   preparing: "Em preparação",
   ready: "Pronto",
@@ -52,7 +52,7 @@ const nextStatus: Partial<Record<OrderStatus, OrderStatus>> = {
 }
 
 const nextStatusLabel: Partial<Record<OrderStatus, string>> = {
-  pending: "Aceitar pedido legado",
+  pending: "Aceitar pedido",
   accepted: "Começar preparo",
   preparing: "Marcar como pronto",
   ready: "Saiu para entrega",
@@ -89,7 +89,9 @@ export function OrdersPanel({
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<"all" | OrderStatus>("all")
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [busyAll, setBusyAll] = useState(false)
   const [error, setError] = useState("")
+  const pendingCount = orders.filter((order) => order.status === "pending").length
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("pt-BR")
@@ -124,6 +126,22 @@ export function OrdersPanel({
     }
   }
 
+  async function acceptAllPending() {
+    if (!pendingCount || busyAll) return
+    setBusyAll(true)
+    setError("")
+    try {
+      const response = await fetch("/api/orders/accept-pending", { method: "POST" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "Não foi possível aceitar os pedidos pendentes.")
+      for (const order of (data.orders || []) as Order[]) onOrderUpdated(order)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao aceitar pedidos pendentes.")
+    } finally {
+      setBusyAll(false)
+    }
+  }
+
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
@@ -131,7 +149,12 @@ export function OrdersPanel({
           <h2 className="text-lg font-bold text-gray-900">Pedidos</h2>
           <p className="text-sm text-gray-500">Acompanhe e atualize o fluxo dos pedidos em tempo real.</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          {pendingCount > 0 && (
+            <button type="button" onClick={acceptAllPending} disabled={busyAll} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white disabled:opacity-50">
+              <CheckCircle2 className="h-4 w-4" />{busyAll ? "Aceitando..." : `Aceitar pendentes (${pendingCount})`}
+            </button>
+          )}
           <label className="relative min-w-64">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
@@ -157,6 +180,11 @@ export function OrdersPanel({
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
+
+      <div className={`rounded-xl border px-4 py-3 text-sm ${settings.orderAcceptanceMode === "manual" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
+        <strong>{settings.orderAcceptanceMode === "manual" ? "Aceite manual ativo." : "Aceite automático ativo."}</strong>{" "}
+        {settings.orderAcceptanceMode === "manual" ? "Novos pedidos aguardam confirmação da equipe antes do preparo." : "Novos pedidos online já entram como aceitos."}
+      </div>
 
       <div className="space-y-3">
         {filteredOrders.map((order) => {
