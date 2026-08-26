@@ -3,6 +3,7 @@ import {
   deactivateTenantProduct,
   updateTenantProduct,
 } from "@/lib/catalog-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
@@ -45,33 +46,23 @@ export async function PATCH(
   }
 
   const patch = {
-    ...(body.name !== undefined
-      ? { name: String(body.name) }
-      : {}),
+    ...(body.name !== undefined ? { name: String(body.name) } : {}),
     ...(body.description !== undefined
       ? { description: String(body.description) }
       : {}),
     ...(body.category !== undefined
       ? { category: String(body.category) }
       : {}),
-    ...(body.price !== undefined
-      ? { price: Number(body.price) }
-      : {}),
-    ...(body.active !== undefined
-      ? { active: Boolean(body.active) }
-      : {}),
-    ...(body.image !== undefined
-      ? { image: String(body.image) }
-      : {}),
+    ...(body.price !== undefined ? { price: Number(body.price) } : {}),
+    ...(body.active !== undefined ? { active: Boolean(body.active) } : {}),
+    ...(body.image !== undefined ? { image: String(body.image) } : {}),
     ...(body.featured !== undefined
       ? { featured: Boolean(body.featured) }
       : {}),
     ...(body.trackStock !== undefined
       ? { trackStock: Boolean(body.trackStock) }
       : {}),
-    ...(body.stock !== undefined
-      ? { stock: Number(body.stock) }
-      : {}),
+    ...(body.stock !== undefined ? { stock: Number(body.stock) } : {}),
     ...(body.minStock !== undefined
       ? { minStock: Number(body.minStock) }
       : {}),
@@ -85,13 +76,18 @@ export async function PATCH(
       )
     }
 
-    const result = await updateTenantProduct(
-      session.organizationId,
-      numericId,
-      patch,
+    const result = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () => updateTenantProduct(session.organizationId, numericId, patch),
+      "tenant-session",
     )
 
     if (!result) {
+      console.warn("[SaborFlow] Produto não encontrado no escopo do tenant", {
+        organizationId: session.organizationId,
+        productId: numericId,
+      })
       return NextResponse.json(
         { error: "Produto não encontrado." },
         { status: 404 },
@@ -100,6 +96,7 @@ export async function PATCH(
 
     return NextResponse.json({ product: result.product })
   } catch (error) {
+    console.error("[SaborFlow] Falha ao atualizar produto PostgreSQL:", error)
     return NextResponse.json(
       {
         error:
@@ -142,17 +139,32 @@ export async function DELETE(
     )
   }
 
-  const product = await deactivateTenantProduct(
-    session.organizationId,
-    numericId,
-  )
+  try {
+    const product = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () => deactivateTenantProduct(session.organizationId, numericId),
+      "tenant-session",
+    )
 
-  if (!product) {
+    if (!product) {
+      return NextResponse.json(
+        { error: "Produto não encontrado." },
+        { status: 404 },
+      )
+    }
+
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    console.error("[SaborFlow] Falha ao desativar produto PostgreSQL:", error)
     return NextResponse.json(
-      { error: "Produto não encontrado." },
-      { status: 404 },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível desativar o produto.",
+      },
+      { status: 400 },
     )
   }
-
-  return NextResponse.json({ ok: true })
 }

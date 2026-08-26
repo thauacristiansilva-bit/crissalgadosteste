@@ -3,6 +3,7 @@ import {
   createTenantCategory,
   getTenantCategories,
 } from "@/lib/catalog-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
@@ -18,9 +19,14 @@ export async function GET() {
     )
   }
 
-  return NextResponse.json({
-    categories: await getTenantCategories(session.organizationId),
-  })
+  const categories = await runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    () => getTenantCategories(session.organizationId),
+    "tenant-session",
+  )
+
+  return NextResponse.json({ categories })
 }
 
 export async function POST(request: Request) {
@@ -45,13 +51,16 @@ export async function POST(request: Request) {
       )
     }
 
-    const category = await createTenantCategory(
-      session.organizationId,
-      body?.name || "",
+    const category = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () => createTenantCategory(session.organizationId, body?.name || ""),
+      "tenant-session",
     )
 
     return NextResponse.json({ category }, { status: 201 })
   } catch (error) {
+    console.error("[SaborFlow] Falha ao criar categoria PostgreSQL:", error)
     return NextResponse.json(
       {
         error:

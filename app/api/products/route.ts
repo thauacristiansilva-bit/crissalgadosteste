@@ -3,6 +3,7 @@ import {
   createTenantProduct,
   getTenantProducts,
 } from "@/lib/catalog-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
@@ -19,9 +20,14 @@ export async function GET() {
     )
   }
 
-  return NextResponse.json({
-    products: await getTenantProducts(session.organizationId),
-  })
+  const products = await runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    () => getTenantProducts(session.organizationId),
+    "tenant-session",
+  )
+
+  return NextResponse.json({ products })
 }
 
 export async function POST(request: Request) {
@@ -77,11 +83,14 @@ export async function POST(request: Request) {
       )
     }
 
-    await assertCanCreateProduct(session.organizationId)
-
-    const result = await createTenantProduct(
-      session.organizationId,
-      input,
+    const result = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        await assertCanCreateProduct(session.organizationId)
+        return createTenantProduct(session.organizationId, input)
+      },
+      "tenant-session",
     )
 
     return NextResponse.json(
@@ -89,6 +98,7 @@ export async function POST(request: Request) {
       { status: 201 },
     )
   } catch (error) {
+    console.error("[SaborFlow] Falha ao criar produto PostgreSQL:", error)
     return NextResponse.json(
       {
         error:

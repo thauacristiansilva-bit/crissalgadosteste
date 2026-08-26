@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { updateTenantCategory } from "@/lib/catalog-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
@@ -39,10 +40,11 @@ export async function PATCH(
       )
     }
 
-    const result = await updateTenantCategory(
-      session.organizationId,
-      numericId,
-      body,
+    const result = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () => updateTenantCategory(session.organizationId, numericId, body),
+      "tenant-session",
     )
 
     if (!result) {
@@ -54,6 +56,7 @@ export async function PATCH(
 
     return NextResponse.json({ category: result.category })
   } catch (error) {
+    console.error("[SaborFlow] Falha ao atualizar categoria PostgreSQL:", error)
     return NextResponse.json(
       {
         error:
