@@ -5,7 +5,7 @@ import {
 } from "node:crypto"
 import { resolveTxt } from "node:dns/promises"
 import { getPostgresPool } from "@/lib/postgres"
-import { enterTenantRlsContext, runWithRlsBypass } from "@/lib/rls-context"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   normalizePublicDomain,
 } from "@/lib/organization-db"
@@ -148,35 +148,42 @@ function mapDomainRow(
 export async function listOrganizationDomains(
   organizationId: string,
 ) {
-  const result =
-    await getPostgresPool().query<{
-      domain: string
-      verified: boolean
-      primary_domain: boolean
-      verification_method: "dns_txt"
-      verified_at: Date | string | null
-      last_checked_at: Date | string | null
-    }>(
-      `
-        SELECT
-          domain,
-          verified,
-          primary_domain,
-          verification_method,
-          verified_at,
-          last_checked_at
-        FROM sf_organization_domains
-        WHERE organization_id = $1
-        ORDER BY
-          primary_domain DESC,
-          verified DESC,
-          domain ASC
-      `,
-      [organizationId],
-    )
+  return runWithTenantRlsScope(
+    [organizationId],
+    undefined,
+    async () => {
+      const result =
+        await getPostgresPool().query<{
+          domain: string
+          verified: boolean
+          primary_domain: boolean
+          verification_method: "dns_txt"
+          verified_at: Date | string | null
+          last_checked_at: Date | string | null
+        }>(
+          `
+            SELECT
+              domain,
+              verified,
+              primary_domain,
+              verification_method,
+              verified_at,
+              last_checked_at
+            FROM sf_organization_domains
+            WHERE organization_id = $1
+            ORDER BY
+              primary_domain DESC,
+              verified DESC,
+              domain ASC
+          `,
+          [organizationId],
+        )
 
-  return result.rows.map(
-    mapDomainRow,
+      return result.rows.map(
+        mapDomainRow,
+      )
+    },
+    "tenant-session",
   )
 }
 
@@ -236,99 +243,115 @@ export async function createDomainVerification(
   const challengeHash =
     hashToken(challenge)
 
-  const client =
-    await getPostgresPool().connect()
-
   try {
-    await client.query("BEGIN")
+    await runWithTenantRlsScope(
+      [input.organizationId],
+      undefined,
+      async () => {
+        const client =
+          await getPostgresPool().connect()
 
-    const existing =
-      await client.query<{
-        organization_id: string
-        verified: boolean
-      }>(
-        `
-          SELECT
-            organization_id,
-            verified
-          FROM sf_organization_domains
-          WHERE domain = $1
-          LIMIT 1
-          FOR UPDATE
-        `,
-        [domain],
-      )
+        try {
+          await client.query("BEGIN")
 
-    const current =
-      existing.rows[0]
+          const existing =
+            await client.query<{
+              verified: boolean
+            }>(
+              `
+                SELECT verified
+                FROM sf_organization_domains
+                WHERE organization_id = $1
+                  AND domain = $2
+                LIMIT 1
+                FOR UPDATE
+              `,
+              [
+                input.organizationId,
+                domain,
+              ],
+            )
 
-    if (
-      current &&
-      current.organization_id !==
-        input.organizationId
-    ) {
+          const current =
+            existing.rows[0]
+
+          if (current?.verified) {
+            throw new Error(
+              "Este domínio já está verificado.",
+            )
+          }
+
+          if (current) {
+            await client.query(
+              `
+                UPDATE sf_organization_domains
+                SET
+                  verified = false,
+                  primary_domain = false,
+                  verification_method = 'dns_txt',
+                  verification_token_hash = $3,
+                  verified_at = NULL,
+                  last_checked_at = NULL,
+                  updated_at = now()
+                WHERE organization_id = $1
+                  AND domain = $2
+              `,
+              [
+                input.organizationId,
+                domain,
+                challengeHash,
+              ],
+            )
+          } else {
+            await client.query(
+              `
+                INSERT INTO sf_organization_domains (
+                  domain,
+                  organization_id,
+                  verified,
+                  primary_domain,
+                  verification_method,
+                  verification_token_hash,
+                  created_at,
+                  updated_at
+                )
+                VALUES (
+                  $1,
+                  $2,
+                  false,
+                  false,
+                  'dns_txt',
+                  $3,
+                  now(),
+                  now()
+                )
+              `,
+              [
+                domain,
+                input.organizationId,
+                challengeHash,
+              ],
+            )
+          }
+
+          await client.query("COMMIT")
+        } catch (error) {
+          await client.query("ROLLBACK")
+          throw error
+        } finally {
+          client.release()
+        }
+      },
+      "tenant-session",
+    )
+  } catch (error) {
+    const pgError = error as { code?: string }
+    if (pgError?.code === "23505") {
       throw new Error(
         "Este domínio já está vinculado a outra empresa.",
       )
     }
-
-    if (
-      current?.verified
-    ) {
-      throw new Error(
-        "Este domínio já está verificado.",
-      )
-    }
-
-    await client.query(
-      `
-        INSERT INTO sf_organization_domains (
-          domain,
-          organization_id,
-          verified,
-          primary_domain,
-          verification_method,
-          verification_token_hash,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          $1,
-          $2,
-          false,
-          false,
-          'dns_txt',
-          $3,
-          now(),
-          now()
-        )
-        ON CONFLICT (domain)
-        DO UPDATE SET
-          organization_id =
-            EXCLUDED.organization_id,
-          verified = false,
-          primary_domain = false,
-          verification_method =
-            'dns_txt',
-          verification_token_hash =
-            EXCLUDED.verification_token_hash,
-          verified_at = NULL,
-          last_checked_at = NULL,
-          updated_at = now()
-      `,
-      [
-        domain,
-        input.organizationId,
-        challengeHash,
-      ],
-    )
-
-    await client.query("COMMIT")
-  } catch (error) {
-    await client.query("ROLLBACK")
     throw error
-  } finally {
-    client.release()
   }
 
   let cloudflare
@@ -336,9 +359,21 @@ export async function createDomainVerification(
     cloudflare = await ensureCloudflareCustomHostname(domain)
   } catch (error) {
     // Evita deixar um cadastro local que o cliente acredita estar roteado.
-    await getPostgresPool().query(
-      `DELETE FROM sf_organization_domains WHERE organization_id = $1 AND domain = $2 AND verified = false`,
-      [input.organizationId, domain],
+    await runWithTenantRlsScope(
+      [input.organizationId],
+      undefined,
+      async () => {
+        await getPostgresPool().query(
+          `
+            DELETE FROM sf_organization_domains
+            WHERE organization_id = $1
+              AND domain = $2
+              AND verified = false
+          `,
+          [input.organizationId, domain],
+        )
+      },
+      "tenant-session",
     ).catch(() => null)
     throw error
   }
@@ -363,29 +398,36 @@ export async function verifyOrganizationDomain(
       input.domain,
     )
 
-  const result =
-    await getPostgresPool().query<{
-      verification_token_hash:
-        | string
-        | null
-      verified: boolean
-    }>(
-      `
-        SELECT
-          verification_token_hash,
-          verified
-        FROM sf_organization_domains
-        WHERE organization_id = $1
-          AND domain = $2
-        LIMIT 1
-      `,
-      [
-        input.organizationId,
-        domain,
-      ],
-    )
+  const row = await runWithTenantRlsScope(
+    [input.organizationId],
+    undefined,
+    async () => {
+      const result =
+        await getPostgresPool().query<{
+          verification_token_hash:
+            | string
+            | null
+          verified: boolean
+        }>(
+          `
+            SELECT
+              verification_token_hash,
+              verified
+            FROM sf_organization_domains
+            WHERE organization_id = $1
+              AND domain = $2
+            LIMIT 1
+          `,
+          [
+            input.organizationId,
+            domain,
+          ],
+        )
 
-  const row = result.rows[0]
+      return result.rows[0]
+    },
+    "tenant-session",
+  )
 
   if (!row) {
     throw new Error(
@@ -435,19 +477,26 @@ export async function verifyOrganizationDomain(
         row.verification_token_hash,
     )
 
-  await getPostgresPool().query(
-    `
-      UPDATE sf_organization_domains
-      SET
-        last_checked_at = now(),
-        updated_at = now()
-      WHERE organization_id = $1
-        AND domain = $2
-    `,
-    [
-      input.organizationId,
-      domain,
-    ],
+  await runWithTenantRlsScope(
+    [input.organizationId],
+    undefined,
+    async () => {
+      await getPostgresPool().query(
+        `
+          UPDATE sf_organization_domains
+          SET
+            last_checked_at = now(),
+            updated_at = now()
+          WHERE organization_id = $1
+            AND domain = $2
+        `,
+        [
+          input.organizationId,
+          domain,
+        ],
+      )
+    },
+    "tenant-session",
   )
 
   if (!matched) {
@@ -460,55 +509,62 @@ export async function verifyOrganizationDomain(
   // ativar o vínculo local da empresa.
   const cloudflare = await ensureCloudflareCustomHostname(domain)
 
-  const client =
-    await getPostgresPool().connect()
+  await runWithTenantRlsScope(
+    [input.organizationId],
+    undefined,
+    async () => {
+      const client =
+        await getPostgresPool().connect()
 
-  try {
-    await client.query("BEGIN")
+      try {
+        await client.query("BEGIN")
 
-    const hasPrimary =
-      await client.query(
-        `
-          SELECT 1
-          FROM sf_organization_domains
-          WHERE organization_id = $1
-            AND verified = true
-            AND primary_domain = true
-            AND domain <> $2
-          LIMIT 1
-        `,
-        [
-          input.organizationId,
-          domain,
-        ],
-      )
+        const hasPrimary =
+          await client.query(
+            `
+              SELECT 1
+              FROM sf_organization_domains
+              WHERE organization_id = $1
+                AND verified = true
+                AND primary_domain = true
+                AND domain <> $2
+              LIMIT 1
+            `,
+            [
+              input.organizationId,
+              domain,
+            ],
+          )
 
-    await client.query(
-      `
-        UPDATE sf_organization_domains
-        SET
-          verified = true,
-          verified_at = now(),
-          last_checked_at = now(),
-          primary_domain = $3,
-          updated_at = now()
-        WHERE organization_id = $1
-          AND domain = $2
-      `,
-      [
-        input.organizationId,
-        domain,
-        !hasPrimary.rowCount,
-      ],
-    )
+        await client.query(
+          `
+            UPDATE sf_organization_domains
+            SET
+              verified = true,
+              verified_at = now(),
+              last_checked_at = now(),
+              primary_domain = $3,
+              updated_at = now()
+            WHERE organization_id = $1
+              AND domain = $2
+          `,
+          [
+            input.organizationId,
+            domain,
+            !hasPrimary.rowCount,
+          ],
+        )
 
-    await client.query("COMMIT")
-  } catch (error) {
-    await client.query("ROLLBACK")
-    throw error
-  } finally {
-    client.release()
-  }
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+    },
+    "tenant-session",
+  )
 
   return {
     verified: true,
@@ -534,23 +590,19 @@ export async function removeOrganizationDomain(
     )
   }
 
-  await removeCloudflareCustomHostname(domain)
-
-  const client =
-    await getPostgresPool().connect()
-
-  try {
-    await client.query("BEGIN")
-
-    const deleted =
-      await client.query<{
-        primary_domain: boolean
-      }>(
+  // Confirma a posse local antes de remover o hostname no Cloudflare.
+  // Isso impede que uma organização tente remover o domínio de outra.
+  const owned = await runWithTenantRlsScope(
+    [input.organizationId],
+    undefined,
+    async () => {
+      const result = await getPostgresPool().query<{ domain: string }>(
         `
-          DELETE FROM sf_organization_domains
+          SELECT domain
+          FROM sf_organization_domains
           WHERE organization_id = $1
             AND domain = $2
-          RETURNING primary_domain
+          LIMIT 1
         `,
         [
           input.organizationId,
@@ -558,45 +610,88 @@ export async function removeOrganizationDomain(
         ],
       )
 
-    if (!deleted.rows[0]) {
-      throw new Error(
-        "Domínio não encontrado.",
-      )
-    }
+      return Boolean(result.rows[0])
+    },
+    "tenant-session",
+  )
 
-    if (
-      deleted.rows[0]
-        .primary_domain
-    ) {
-      await client.query(
-        `
-          UPDATE sf_organization_domains
-          SET
-            primary_domain = true,
-            updated_at = now()
-          WHERE domain = (
-            SELECT domain
-            FROM sf_organization_domains
-            WHERE organization_id = $1
-              AND verified = true
-            ORDER BY verified_at ASC, domain ASC
-            LIMIT 1
-          )
-        `,
-        [input.organizationId],
-      )
-    }
-
-    await client.query("COMMIT")
-  } catch (error) {
-    await client.query("ROLLBACK")
-    throw error
-  } finally {
-    client.release()
+  if (!owned) {
+    throw new Error(
+      "Domínio não encontrado.",
+    )
   }
+
+  await removeCloudflareCustomHostname(domain)
+
+  await runWithTenantRlsScope(
+    [input.organizationId],
+    undefined,
+    async () => {
+      const client =
+        await getPostgresPool().connect()
+
+      try {
+        await client.query("BEGIN")
+
+        const deleted =
+          await client.query<{
+            primary_domain: boolean
+          }>(
+            `
+              DELETE FROM sf_organization_domains
+              WHERE organization_id = $1
+                AND domain = $2
+              RETURNING primary_domain
+            `,
+            [
+              input.organizationId,
+              domain,
+            ],
+          )
+
+        if (!deleted.rows[0]) {
+          throw new Error(
+            "Domínio não encontrado.",
+          )
+        }
+
+        if (
+          deleted.rows[0]
+            .primary_domain
+        ) {
+          await client.query(
+            `
+              UPDATE sf_organization_domains
+              SET
+                primary_domain = true,
+                updated_at = now()
+              WHERE domain = (
+                SELECT domain
+                FROM sf_organization_domains
+                WHERE organization_id = $1
+                  AND verified = true
+                ORDER BY verified_at ASC, domain ASC
+                LIMIT 1
+              )
+            `,
+            [input.organizationId],
+          )
+        }
+
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+    },
+    "tenant-session",
+  )
 
   return true
 }
+
 
 
 export type PrintAgentSummary = {
