@@ -1,42 +1,33 @@
 import { NextResponse } from "next/server"
 import {
-  createProduct as createLegacyProduct,
-  getProducts as getLegacyProducts,
-  syncLegacyCategoryFromTenant,
-  syncLegacyProductFromTenant,
-} from "@/lib/db"
-import {
   createTenantProduct,
   getTenantProducts,
-  isCurrentDeploymentOrganization,
-  isTenantCatalogReady,
 } from "@/lib/catalog-db"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
-import { isAdminAuthenticated } from "@/lib/auth"
 import { assertCanCreateProduct, billingErrorStatus } from "@/lib/billing-db"
 
 export async function GET() {
   const session = await getVerifiedTenantSession().catch(() => null)
 
-  if (
-    session &&
-    (await isTenantCatalogReady(session.organizationId).catch(() => false))
-  ) {
-    return NextResponse.json({
-      products: await getTenantProducts(session.organizationId),
-    })
+  if (!session) {
+    return NextResponse.json(
+      { error: "Não autorizado." },
+      { status: 401 },
+    )
   }
 
   return NextResponse.json({
-    products: await getLegacyProducts(),
+    products: await getTenantProducts(session.organizationId),
   })
 }
 
 export async function POST(request: Request) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
@@ -79,16 +70,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const session = await getVerifiedTenantSession()
-    const catalogReady =
-      session &&
-      (await isTenantCatalogReady(session.organizationId))
-
-    if (!session || !catalogReady) {
-      const product = await createLegacyProduct(input)
-      return NextResponse.json({ product }, { status: 201 })
-    }
-
     if (!canManageCatalog(session.role)) {
       return NextResponse.json(
         { error: "Seu perfil não pode alterar o catálogo." },
@@ -102,13 +83,6 @@ export async function POST(request: Request) {
       session.organizationId,
       input,
     )
-
-    if (await isCurrentDeploymentOrganization(session.organizationId)) {
-      if (result.createdCategory) {
-        await syncLegacyCategoryFromTenant(result.createdCategory)
-      }
-      await syncLegacyProductFromTenant(result.product)
-    }
 
     return NextResponse.json(
       { product: result.product },

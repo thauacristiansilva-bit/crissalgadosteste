@@ -1,27 +1,20 @@
 import { NextResponse } from "next/server"
 import {
-  deleteProduct as deleteLegacyProduct,
-  syncLegacyCategoryFromTenant,
-  syncLegacyProductFromTenant,
-  updateProduct as updateLegacyProduct,
-} from "@/lib/db"
-import {
   deactivateTenantProduct,
-  isCurrentDeploymentOrganization,
-  isTenantCatalogReady,
   updateTenantProduct,
 } from "@/lib/catalog-db"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
-import { isAdminAuthenticated } from "@/lib/auth"
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
@@ -85,24 +78,6 @@ export async function PATCH(
   }
 
   try {
-    const session = await getVerifiedTenantSession()
-    const catalogReady =
-      session &&
-      (await isTenantCatalogReady(session.organizationId))
-
-    if (!session || !catalogReady) {
-      const product = await updateLegacyProduct(numericId, patch)
-
-      if (!product) {
-        return NextResponse.json(
-          { error: "Produto não encontrado." },
-          { status: 404 },
-        )
-      }
-
-      return NextResponse.json({ product })
-    }
-
     if (!canManageCatalog(session.role)) {
       return NextResponse.json(
         { error: "Seu perfil não pode alterar o catálogo." },
@@ -123,13 +98,6 @@ export async function PATCH(
       )
     }
 
-    if (await isCurrentDeploymentOrganization(session.organizationId)) {
-      if (result.createdCategory) {
-        await syncLegacyCategoryFromTenant(result.createdCategory)
-      }
-      await syncLegacyProductFromTenant(result.product)
-    }
-
     return NextResponse.json({ product: result.product })
   } catch (error) {
     return NextResponse.json(
@@ -148,7 +116,9 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
@@ -163,22 +133,6 @@ export async function DELETE(
       { error: "Produto inválido." },
       { status: 400 },
     )
-  }
-
-  const session = await getVerifiedTenantSession()
-  const catalogReady =
-    session &&
-    (await isTenantCatalogReady(session.organizationId))
-
-  if (!session || !catalogReady) {
-    const deleted = await deleteLegacyProduct(numericId)
-    if (!deleted) {
-      return NextResponse.json(
-        { error: "Produto não encontrado." },
-        { status: 404 },
-      )
-    }
-    return NextResponse.json({ ok: true })
   }
 
   if (!canManageCatalog(session.role)) {
@@ -198,10 +152,6 @@ export async function DELETE(
       { error: "Produto não encontrado." },
       { status: 404 },
     )
-  }
-
-  if (await isCurrentDeploymentOrganization(session.organizationId)) {
-    await syncLegacyProductFromTenant(product)
   }
 
   return NextResponse.json({ ok: true })

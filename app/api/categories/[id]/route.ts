@@ -1,24 +1,17 @@
 import { NextResponse } from "next/server"
-import {
-  syncLegacyCategoryFromTenant,
-  updateCategory as updateLegacyCategory,
-} from "@/lib/db"
-import {
-  isCurrentDeploymentOrganization,
-  isTenantCatalogReady,
-  updateTenantCategory,
-} from "@/lib/catalog-db"
+import { updateTenantCategory } from "@/lib/catalog-db"
 import {
   canManageCatalog,
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
-import { isAdminAuthenticated } from "@/lib/auth"
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isAdminAuthenticated())) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+
+  if (!session) {
     return NextResponse.json(
       { error: "Não autorizado." },
       { status: 401 },
@@ -39,24 +32,6 @@ export async function PATCH(
   }
 
   try {
-    const session = await getVerifiedTenantSession()
-    const catalogReady =
-      session &&
-      (await isTenantCatalogReady(session.organizationId))
-
-    if (!session || !catalogReady) {
-      const category = await updateLegacyCategory(numericId, body)
-
-      if (!category) {
-        return NextResponse.json(
-          { error: "Categoria não encontrada." },
-          { status: 404 },
-        )
-      }
-
-      return NextResponse.json({ category })
-    }
-
     if (!canManageCatalog(session.role)) {
       return NextResponse.json(
         { error: "Seu perfil não pode alterar o catálogo." },
@@ -74,13 +49,6 @@ export async function PATCH(
       return NextResponse.json(
         { error: "Categoria não encontrada." },
         { status: 404 },
-      )
-    }
-
-    if (await isCurrentDeploymentOrganization(session.organizationId)) {
-      await syncLegacyCategoryFromTenant(
-        result.category,
-        result.previousName,
       )
     }
 
