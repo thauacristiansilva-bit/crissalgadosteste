@@ -28,17 +28,27 @@ type PublicStoreSnapshot = {
   }
 }
 
+type PublicStoreCacheEntry = {
+  expiresAt: number
+  staleUntil: number
+  snapshot: PublicStoreSnapshot
+}
+
 type GlobalWithPublicStoreCache = typeof globalThis & {
-  __saborflowPublicStoreCache?: Map<
-    string,
-    { expiresAt: number; snapshot: PublicStoreSnapshot }
-  >
+  __saborflowPublicStoreCache?: Map<string, PublicStoreCacheEntry>
+  __saborflowPublicStoreRefreshes?: Map<string, Promise<PublicStoreSnapshot>>
 }
 
 function cacheTtlMs() {
   const raw = Number(process.env.PUBLIC_STORE_CACHE_TTL_MS || 15_000)
   if (!Number.isFinite(raw)) return 15_000
   return Math.max(0, Math.min(60_000, Math.floor(raw)))
+}
+
+function staleGraceMs() {
+  const raw = Number(process.env.PUBLIC_STORE_CACHE_STALE_MS || 30_000)
+  if (!Number.isFinite(raw)) return 30_000
+  return Math.max(0, Math.min(120_000, Math.floor(raw)))
 }
 
 function publicStoreCache() {
@@ -49,24 +59,43 @@ function publicStoreCache() {
   return globalCache.__saborflowPublicStoreCache
 }
 
+function publicStoreRefreshes() {
+  const globalCache = globalThis as GlobalWithPublicStoreCache
+  if (!globalCache.__saborflowPublicStoreRefreshes) {
+    globalCache.__saborflowPublicStoreRefreshes = new Map()
+  }
+  return globalCache.__saborflowPublicStoreRefreshes
+}
+
 function readCachedSnapshot(organizationId: string) {
   const cache = publicStoreCache()
   const cached = cache.get(organizationId)
   if (!cached) return null
-  if (cached.expiresAt <= Date.now()) {
+
+  const now = Date.now()
+  if (cached.staleUntil <= now) {
     cache.delete(organizationId)
     return null
   }
-  return cached.snapshot
+
+  return {
+    snapshot: cached.snapshot,
+    fresh: cached.expiresAt > now,
+  }
 }
 
 function writeCachedSnapshot(organizationId: string, snapshot: PublicStoreSnapshot) {
   const ttl = cacheTtlMs()
   if (ttl <= 0) return
 
+  // Pequeno jitter evita que várias réplicas renovem o cache exatamente juntas.
+  const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(ttl * 0.2)))
+  const expiresAt = Date.now() + ttl + jitter
+
   const cache = publicStoreCache()
   cache.set(organizationId, {
-    expiresAt: Date.now() + ttl,
+    expiresAt,
+    staleUntil: expiresAt + staleGraceMs(),
     snapshot,
   })
 
@@ -135,14 +164,46 @@ async function loadPublicStoreSnapshot(organization: PublicOrganization) {
   )
 }
 
+/**
+ * Single-flight por tenant: enquanto uma réplica está atualizando o snapshot,
+ * todas as requisições concorrentes compartilham a mesma Promise em vez de
+ * disparar dezenas/centenas de consultas PostgreSQL ao mesmo tempo.
+ */
+function refreshPublicStoreSnapshot(organization: PublicOrganization) {
+  const refreshes = publicStoreRefreshes()
+  const current = refreshes.get(organization.id)
+  if (current) return current
+
+  const refresh = loadPublicStoreSnapshot(organization)
+    .then((snapshot) => {
+      writeCachedSnapshot(organization.id, snapshot)
+      return snapshot
+    })
+    .finally(() => {
+      if (refreshes.get(organization.id) === refresh) {
+        refreshes.delete(organization.id)
+      }
+    })
+
+  refreshes.set(organization.id, refresh)
+  return refresh
+}
+
 export async function getPublicStoreForOrganization(
   organization: PublicOrganization,
 ) {
   const cached = readCachedSnapshot(organization.id)
-  const snapshot = cached || await loadPublicStoreSnapshot(organization)
+  let snapshot: PublicStoreSnapshot
 
-  if (!cached) {
-    writeCachedSnapshot(organization.id, snapshot)
+  if (cached?.fresh) {
+    snapshot = cached.snapshot
+  } else if (cached) {
+    // Stale-while-revalidate: mantém a loja rápida durante a renovação.
+    // Apenas uma atualização por tenant é executada por réplica.
+    void refreshPublicStoreSnapshot(organization).catch(() => undefined)
+    snapshot = cached.snapshot
+  } else {
+    snapshot = await refreshPublicStoreSnapshot(organization)
   }
 
   return {
