@@ -5,7 +5,11 @@ import {
 } from "node:crypto"
 import { resolveTxt } from "node:dns/promises"
 import { getPostgresPool } from "@/lib/postgres"
-import { runWithTenantRlsScope } from "@/lib/rls-context"
+import {
+  enterTenantRlsContext,
+  runWithRlsBypass,
+  runWithTenantRlsScope,
+} from "@/lib/rls-context"
 import {
   normalizePublicDomain,
 } from "@/lib/organization-db"
