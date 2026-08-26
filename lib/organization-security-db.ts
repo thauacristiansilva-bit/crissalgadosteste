@@ -9,6 +9,11 @@ import { enterTenantRlsContext, runWithRlsBypass } from "@/lib/rls-context"
 import {
   normalizePublicDomain,
 } from "@/lib/organization-db"
+import {
+  cloudflareDnsInstructions,
+  ensureCloudflareCustomHostname,
+  removeCloudflareCustomHostname,
+} from "@/lib/cloudflare-saas"
 
 const DOMAIN_TXT_PREFIX =
   "saborflow-verification="
@@ -178,16 +183,20 @@ export async function listOrganizationDomains(
 function isReservedHost(
   domain: string,
 ) {
-  const railway =
-    normalizePublicDomain(
-      process.env
-        .RAILWAY_PUBLIC_DOMAIN ||
-        "",
-    )
+  const railway = normalizePublicDomain(
+    process.env.RAILWAY_PUBLIC_DOMAIN || "",
+  )
+  const platform = normalizePublicDomain(
+    process.env.STOREFRONT_ROOT_DOMAIN ||
+      process.env.NEXT_PUBLIC_STOREFRONT_ROOT_DOMAIN ||
+      "",
+  )
 
   return Boolean(
-    railway &&
-      domain === railway,
+    (railway && domain === railway) ||
+      (platform &&
+        (domain === platform || domain.endsWith(`.${platform}`))) ||
+      domain.endsWith(".up.railway.app"),
   )
 }
 
@@ -215,7 +224,7 @@ export async function createDomainVerification(
 
   if (isReservedHost(domain)) {
     throw new Error(
-      "O domínio público padrão do Railway já é gerenciado pelo SaborFlow e não precisa de verificação.",
+      "Este domínio pertence à infraestrutura do SaborFlow e não pode ser cadastrado como domínio de cliente.",
     )
   }
 
@@ -322,14 +331,24 @@ export async function createDomainVerification(
     client.release()
   }
 
+  let cloudflare
+  try {
+    cloudflare = await ensureCloudflareCustomHostname(domain)
+  } catch (error) {
+    // Evita deixar um cadastro local que o cliente acredita estar roteado.
+    await getPostgresPool().query(
+      `DELETE FROM sf_organization_domains WHERE organization_id = $1 AND domain = $2 AND verified = false`,
+      [input.organizationId, domain],
+    ).catch(() => null)
+    throw error
+  }
+
   return {
     domain,
-    recordName:
-      `_saborflow.${domain}`,
-    recordValue:
-      challenge,
-    method:
-      "dns_txt" as const,
+    recordName: `_saborflow.${domain}`,
+    recordValue: challenge,
+    method: "dns_txt" as const,
+    routing: cloudflareDnsInstructions(cloudflare),
   }
 }
 
@@ -375,9 +394,11 @@ export async function verifyOrganizationDomain(
   }
 
   if (row.verified) {
+    const cloudflare = await ensureCloudflareCustomHostname(domain)
     return {
       verified: true,
       domain,
+      routing: cloudflareDnsInstructions(cloudflare),
     }
   }
 
@@ -435,6 +456,10 @@ export async function verifyOrganizationDomain(
     )
   }
 
+  // Garante que o hostname também existe no Cloudflare for SaaS antes de
+  // ativar o vínculo local da empresa.
+  const cloudflare = await ensureCloudflareCustomHostname(domain)
+
   const client =
     await getPostgresPool().connect()
 
@@ -488,6 +513,7 @@ export async function verifyOrganizationDomain(
   return {
     verified: true,
     domain,
+    routing: cloudflareDnsInstructions(cloudflare),
   }
 }
 
@@ -504,9 +530,11 @@ export async function removeOrganizationDomain(
 
   if (isReservedHost(domain)) {
     throw new Error(
-      "O domínio padrão do Railway não pode ser removido por esta tela.",
+      "O domínio padrão da plataforma não pode ser removido por esta tela.",
     )
   }
+
+  await removeCloudflareCustomHostname(domain)
 
   const client =
     await getPostgresPool().connect()

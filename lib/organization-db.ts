@@ -234,8 +234,6 @@ export async function getTenantSettings(
     systemName: "SaborFlow",
     timeZone: row.timezone || "America/Sao_Paulo",
     deliveryTrackingEnabled: settings.deliveryTrackingEnabled !== false,
-    orderAcceptanceMode:
-      settings.orderAcceptanceMode === "manual" ? "manual" : "automatic",
   }
 }
 
@@ -248,14 +246,6 @@ function normalizedSettings(
     ...patch,
     systemName: "SaborFlow",
     deliveryFee: 0,
-    orderAcceptanceMode:
-      patch.orderAcceptanceMode === "manual"
-        ? "manual"
-        : patch.orderAcceptanceMode === "automatic"
-          ? "automatic"
-          : current.orderAcceptanceMode === "manual"
-            ? "manual"
-            : "automatic",
     deliveryTrackingEnabled:
       patch.deliveryTrackingEnabled !== undefined
         ? Boolean(patch.deliveryTrackingEnabled)
@@ -1034,4 +1024,38 @@ export async function getTenantRuntimeStats(
     importedStaff: Number(row?.staff_count || 0),
     importedDomains: Number(row?.domains_count || 0),
   }
+}
+
+
+export async function getPublicOrganizationForHost(
+  host: string,
+): Promise<PublicOrganization | null> {
+  const clean = normalizeHost(host)
+  if (!clean) return null
+
+  const direct = await getPublicOrganizationByDomain(clean)
+  if (direct) return direct
+
+  const root = normalizeHost(
+    process.env.STOREFRONT_ROOT_DOMAIN ||
+      process.env.NEXT_PUBLIC_STOREFRONT_ROOT_DOMAIN ||
+      "",
+  )
+
+  if (!root || !clean.endsWith(`.${root}`)) return null
+
+  const slug = clean.slice(0, -(root.length + 1))
+  if (!slug || slug.includes(".")) return null
+
+  const reserved = new Set(
+    (process.env.STOREFRONT_RESERVED_SUBDOMAINS ||
+      "www,painel,media,api,admin")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  )
+
+  if (reserved.has(slug)) return null
+
+  return getPublicOrganizationBySlug(slug)
 }

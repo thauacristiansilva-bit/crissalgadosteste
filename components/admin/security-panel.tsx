@@ -23,6 +23,23 @@ type DomainStatus = {
   lastCheckedAt: string | null
 }
 
+type RoutingInstruction = {
+  provider: "cloudflare_saas"
+  hostnameId: string
+  hostnameStatus: string | null
+  sslStatus: string | null
+  ready: boolean
+  cnameTarget: string
+  dnsRecords: Array<{
+    type: "CNAME" | "TXT"
+    name: string
+    value: string
+    purpose: "traffic" | "hostname_verification" | "ssl_validation"
+    status: string | null
+  }>
+  errors: string[]
+}
+
 type PrintAgent = {
   id: string
   name: string
@@ -98,6 +115,18 @@ function CopyButton({
   )
 }
 
+function DnsCopyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs font-bold uppercase text-amber-700">{label}</span>
+      <div className="mt-1 flex items-center gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">{value}</code>
+        <CopyButton value={value} />
+      </div>
+    </div>
+  )
+}
+
 export function SecurityPanel({
   canManageSecurity,
 }: {
@@ -154,9 +183,13 @@ export function SecurityPanel({
     setVerification,
   ] = useState<{
     domain: string
-    recordName: string
-    recordValue: string
+    recordName?: string
+    recordValue?: string
+    routing?: RoutingInstruction | null
   } | null>(null)
+
+  const storefrontRootDomain =
+    process.env.NEXT_PUBLIC_STOREFRONT_ROOT_DOMAIN || ""
 
   const [
     agentName,
@@ -425,7 +458,7 @@ export function SecurityPanel({
     )
     setDomain("")
     setOrganizationMessage(
-      "Domínio cadastrado. Crie o registro TXT abaixo e depois clique em Verificar.",
+      "Domínio cadastrado no SaborFlow e no Cloudflare for SaaS. Configure os registros DNS exibidos abaixo e depois clique em Verificar.",
     )
     await reload()
   }
@@ -462,9 +495,14 @@ export function SecurityPanel({
       )
     }
 
-    setVerification(null)
+    setVerification({
+      domain: value,
+      routing: result.routing || null,
+    })
     setOrganizationMessage(
-      "Domínio verificado no SaborFlow.",
+      result.routing?.ready
+        ? "Domínio verificado e Cloudflare/SSL prontos."
+        : "Domínio verificado no SaborFlow. O Cloudflare ainda está validando DNS/SSL.",
     )
     await reload()
   }
@@ -799,12 +837,24 @@ export function SecurityPanel({
               <HelpLabel helpKey="security.domain">Domínio customizado</HelpLabel>
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              O SaborFlow verifica propriedade
-              com um registro DNS TXT. A
-              configuração de roteamento do
-              domínio no provedor de hospedagem
-              continua sendo necessária.
+              O SaborFlow cadastra o domínio automaticamente no Cloudflare for SaaS,
+              prepara o SSL e informa exatamente quais registros DNS o cliente deve criar.
             </p>
+
+            {storefrontRootDomain && data?.organization?.slug && (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-xs font-bold uppercase text-blue-700">Subdomínio automático SaborFlow</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
+                    {`https://${data.organization.slug}.${storefrontRootDomain}`}
+                  </code>
+                  <CopyButton value={`https://${data.organization.slug}.${storefrontRootDomain}`} />
+                </div>
+                <p className="mt-2 text-xs text-blue-800">
+                  Esse endereço usa o slug da empresa e funciona pelo wildcard da plataforma, sem cadastrar cada loja individualmente.
+                </p>
+              </div>
+            )}
 
             <form
               onSubmit={createDomain}
@@ -830,46 +880,48 @@ export function SecurityPanel({
             </form>
 
             {verification && (
-              <div className="mt-4 space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-black text-amber-900">
-                  Crie este registro TXT no DNS
-                </p>
-
-                <div>
-                  <span className="text-xs font-bold uppercase text-amber-700">
-                    Nome
-                  </span>
-                  <div className="mt-1 flex items-center gap-2">
-                    <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
-                      {
-                        verification.recordName
-                      }
-                    </code>
-                    <CopyButton
-                      value={
-                        verification.recordName
-                      }
-                    />
+              <div className="mt-4 space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                {verification.recordName && verification.recordValue && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-black text-amber-900">1. Verificação de propriedade do SaborFlow</p>
+                    <DnsCopyRow label="TXT — Nome" value={verification.recordName} />
+                    <DnsCopyRow label="TXT — Valor" value={verification.recordValue} />
                   </div>
-                </div>
+                )}
 
-                <div>
-                  <span className="text-xs font-bold uppercase text-amber-700">
-                    Valor
-                  </span>
-                  <div className="mt-1 flex items-center gap-2">
-                    <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
-                      {
-                        verification.recordValue
-                      }
-                    </code>
-                    <CopyButton
-                      value={
-                        verification.recordValue
-                      }
-                    />
+                {verification.routing && (
+                  <div className="space-y-3 border-t border-amber-200 pt-4">
+                    <p className="text-sm font-black text-amber-900">2. Roteamento e SSL automáticos — Cloudflare for SaaS</p>
+                    {verification.routing.dnsRecords.map((record, index) => (
+                      <div key={`${record.name}-${record.value}-${index}`} className="rounded-xl border border-amber-200 bg-white/70 p-3">
+                        <p className="mb-2 text-xs font-black text-amber-800">
+                          {record.purpose === "traffic"
+                            ? "Tráfego da loja"
+                            : record.purpose === "hostname_verification"
+                              ? "Validação do hostname"
+                              : "Validação do certificado SSL"}
+                        </p>
+                        <DnsCopyRow label={`${record.type} — Nome`} value={record.name} />
+                        <div className="mt-2"><DnsCopyRow label={`${record.type} — Valor`} value={record.value} /></div>
+                        {record.status && <p className="mt-2 text-xs text-amber-800">Status Cloudflare: {record.status}</p>}
+                      </div>
+                    ))}
+                    <div className="rounded-xl border border-amber-200 bg-white/70 p-3 text-xs text-amber-900">
+                      <p><strong>Hostname:</strong> {verification.routing.hostnameStatus || "aguardando"}</p>
+                      <p className="mt-1"><strong>SSL:</strong> {verification.routing.sslStatus || "aguardando"}</p>
+                    </div>
+                    {verification.routing.errors.length > 0 && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+                        {verification.routing.errors.join(" • ")}
+                      </div>
+                    )}
+                    <p className={verification.routing.ready ? "text-xs font-bold text-emerald-700" : "text-xs font-bold text-amber-800"}>
+                      {verification.routing.ready
+                        ? "Cloudflare: hostname e certificado SSL ativos."
+                        : "Cloudflare: aguardando propagação/validação. Clique em Verificar novamente após o DNS propagar."}
+                    </p>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
@@ -904,19 +956,13 @@ export function SecurityPanel({
                       </div>
                     </div>
 
-                    {!item.verified && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          verifyDomain(
-                            item.domain,
-                          )
-                        }
-                        className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white"
-                      >
-                        Verificar
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => verifyDomain(item.domain)}
+                      className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white"
+                    >
+                      {item.verified ? "Atualizar Cloudflare/SSL" : "Verificar"}
+                    </button>
 
                     <button
                       type="button"

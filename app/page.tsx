@@ -2,7 +2,7 @@ import { headers } from "next/headers"
 import { MarketingHome } from "@/components/marketing/marketing-home"
 import { StoreLandingPage } from "@/components/store/store-landing-page"
 import { getPublicStoreForOrganization } from "@/lib/public-store-db"
-import { getPublicOrganizationByDomain } from "@/lib/organization-db"
+import { getPublicOrganizationForHost } from "@/lib/organization-db"
 import { hostFromHeaders, isPlatformHost } from "@/lib/public-host"
 
 export const dynamic = "force-dynamic"
@@ -14,7 +14,7 @@ export default async function HomePage() {
   // A raiz da plataforma continua institucional. Em domínio próprio verificado,
   // a raiz passa a ser a landing page pública da empresa.
   if (host && !isPlatformHost(host)) {
-    const organization = await getPublicOrganizationByDomain(host).catch(() => null)
+    const organization = await getPublicOrganizationForHost(host).catch(() => null)
     if (organization) {
       const store = await getPublicStoreForOrganization(organization)
       return (
