@@ -28,12 +28,24 @@ function formatCpf(value: string) {
 }
 
 function formatCnpj(value: string) {
-  const digits = onlyDigits(value, 14)
-  return digits
-    .replace(/^(\d{2})(\d)/, "$1.$2")
-    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
-    .replace(/\.(\d{3})(\d)/, ".$1/$2")
-    .replace(/(\/\d{4})(\d)/, "$1-$2")
+  const raw = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 14)
+
+  const base = raw.slice(0, 12)
+  const verificationDigits = raw
+    .slice(12)
+    .replace(/\D/g, "")
+    .slice(0, 2)
+
+  const cnpj = `${base}${verificationDigits}`
+
+  return cnpj
+    .replace(/^([A-Z0-9]{2})([A-Z0-9])/, "$1.$2")
+    .replace(/^([A-Z0-9]{2})\.([A-Z0-9]{3})([A-Z0-9])/, "$1.$2.$3")
+    .replace(/^([A-Z0-9]{2})\.([A-Z0-9]{3})\.([A-Z0-9]{3})([A-Z0-9])/, "$1.$2.$3/$4")
+    .replace(/(\/[A-Z0-9]{4})(\d)/, "$1-$2")
 }
 
 export function CommercialCheckout() {
@@ -217,7 +229,7 @@ export function CommercialCheckout() {
               {hasCnpj && (
                 <label className="mt-4 block">
                   <span className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">CNPJ da empresa</span>
-                  <div className="relative"><Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required inputMode="numeric" value={cnpj} onChange={(event) => setCnpj(formatCnpj(event.target.value))} placeholder="00.000.000/0000-00" className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 outline-none focus:border-amber-500" /></div>
+                  <div className="relative"><Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required inputMode="text" autoCapitalize="characters" autoComplete="off" spellCheck={false} maxLength={18} value={cnpj} onChange={(event) => setCnpj(formatCnpj(event.target.value))} placeholder="00.000.000/0000-00" className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 outline-none focus:border-amber-500" /></div>
                 </label>
               )}
             </div>

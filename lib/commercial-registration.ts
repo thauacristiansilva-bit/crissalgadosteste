@@ -10,44 +10,188 @@ export function normalizeCpfDocument(value: string) {
 }
 
 export function normalizeCnpjDocument(value: string) {
-  return digits(value)
+  return value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
 }
 
 export function isValidResponsibleCpf(value: string) {
   const cpf = normalizeCpfDocument(value)
-  if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return false
+
+  if (
+    !/^\d{11}$/.test(cpf) ||
+    /^(\d)\1{10}$/.test(cpf)
+  ) {
+    return false
+  }
 
   const digit = (length: number) => {
     let sum = 0
-    for (let index = 0; index < length; index += 1) {
-      sum += Number(cpf[index]) * (length + 1 - index)
+
+    for (
+      let index = 0;
+      index < length;
+      index += 1
+    ) {
+      sum +=
+        Number(cpf[index]) *
+        (length + 1 - index)
     }
+
     const mod = (sum * 10) % 11
+
     return mod === 10 ? 0 : mod
   }
 
-  return digit(9) === Number(cpf[9]) && digit(10) === Number(cpf[10])
+  return (
+    digit(9) === Number(cpf[9]) &&
+    digit(10) === Number(cpf[10])
+  )
 }
 
-export function isValidCompanyCnpj(value: string) {
-  const cnpj = normalizeCnpjDocument(value)
-  if (!/^\d{14}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return false
+export function isValidCompanyCnpj(
+  value: string,
+) {
+  const cnpj =
+    normalizeCnpjDocument(value)
 
-  const calculate = (length: 12 | 13) => {
-    const weights = length === 12
-      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-    const sum = weights.reduce((total, weight, index) => total + Number(cnpj[index]) * weight, 0)
-    const rest = sum % 11
-    return rest < 2 ? 0 : 11 - rest
+  /*
+   * CNPJ:
+   * - 14 posições no total
+   * - 12 primeiras posições podem conter
+   *   números e letras de A a Z
+   * - 2 últimas posições são os
+   *   dígitos verificadores numéricos
+   *
+   * Continua compatível com os
+   * CNPJs numéricos antigos.
+   */
+  if (!/^[A-Z0-9]{12}\d{2}$/.test(cnpj)) {
+    return false
   }
 
-  return calculate(12) === Number(cnpj[12]) && calculate(13) === Number(cnpj[13])
+  /*
+   * Mantém a proteção já existente
+   * contra sequências numéricas triviais,
+   * como 00000000000000.
+   */
+  if (/^(\d)\1{13}$/.test(cnpj)) {
+    return false
+  }
+
+  /*
+   * No CNPJ alfanumérico, cada caractere
+   * participa do cálculo usando:
+   *
+   * valor ASCII - 48
+   *
+   * Exemplo:
+   * 0 => 0
+   * 9 => 9
+   * A => 17
+   * B => 18
+   * ...
+   * Z => 42
+   */
+  const characterValue = (
+    character: string,
+  ) => {
+    return character.charCodeAt(0) - 48
+  }
+
+  const calculateDigit = (
+    base: string,
+    weights: number[],
+  ) => {
+    const sum = weights.reduce(
+      (
+        total,
+        weight,
+        index,
+      ) =>
+        total +
+        characterValue(base[index]) *
+          weight,
+      0,
+    )
+
+    const remainder = sum % 11
+
+    if (
+      remainder === 0 ||
+      remainder === 1
+    ) {
+      return 0
+    }
+
+    return 11 - remainder
+  }
+
+  const firstWeights = [
+    5,
+    4,
+    3,
+    2,
+    9,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+  ]
+
+  const firstDigit =
+    calculateDigit(
+      cnpj.slice(0, 12),
+      firstWeights,
+    )
+
+  if (
+    firstDigit !==
+    Number(cnpj[12])
+  ) {
+    return false
+  }
+
+  const secondWeights = [
+    6,
+    5,
+    4,
+    3,
+    2,
+    9,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+  ]
+
+  const secondDigit =
+    calculateDigit(
+      `${cnpj.slice(0, 12)}${firstDigit}`,
+      secondWeights,
+    )
+
+  return (
+    secondDigit ===
+    Number(cnpj[13])
+  )
 }
 
-export function responsibleCpfHash(value: string) {
+export function responsibleCpfHash(
+  value: string,
+) {
   return createHash("sha256")
-    .update(`saborflow-responsible-cpf:v1:${normalizeCpfDocument(value)}`)
+    .update(
+      `saborflow-responsible-cpf:v1:${normalizeCpfDocument(
+        value,
+      )}`,
+    )
     .digest("hex")
 }
 
@@ -68,29 +212,59 @@ export type NormalizedCommercialRegistration = {
 export function normalizeCommercialRegistration(
   input: CommercialRegistrationInput,
 ): NormalizedCommercialRegistration {
-  const cpfDigits = normalizeCpfDocument(input.cpf || "")
-  if (!isValidResponsibleCpf(cpfDigits)) {
-    throw new Error("Informe um CPF válido para o responsável pela conta.")
+  const cpfDigits =
+    normalizeCpfDocument(
+      input.cpf || "",
+    )
+
+  if (
+    !isValidResponsibleCpf(
+      cpfDigits,
+    )
+  ) {
+    throw new Error(
+      "Informe um CPF válido para o responsável pela conta.",
+    )
   }
 
   if (input.hasCnpj) {
-    const cnpjDigits = normalizeCnpjDocument(input.cnpj || "")
-    if (!isValidCompanyCnpj(cnpjDigits)) {
-      throw new Error("Informe um CNPJ válido para a empresa.")
+    const cnpjNormalized =
+      normalizeCnpjDocument(
+        input.cnpj || "",
+      )
+
+    if (
+      !isValidCompanyCnpj(
+        cnpjNormalized,
+      )
+    ) {
+      throw new Error(
+        "Informe um CNPJ válido para a empresa.",
+      )
     }
+
     return {
       cpfDigits,
-      cpfHash: responsibleCpfHash(cpfDigits),
-      cpfLast4: cpfDigits.slice(-4),
+      cpfHash:
+        responsibleCpfHash(
+          cpfDigits,
+        ),
+      cpfLast4:
+        cpfDigits.slice(-4),
       companyPersonType: "PJ",
-      companyDocument: cnpjDigits,
+      companyDocument:
+        cnpjNormalized,
     }
   }
 
   return {
     cpfDigits,
-    cpfHash: responsibleCpfHash(cpfDigits),
-    cpfLast4: cpfDigits.slice(-4),
+    cpfHash:
+      responsibleCpfHash(
+        cpfDigits,
+      ),
+    cpfLast4:
+      cpfDigits.slice(-4),
     companyPersonType: "PF",
     companyDocument: null,
   }
@@ -104,15 +278,21 @@ export function commercialRegistrationMetadata(
     signup: "phase-26",
     source,
     registration: {
-      responsibleCpfLast4: registration.cpfLast4,
+      responsibleCpfLast4:
+        registration.cpfLast4,
       responsibleCpfStoredAsHash: true,
-      responsibleDocumentValidation: "local_check_digits",
-      companyPersonType: registration.companyPersonType,
-      companyDocument: registration.companyDocument,
-      companyDocumentValidation: registration.companyDocument
-        ? "local_check_digits"
-        : "pending_company_creation",
-      officialRegistryVerification: "pending",
+      responsibleDocumentValidation:
+        "local_check_digits",
+      companyPersonType:
+        registration.companyPersonType,
+      companyDocument:
+        registration.companyDocument,
+      companyDocumentValidation:
+        registration.companyDocument
+          ? "local_check_digits"
+          : "pending_company_creation",
+      officialRegistryVerification:
+        "pending",
     },
   }
 }
@@ -121,41 +301,84 @@ export type CommercialRegistrationProfile = {
   responsibleCpfLast4: string
   companyPersonType: "PF" | "PJ"
   companyDocument: string
-  officialRegistryVerification: "pending" | "verified" | "failed"
+  officialRegistryVerification:
+    | "pending"
+    | "verified"
+    | "failed"
 }
 
 export async function getCommercialRegistrationProfile(
   userId: string,
 ): Promise<CommercialRegistrationProfile | null> {
-  const result = await getPostgresPool().query<{
-    metadata: Record<string, unknown> | null
-  }>(
-    `
-      SELECT metadata
-      FROM sf_billing_accounts
-      WHERE owner_user_id = $1
-      LIMIT 1
-    `,
-    [userId],
-  )
+  const result =
+    await getPostgresPool().query<{
+      metadata:
+        | Record<string, unknown>
+        | null
+    }>(
+      `
+        SELECT metadata
+        FROM sf_billing_accounts
+        WHERE owner_user_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    )
 
-  const metadata = result.rows[0]?.metadata
-  if (!metadata || typeof metadata !== "object") return null
-  const registration = metadata.registration
-  if (!registration || typeof registration !== "object" || Array.isArray(registration)) return null
+  const metadata =
+    result.rows[0]?.metadata
 
-  const row = registration as Record<string, unknown>
-  const personType = row.companyPersonType === "PF" ? "PF" : "PJ"
-  const verification = row.officialRegistryVerification === "verified"
-    ? "verified"
-    : row.officialRegistryVerification === "failed"
-      ? "failed"
-      : "pending"
+  if (
+    !metadata ||
+    typeof metadata !== "object"
+  ) {
+    return null
+  }
+
+  const registration =
+    metadata.registration
+
+  if (
+    !registration ||
+    typeof registration !== "object" ||
+    Array.isArray(registration)
+  ) {
+    return null
+  }
+
+  const row =
+    registration as Record<
+      string,
+      unknown
+    >
+
+  const personType =
+    row.companyPersonType === "PF"
+      ? "PF"
+      : "PJ"
+
+  const verification =
+    row.officialRegistryVerification ===
+    "verified"
+      ? "verified"
+      : row.officialRegistryVerification ===
+          "failed"
+        ? "failed"
+        : "pending"
 
   return {
-    responsibleCpfLast4: String(row.responsibleCpfLast4 || ""),
-    companyPersonType: personType,
-    companyDocument: String(row.companyDocument || ""),
-    officialRegistryVerification: verification,
+    responsibleCpfLast4:
+      String(
+        row.responsibleCpfLast4 ||
+          "",
+      ),
+    companyPersonType:
+      personType,
+    companyDocument:
+      String(
+        row.companyDocument || "",
+      ),
+    officialRegistryVerification:
+      verification,
   }
 }

@@ -7,6 +7,12 @@ import {
 } from "@/lib/operations"
 import { getPostgresPool } from "@/lib/postgres"
 import { reserveOrganizationSlot } from "@/lib/billing-db"
+import {
+  isValidCompanyCnpj,
+  isValidResponsibleCpf,
+  normalizeCnpjDocument,
+  normalizeCpfDocument,
+} from "@/lib/commercial-registration"
 import { enterTenantRlsContext, runWithRlsBypass } from "@/lib/rls-context"
 import type {
   StoreSettings,
@@ -31,89 +37,16 @@ export type CreateOrganizationInput = {
   state?: string
 }
 
-function digits(value: string) {
-  return value.replace(/\D/g, "")
-}
-
 export function isValidCpfDocument(
   value: string,
 ) {
-  const cpf = digits(value)
-
-  if (
-    !/^\d{11}$/.test(cpf) ||
-    /^(\d)\1{10}$/.test(cpf)
-  ) {
-    return false
-  }
-
-  const calculate = (length: number) => {
-    let sum = 0
-
-    for (
-      let index = 0;
-      index < length;
-      index += 1
-    ) {
-      sum +=
-        Number(cpf[index]) *
-        (length + 1 - index)
-    }
-
-    const mod = (sum * 10) % 11
-    return mod === 10 ? 0 : mod
-  }
-
-  return (
-    calculate(9) === Number(cpf[9]) &&
-    calculate(10) === Number(cpf[10])
-  )
+  return isValidResponsibleCpf(value)
 }
 
 export function isValidCnpjDocument(
   value: string,
 ) {
-  const cnpj = digits(value)
-
-  if (
-    !/^\d{14}$/.test(cnpj) ||
-    /^(\d)\1{13}$/.test(cnpj)
-  ) {
-    return false
-  }
-
-  const calculate = (
-    length: 12 | 13,
-  ) => {
-    const weights =
-      length === 12
-        ? [
-            5, 4, 3, 2, 9, 8, 7,
-            6, 5, 4, 3, 2,
-          ]
-        : [
-            6, 5, 4, 3, 2, 9, 8,
-            7, 6, 5, 4, 3, 2,
-          ]
-
-    const sum = weights.reduce(
-      (total, weight, index) =>
-        total +
-        Number(cnpj[index]) *
-          weight,
-      0,
-    )
-
-    const rest = sum % 11
-    return rest < 2 ? 0 : 11 - rest
-  }
-
-  return (
-    calculate(12) ===
-      Number(cnpj[12]) &&
-    calculate(13) ===
-      Number(cnpj[13])
-  )
+  return isValidCompanyCnpj(value)
 }
 
 function slugBase(value: string) {
@@ -274,9 +207,14 @@ async function createOrganizationForUserInternal(
       ? "PF"
       : "PJ"
 
-  const document = digits(
-    input.document,
-  )
+  const document =
+    personType === "PF"
+      ? normalizeCpfDocument(
+          input.document,
+        )
+      : normalizeCnpjDocument(
+          input.document,
+        )
 
   const validDocument =
     personType === "PF"
