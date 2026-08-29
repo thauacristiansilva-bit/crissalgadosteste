@@ -2,47 +2,42 @@ import type { Metadata, Viewport } from "next"
 import type { ReactNode } from "react"
 import "./globals.css"
 
+const appBaseUrl =
+  process.env.APP_BASE_URL?.trim() ||
+  "https://appsaborflow.com.br"
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://appsaborflow.com.br"),
-
-  title: {
-    default: "SaborFlow — Gestão para alimentação",
-    template: "%s | SaborFlow",
-  },
-
+  metadataBase: new URL(appBaseUrl),
+  title: "SaborFlow — Gestão para alimentação",
   description:
-    "Pedidos, PDV, cozinha, delivery, estoque, clientes e gestão comercial em um único fluxo com o SaborFlow.",
-
-  applicationName: "SaborFlow",
-
+    "Pedidos, PDV, cozinha, delivery, estoque e gestão comercial no SaborFlow.",
   icons: {
-    icon: "/saborflow-brand.png",
-    shortcut: "/saborflow-brand.png",
-    apple: "/saborflow-brand.png",
+    icon: "/icon.svg",
+    apple: "/apple-icon.png",
   },
-
   openGraph: {
     type: "website",
     locale: "pt_BR",
-    url: "https://appsaborflow.com.br",
+    url: appBaseUrl,
     siteName: "SaborFlow",
     title: "SaborFlow — Gestão para alimentação",
     description:
-      "Pedidos, PDV, cozinha, delivery, estoque, clientes e gestão comercial em um único fluxo.",
+      "Pedidos, PDV, cozinha, delivery, estoque e gestão comercial no SaborFlow.",
     images: [
       {
-        url: "/og-image.png",
+        url: `${appBaseUrl}/og-image.jpg`,
+        width: 1200,
+        height: 630,
         alt: "SaborFlow — Gestão para alimentação",
       },
     ],
   },
-
   twitter: {
     card: "summary_large_image",
     title: "SaborFlow — Gestão para alimentação",
     description:
-      "Pedidos, PDV, cozinha, delivery, estoque, clientes e gestão comercial em um único fluxo.",
-    images: ["/og-image.png"],
+      "Pedidos, PDV, cozinha, delivery, estoque e gestão comercial no SaborFlow.",
+    images: [`${appBaseUrl}/og-image.jpg`],
   },
 }
 
@@ -53,9 +48,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: ReactNode
-}>) {
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="pt-BR">
       <body className="min-h-screen font-sans antialiased">
