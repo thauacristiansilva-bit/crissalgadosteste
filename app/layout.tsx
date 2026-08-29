@@ -15,17 +15,8 @@ export const metadata: Metadata = {
 
   applicationName: "SaborFlow",
 
-  alternates: {
-    canonical: "/",
-  },
-
   icons: {
-    icon: [
-      {
-        url: "/saborflow-brand.png",
-        type: "image/png",
-      },
-    ],
+    icon: "/saborflow-brand.png",
     shortcut: "/saborflow-brand.png",
     apple: "/saborflow-brand.png",
   },
@@ -40,8 +31,8 @@ export const metadata: Metadata = {
       "Pedidos, PDV, cozinha, delivery, estoque, clientes e gestão comercial em um único fluxo.",
     images: [
       {
-        url: "/saborflow-brand.png",
-        alt: "SaborFlow",
+        url: "/og-image.png",
+        alt: "SaborFlow — Gestão para alimentação",
       },
     ],
   },
@@ -51,12 +42,7 @@ export const metadata: Metadata = {
     title: "SaborFlow — Gestão para alimentação",
     description:
       "Pedidos, PDV, cozinha, delivery, estoque, clientes e gestão comercial em um único fluxo.",
-    images: ["/saborflow-brand.png"],
-  },
-
-  robots: {
-    index: true,
-    follow: true,
+    images: ["/og-image.png"],
   },
 }
 
