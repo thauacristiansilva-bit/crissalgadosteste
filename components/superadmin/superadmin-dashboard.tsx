@@ -39,20 +39,44 @@ function currentDate() {
 const tabs = [
   "Visão geral",
   "Cadastros",
+  "Empresas",
   "Contas",
   "Planos",
-  "DRE SaborFlow",
-  "Empresas",
   "Pagamentos",
-  "Demos/Trials",
-  "Domínios",
   "Cupons",
+  "Demos/Trials",
+  "DRE SaborFlow",
+  "Domínios",
   "Suporte",
   "Logs",
 ] as const
 
 type Tab = (typeof tabs)[number]
 type ActionFn = (payload: Record<string, unknown>) => Promise<void>
+
+const navigationGroups: Array<{ label: string; items: Tab[] }> = [
+  { label: "Geral", items: ["Visão geral"] },
+  { label: "Clientes", items: ["Cadastros", "Empresas", "Contas"] },
+  { label: "Comercial", items: ["Planos", "Pagamentos", "Cupons", "Demos/Trials"] },
+  { label: "Financeiro", items: ["DRE SaborFlow"] },
+  { label: "Operação", items: ["Domínios", "Suporte"] },
+  { label: "Segurança", items: ["Logs"] },
+]
+
+const tabDescriptions: Record<Tab, string> = {
+  "Visão geral": "Resumo da saúde comercial e operacional da plataforma.",
+  "Cadastros": "Validação e acompanhamento de novos cadastros comerciais.",
+  "Empresas": "Empresas clientes e situação das lojas cadastradas.",
+  "Contas": "Contas contratantes, planos, bloqueios e limites especiais.",
+  "Planos": "Planos comerciais, preços, assinaturas e MRR contratado.",
+  "Pagamentos": "Checkouts e movimentações de cobrança registradas.",
+  "Cupons": "Cupons promocionais usados na contratação do SaborFlow.",
+  "Demos/Trials": "Ambientes de demonstração e períodos de avaliação.",
+  "DRE SaborFlow": "Receitas, despesas e resultado gerencial da plataforma.",
+  "Domínios": "Domínios das empresas e situação de verificação.",
+  "Suporte": "Chamados das empresas e acompanhamento de atendimento.",
+  "Logs": "Auditoria das ações administrativas da plataforma.",
+}
 
 function EntitlementOverride({ accountId, busy, onApply }: { accountId: string; busy: boolean; onApply: ActionFn }) {
   const [key, setKey] = useState("maxOrganizations")
@@ -346,10 +370,96 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
       </header>
 
       <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6">
-        <nav className="mb-5 flex gap-2 overflow-x-auto pb-1">{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-black ${tab === item ? "bg-orange-500 text-stone-950" : "bg-white/5 text-stone-300 hover:bg-white/10"}`}>{item}</button>)}</nav>
-        {message && <div className="mb-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200">{message}</div>}
+        <select
+          value={tab}
+          onChange={(event) => setTab(event.target.value as Tab)}
+          className="mb-4 w-full rounded-xl border border-white/10 bg-stone-900 px-4 py-3 text-sm font-black text-white outline-none lg:hidden"
+          aria-label="Seção do Superadmin"
+        >
+          {tabs.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
 
-        {tab === "Visão geral" && <div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{metrics.map(([label, value, Icon]) => <article key={label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><Icon className="h-5 w-5 text-orange-400" /><p className="mt-4 text-3xl font-black">{value}</p><p className="mt-1 text-sm text-stone-400">{label}</p></article>)}</div><article className="rounded-2xl border border-orange-500/20 bg-orange-500/[0.06] p-5"><p className="text-xs font-black uppercase tracking-wider text-orange-300">MRR comercial contratado</p><p className="mt-2 text-3xl font-black">{money(data.metrics.contractedMrrCents)}</p><p className="mt-1 text-xs text-stone-500">Indicador comercial; não é tratado como receita realizada da DRE.</p></article></div>}
+        <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+          <aside className="hidden lg:block">
+            <div className="sticky top-5 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+              <div className="px-3 pb-3 pt-2">
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-orange-400">Navegação</p>
+                <p className="mt-1 text-xs leading-5 text-stone-500">Áreas administrativas da plataforma.</p>
+              </div>
+
+              <div className="space-y-4">
+                {navigationGroups.map((group) => (
+                  <div key={group.label}>
+                    <p className="px-3 text-[10px] font-black uppercase tracking-[0.18em] text-stone-600">{group.label}</p>
+                    <div className="mt-1 space-y-1">
+                      {group.items.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setTab(item)}
+                          className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-black transition ${
+                            tab === item
+                              ? "bg-orange-500 text-stone-950"
+                              : "text-stone-300 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+
+          <section className="min-w-0">
+            <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-orange-400">{tab}</p>
+              <p className="mt-1 text-sm text-stone-400">{tabDescriptions[tab]}</p>
+            </div>
+
+            {message && <div className="mb-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200">{message}</div>}
+
+        {tab === "Visão geral" && (
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {metrics.map(([label, value, Icon]) => (
+                <article key={label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                  <Icon className="h-5 w-5 text-orange-400" />
+                  <p className="mt-4 text-3xl font-black">{value}</p>
+                  <p className="mt-1 text-sm text-stone-400">{label}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
+              <article className="rounded-2xl border border-orange-500/20 bg-orange-500/[0.06] p-5">
+                <p className="text-xs font-black uppercase tracking-wider text-orange-300">MRR comercial contratado</p>
+                <p className="mt-2 text-3xl font-black">{money(data.metrics.contractedMrrCents)}</p>
+                <p className="mt-1 text-xs text-stone-500">Indicador comercial; não é tratado como receita realizada da DRE.</p>
+              </article>
+
+              <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                <p className="text-xs font-black uppercase tracking-wider text-stone-400">Atenção necessária</p>
+                <div className="mt-4 space-y-3 text-sm">
+                  <button type="button" onClick={() => setTab("Cadastros")} className="flex w-full items-center justify-between rounded-xl bg-black/20 px-3 py-2 text-left hover:bg-black/30">
+                    <span className="text-stone-300">Cadastros pendentes</span>
+                    <strong className="text-amber-300">{data.metrics.pendingRegistrations}</strong>
+                  </button>
+                  <button type="button" onClick={() => setTab("Contas")} className="flex w-full items-center justify-between rounded-xl bg-black/20 px-3 py-2 text-left hover:bg-black/30">
+                    <span className="text-stone-300">Inadimplentes/suspensas</span>
+                    <strong className="text-red-300">{data.metrics.pastDueSubscriptions}</strong>
+                  </button>
+                  <button type="button" onClick={() => setTab("Suporte")} className="flex w-full items-center justify-between rounded-xl bg-black/20 px-3 py-2 text-left hover:bg-black/30">
+                    <span className="text-stone-300">Chamados abertos</span>
+                    <strong className="text-orange-300">{data.metrics.openSupportCases}</strong>
+                  </button>
+                </div>
+              </article>
+            </div>
+          </div>
+        )}
 
         {tab === "Cadastros" && <div className="space-y-3">{data.registrations.length === 0 && <p className="rounded-xl border border-white/10 bg-white/[0.04] p-5 text-sm text-stone-400">Nenhum cadastro comercial na fila.</p>}{data.registrations.map((registration) => <RegistrationReviewCard key={registration.id} registration={registration} busy={busy} onApply={action} />)}</div>}
 
@@ -372,6 +482,8 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
         {tab === "Suporte" && <div className="space-y-2">{data.support.length === 0 && <p className="rounded-xl border border-white/10 bg-white/[0.04] p-5 text-sm text-stone-400">Nenhum chamado cadastrado.</p>}{data.support.map((support) => <article key={support.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-4"><div><p className="font-black">{support.subject}</p><p className="text-xs text-stone-500">{support.organizationName || support.billingEmail || "Sem vínculo"} · {support.priority} · {date(support.updatedAt)}</p></div><select disabled={busy} value={support.status} onChange={(event) => action({ action: "support-status", caseId: support.id, status: event.target.value })} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold"><option value="open">Aberto</option><option value="pending">Pendente</option><option value="resolved">Resolvido</option><option value="closed">Fechado</option></select></article>)}</div>}
 
         {tab === "Logs" && <div className="space-y-2">{data.logs.map((log) => <article key={log.id} className="rounded-xl border border-white/10 bg-white/[0.04] p-4"><div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-orange-400" /><p className="font-black">{log.action}</p></div><p className="mt-1 text-xs text-stone-500">{log.adminEmail} · {log.targetType}:{log.targetId} · {date(log.createdAt)}</p></article>)}</div>}
+          </section>
+        </div>
       </div>
     </main>
   )
