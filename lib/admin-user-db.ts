@@ -4,7 +4,11 @@ import {
   timingSafeEqual,
 } from "node:crypto"
 import { getPostgresPool } from "@/lib/postgres"
-import { consumeAuthToken, getValidAuthToken, revokeOutstandingAuthTokens } from "@/lib/security-tokens"
+import {
+  getValidAuthToken,
+  revokeOutstandingAuthTokens,
+} from "@/lib/security-tokens"
+import { runWithRlsBypass } from "@/lib/rls-context"
 
 const PREFIX = "scrypt$v1"
 const MIN_ADMIN_PASSWORD_LENGTH = 12
@@ -135,8 +139,14 @@ export async function authenticateAdminUser(
     )
 
   const row = result.rows[0]
-  const passwordHash = row?.password_hash || DUMMY_PASSWORD_HASH
-  const passwordMatches = verifyAdminPassword(password, passwordHash)
+  const passwordHash =
+    row?.password_hash ||
+    DUMMY_PASSWORD_HASH
+  const passwordMatches =
+    verifyAdminPassword(
+      password,
+      passwordHash,
+    )
 
   if (
     !row ||
@@ -165,26 +175,33 @@ export async function authenticateAdminUser(
   }
 }
 
-
 export async function authenticateAdminGoogleUser(
   googleSubject: string,
   email: string,
 ): Promise<AuthenticatedAdminUser | null> {
-  const result = await getPostgresPool().query<AdminUserCredentialRow>(
-    `
-      SELECT id, name, email, password_hash, status
-      FROM sf_users
-      WHERE google_subject = $1
-      LIMIT 1
-    `,
-    [googleSubject.trim()],
-  )
+  const result =
+    await getPostgresPool().query<AdminUserCredentialRow>(
+      `
+        SELECT
+          id,
+          name,
+          email,
+          password_hash,
+          status
+        FROM sf_users
+        WHERE google_subject = $1
+        LIMIT 1
+      `,
+      [googleSubject.trim()],
+    )
 
   const row = result.rows[0]
+
   if (
     !row ||
     row.status !== "active" ||
-    row.email.trim().toLowerCase() !== email.trim().toLowerCase()
+    row.email.trim().toLowerCase() !==
+      email.trim().toLowerCase()
   ) {
     return null
   }
@@ -192,7 +209,9 @@ export async function authenticateAdminGoogleUser(
   await getPostgresPool().query(
     `
       UPDATE sf_users
-      SET last_login_at = now(), updated_at = now()
+      SET
+        last_login_at = now(),
+        updated_at = now()
       WHERE id = $1
     `,
     [row.id],
@@ -220,26 +239,27 @@ export async function upgradeLegacyAdminPassword(
     return false
   }
 
-  const hash = hashAdminPassword(password)
+  const hash =
+    hashAdminPassword(password)
 
-  const result = await getPostgresPool().query(
-    `
-      UPDATE sf_users
-      SET
-        password_hash = $2,
-        password_updated_at = now(),
-        last_login_at = now(),
-        updated_at = now()
-      WHERE id = $1
-        AND password_hash IS NULL
-      RETURNING id
-    `,
-    [state.userId, hash],
-  )
+  const result =
+    await getPostgresPool().query(
+      `
+        UPDATE sf_users
+        SET
+          password_hash = $2,
+          password_updated_at = now(),
+          last_login_at = now(),
+          updated_at = now()
+        WHERE id = $1
+          AND password_hash IS NULL
+        RETURNING id
+      `,
+      [state.userId, hash],
+    )
 
   return Boolean(result.rowCount)
 }
-
 
 export async function changeAdminUserPassword(
   userId: string,
@@ -375,74 +395,89 @@ export async function resetAdminUserPassword(
   const passwordHash =
     hashAdminPassword(newPassword)
 
-  const client =
-    await getPostgresPool().connect()
+  return runWithRlsBypass(
+    async () => {
+      const client =
+        await getPostgresPool().connect()
 
-  try {
-    await client.query("BEGIN")
+      try {
+        await client.query("BEGIN")
 
-    const consumed =
-      await client.query(
-        `
-          UPDATE sf_auth_tokens
-          SET used_at = now()
-          WHERE id = $1
-            AND used_at IS NULL
-            AND expires_at > now()
-          RETURNING id
-        `,
-        [preview.tokenId],
-      )
+        const consumed =
+          await client.query(
+            `
+              UPDATE sf_auth_tokens
+              SET used_at = now()
+              WHERE id = $1
+                AND used_at IS NULL
+                AND expires_at > now()
+              RETURNING id
+            `,
+            [preview.tokenId],
+          )
 
-    if (!consumed.rowCount) {
-      throw new Error(
-        "Este link já foi usado ou expirou.",
-      )
-    }
+        if (!consumed.rowCount) {
+          throw new Error(
+            "Este link já foi usado ou expirou.",
+          )
+        }
 
-    await client.query(
-      `
-        UPDATE sf_users
-        SET
-          password_hash = $2,
-          password_updated_at = now(),
-          session_version = session_version + 1,
-          status = CASE
-            WHEN status = 'blocked' THEN status
-            ELSE 'active'
-          END,
-          updated_at = now()
-        WHERE id = $1
-      `,
-      [
-        preview.userId,
-        passwordHash,
-      ],
-    )
+        const updatedUser =
+          await client.query(
+            `
+              UPDATE sf_users
+              SET
+                password_hash = $2,
+                password_updated_at = now(),
+                session_version =
+                  session_version + 1,
+                status = CASE
+                  WHEN status = 'blocked'
+                    THEN status
+                  ELSE 'active'
+                END,
+                updated_at = now()
+              WHERE id = $1
+              RETURNING id
+            `,
+            [
+              preview.userId,
+              passwordHash,
+            ],
+          )
 
-    await client.query(
-      `
-        UPDATE sf_auth_tokens
-        SET used_at = COALESCE(used_at, now())
-        WHERE user_id = $1
-          AND id <> $2
-          AND used_at IS NULL
-      `,
-      [
-        preview.userId,
-        preview.tokenId,
-      ],
-    )
+        if (!updatedUser.rowCount) {
+          throw new Error(
+            "Usuário não encontrado para redefinição de senha.",
+          )
+        }
 
-    await client.query("COMMIT")
-  } catch (error) {
-    await client.query("ROLLBACK")
-    throw error
-  } finally {
-    client.release()
-  }
+        await client.query(
+          `
+            UPDATE sf_auth_tokens
+            SET used_at =
+              COALESCE(used_at, now())
+            WHERE user_id = $1
+              AND id <> $2
+              AND used_at IS NULL
+          `,
+          [
+            preview.userId,
+            preview.tokenId,
+          ],
+        )
 
-  return {
-    email: preview.email,
-  }
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+
+      return {
+        email: preview.email,
+      }
+    },
+  )
 }
