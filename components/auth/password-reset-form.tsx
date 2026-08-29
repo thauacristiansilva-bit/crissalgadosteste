@@ -13,6 +13,22 @@ type ResetPreview = {
   expiresAt: string
 }
 
+function validatePassword(password: string) {
+  if (password.length < 8) {
+    return "A senha precisa ter pelo menos 8 caracteres."
+  }
+
+  if (password === password.toLocaleLowerCase("pt-BR")) {
+    return "A senha precisa ter pelo menos 1 letra maiúscula."
+  }
+
+  if (!/[^\p{L}\p{N}\s]/u.test(password)) {
+    return "A senha precisa ter pelo menos 1 caractere especial."
+  }
+
+  return ""
+}
+
 export function PasswordResetForm({
   token,
 }: {
@@ -81,9 +97,12 @@ export function PasswordResetForm({
   ) {
     event.preventDefault()
 
-    if (password.length < 12) {
+    const passwordError =
+      validatePassword(password)
+
+    if (passwordError) {
       return setMessage(
-        "A senha precisa ter pelo menos 12 caracteres.",
+        passwordError,
       )
     }
 
@@ -98,38 +117,44 @@ export function PasswordResetForm({
     setBusy(true)
     setMessage("")
 
-    const response = await fetch(
-      `/api/password-reset/${encodeURIComponent(
-        token,
-      )}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
+    try {
+      const response = await fetch(
+        `/api/password-reset/${encodeURIComponent(
+          token,
+        )}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            password,
+          }),
         },
-        body: JSON.stringify({
-          password,
-        }),
-      },
-    )
-
-    const data =
-      await response.json()
-
-    if (!response.ok) {
-      setBusy(false)
-      return setMessage(
-        data.error ||
-          "Não foi possível redefinir.",
       )
-    }
 
-    setDone(true)
-    setBusy(false)
-    setMessage(
-      "Senha atualizada. As sessões antigas foram invalidadas.",
-    )
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        return setMessage(
+          data.error ||
+            "Não foi possível redefinir.",
+        )
+      }
+
+      setDone(true)
+      setMessage(
+        "Senha atualizada. As sessões antigas foram invalidadas.",
+      )
+    } catch {
+      setMessage(
+        "Não foi possível redefinir a senha no momento.",
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -138,6 +163,7 @@ export function PasswordResetForm({
         <p className="text-xs font-black uppercase tracking-[0.26em] text-[#d96d00]">
           Plataforma SaborFlow
         </p>
+
         <h1 className="mt-3 text-2xl font-black">
           Redefinir senha
         </h1>
@@ -147,6 +173,7 @@ export function PasswordResetForm({
             <strong>
               {preview.name}
             </strong>
+
             <p className="mt-1 text-gray-600">
               {preview.email}
             </p>
@@ -158,25 +185,31 @@ export function PasswordResetForm({
             onSubmit={submit}
             className="mt-6 space-y-4"
           >
-            <input
-              type="password"
-              autoComplete="new-password"
-              minLength={12}
-              required
-              placeholder="Nova senha"
-              value={password}
-              onChange={(event) =>
-                setPassword(
-                  event.target.value,
-                )
-              }
-              className="h-12 w-full rounded-xl border border-gray-200 px-4 outline-none focus:border-[#d96d00]"
-            />
+            <div>
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                placeholder="Nova senha"
+                value={password}
+                onChange={(event) =>
+                  setPassword(
+                    event.target.value,
+                  )
+                }
+                className="h-12 w-full rounded-xl border border-gray-200 px-4 outline-none focus:border-[#d96d00]"
+              />
+
+              <p className="mt-2 text-xs leading-5 text-gray-500">
+                Use pelo menos 8 caracteres, 1 letra maiúscula e 1 caractere especial.
+              </p>
+            </div>
 
             <input
               type="password"
               autoComplete="new-password"
-              minLength={12}
+              minLength={8}
               required
               placeholder="Confirmar nova senha"
               value={confirmation}

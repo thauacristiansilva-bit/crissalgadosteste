@@ -5,13 +5,17 @@ import {
 } from "node:crypto"
 import { getPostgresPool } from "@/lib/postgres"
 import {
+  createAuthToken,
   getValidAuthToken,
   revokeOutstandingAuthTokens,
 } from "@/lib/security-tokens"
 import { runWithRlsBypass } from "@/lib/rls-context"
 
 const PREFIX = "scrypt$v1"
-const MIN_ADMIN_PASSWORD_LENGTH = 12
+const MIN_ADMIN_PASSWORD_LENGTH = 8
+const PASSWORD_POLICY_MESSAGE =
+  "A senha deve ter pelo menos 8 caracteres, 1 letra maiúscula e 1 caractere especial."
+
 const DUMMY_PASSWORD_HASH = `${PREFIX}$saborflow-auth-dummy$${scryptSync(
   "__saborflow_invalid_password__",
   "saborflow-auth-dummy",
@@ -22,6 +26,7 @@ type AdminUserCredentialRow = {
   id: string
   name: string
   email: string
+  cpf: string | null
   password_hash: string | null
   status: string
 }
@@ -32,12 +37,86 @@ export type AuthenticatedAdminUser = {
   email: string
 }
 
-export function hashAdminPassword(password: string) {
-  if (password.length < MIN_ADMIN_PASSWORD_LENGTH) {
-    throw new Error(
-      "A senha administrativa deve ter pelo menos 12 caracteres.",
-    )
+function normalizeAdminLoginIdentifier(identifier: string) {
+  const trimmed = identifier.trim()
+
+  if (trimmed.includes("@")) {
+    return {
+      type: "email" as const,
+      value: trimmed.toLowerCase(),
+    }
   }
+
+  return {
+    type: "cpf" as const,
+    value: trimmed.replace(/\D/g, ""),
+  }
+}
+
+function hasUppercaseLetter(password: string) {
+  return password !== password.toLocaleLowerCase("pt-BR")
+}
+
+function hasSpecialCharacter(password: string) {
+  return /[^\p{L}\p{N}\s]/u.test(password)
+}
+
+export function validateAdminPasswordPolicy(password: string) {
+  if (
+    password.length < MIN_ADMIN_PASSWORD_LENGTH ||
+    !hasUppercaseLetter(password) ||
+    !hasSpecialCharacter(password)
+  ) {
+    throw new Error(PASSWORD_POLICY_MESSAGE)
+  }
+
+  return true
+}
+
+async function findAdminUserCredential(identifier: string) {
+  const normalized = normalizeAdminLoginIdentifier(identifier)
+
+  if (
+    normalized.type === "cpf" &&
+    normalized.value.length !== 11
+  ) {
+    return null
+  }
+
+  const result =
+    await getPostgresPool().query<AdminUserCredentialRow>(
+      `
+        SELECT
+          id,
+          name,
+          email,
+          cpf,
+          password_hash,
+          status
+        FROM sf_users
+        WHERE (
+          $2 = 'email'
+          AND lower(email) = lower($1)
+        )
+        OR (
+          $2 = 'cpf'
+          AND regexp_replace(
+            COALESCE(cpf, ''),
+            '[^0-9]',
+            '',
+            'g'
+          ) = $1
+        )
+        LIMIT 1
+      `,
+      [normalized.value, normalized.type],
+    )
+
+  return result.rows[0] || null
+}
+
+export function hashAdminPassword(password: string) {
+  validateAdminPasswordPolicy(password)
 
   const salt = randomBytes(16).toString("hex")
   const digest = scryptSync(
@@ -86,25 +165,10 @@ export function verifyAdminPassword(
 }
 
 export async function getAdminUserCredentialState(
-  email: string,
+  identifier: string,
 ) {
-  const result =
-    await getPostgresPool().query<AdminUserCredentialRow>(
-      `
-        SELECT
-          id,
-          name,
-          email,
-          password_hash,
-          status
-        FROM sf_users
-        WHERE lower(email) = lower($1)
-        LIMIT 1
-      `,
-      [email.trim()],
-    )
-
-  const row = result.rows[0]
+  const row =
+    await findAdminUserCredential(identifier)
 
   return row
     ? {
@@ -119,29 +183,16 @@ export async function getAdminUserCredentialState(
 }
 
 export async function authenticateAdminUser(
-  email: string,
+  identifier: string,
   password: string,
 ): Promise<AuthenticatedAdminUser | null> {
-  const result =
-    await getPostgresPool().query<AdminUserCredentialRow>(
-      `
-        SELECT
-          id,
-          name,
-          email,
-          password_hash,
-          status
-        FROM sf_users
-        WHERE lower(email) = lower($1)
-        LIMIT 1
-      `,
-      [email.trim()],
-    )
+  const row =
+    await findAdminUserCredential(identifier)
 
-  const row = result.rows[0]
   const passwordHash =
     row?.password_hash ||
     DUMMY_PASSWORD_HASH
+
   const passwordMatches =
     verifyAdminPassword(
       password,
@@ -175,6 +226,44 @@ export async function authenticateAdminUser(
   }
 }
 
+export async function createSelfServicePasswordReset(
+  identifier: string,
+) {
+  const row =
+    await findAdminUserCredential(identifier)
+
+  if (
+    !row ||
+    row.status !== "active" ||
+    !row.email?.trim()
+  ) {
+    return null
+  }
+
+  await revokeOutstandingAuthTokens(
+    row.id,
+    "password_reset",
+  )
+
+  const created =
+    await createAuthToken({
+      userId: row.id,
+      organizationId: null,
+      purpose: "password_reset",
+      expiresInMinutes: 30,
+      metadata: {
+        email: row.email,
+        source: "self_service",
+      },
+    })
+
+  return {
+    email: row.email.trim().toLowerCase(),
+    token: created.token,
+    expiresAt: created.expiresAt,
+  }
+}
+
 export async function authenticateAdminGoogleUser(
   googleSubject: string,
   email: string,
@@ -186,6 +275,7 @@ export async function authenticateAdminGoogleUser(
           id,
           name,
           email,
+          cpf,
           password_hash,
           status
         FROM sf_users
