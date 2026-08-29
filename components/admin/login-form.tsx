@@ -48,7 +48,13 @@ export function LoginForm() {
         )
       }
 
-      router.replace("/admin")
+      const redirectTo =
+        typeof data.redirectTo === "string" &&
+        data.redirectTo.startsWith("/")
+          ? data.redirectTo
+          : "/admin"
+
+      router.replace(redirectTo)
       router.refresh()
     } catch (err) {
       setError(

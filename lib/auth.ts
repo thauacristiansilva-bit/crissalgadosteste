@@ -5,6 +5,7 @@ import { demoOrganizationIsUsable } from "@/lib/demo-policy"
 import { enterTenantRlsContext } from "@/lib/rls-context"
 
 export const ADMIN_SESSION_COOKIE = "saborflow_admin_session"
+export const SUPERADMIN_SESSION_COOKIE = "saborflow_superadmin_session"
 // Mantido apenas para que logout/login removam cookies antigos do navegador.
 export const LEGACY_ADMIN_SESSION_COOKIE = "cris_admin_session"
 
@@ -44,6 +45,13 @@ export type AdminSession =
       email: string
     }
 
+type SuperadminSessionPayload = {
+  v: 1
+  purpose: "superadmin-cpf"
+  userId: string
+  expiresAt: number
+}
+
 /** @deprecated Login legado foi desativado na Fase 25. */
 export function credentialsAreValid(_email: string, _password: string) {
   return false
@@ -81,6 +89,24 @@ export function createSessionToken(context: AdminTenantContext) {
 
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
   return `v3.${encoded}.${sign(encoded)}`
+}
+
+export function createSuperadminSessionToken(userId: string) {
+  const normalizedUserId = userId.trim()
+  if (!normalizedUserId) {
+    throw new Error("Sessão Superadmin exige usuário válido.")
+  }
+
+  const payload: SuperadminSessionPayload = {
+    v: 1,
+    purpose: "superadmin-cpf",
+    userId: normalizedUserId,
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  }
+
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  const signature = sign(`superadmin:${encoded}`)
+  return `sa1.${encoded}.${signature}`
 }
 
 function parseTenantSessionToken(token?: string | null): AdminSession | null {
@@ -140,8 +166,59 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
   }
 }
 
+function parseSuperadminSessionToken(
+  token?: string | null,
+): SuperadminSessionPayload | null {
+  if (!token || !token.startsWith("sa1.")) return null
+
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+
+  const [, encoded, signature] = parts
+  if (!encoded || !signature) return null
+
+  const expectedSignature = sign(`superadmin:${encoded}`)
+  if (!signaturesMatch(signature, expectedSignature)) return null
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    ) as Partial<SuperadminSessionPayload>
+
+    if (
+      payload.v !== 1 ||
+      payload.purpose !== "superadmin-cpf" ||
+      !payload.userId ||
+      !payload.expiresAt ||
+      payload.expiresAt <= Date.now()
+    ) {
+      return null
+    }
+
+    return {
+      v: 1,
+      purpose: "superadmin-cpf",
+      userId: payload.userId,
+      expiresAt: payload.expiresAt,
+    }
+  } catch {
+    return null
+  }
+}
+
 export function sessionTokenIsValid(token?: string | null) {
   return Boolean(parseTenantSessionToken(token))
+}
+
+export async function hasSuperadminCpfSession(userId: string) {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(SUPERADMIN_SESSION_COOKIE)?.value
+  const session = parseSuperadminSessionToken(token)
+
+  return Boolean(
+    session &&
+      session.userId === userId.trim(),
+  )
 }
 
 export async function getAdminSession(): Promise<AdminSession | null> {
