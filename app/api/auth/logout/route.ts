@@ -7,6 +7,9 @@ import {
 import {
   TWO_FACTOR_CHALLENGE_COOKIE,
 } from "@/lib/security/two-factor-challenge"
+import {
+  PASSKEY_CHALLENGE_COOKIE,
+} from "@/lib/security/passkey-challenge"
 
 export async function POST() {
   const response =
@@ -19,6 +22,7 @@ export async function POST() {
     SUPERADMIN_SESSION_COOKIE,
     LEGACY_ADMIN_SESSION_COOKIE,
     TWO_FACTOR_CHALLENGE_COOKIE,
+    PASSKEY_CHALLENGE_COOKIE,
   ]) {
     response.cookies.set(
       cookieName,

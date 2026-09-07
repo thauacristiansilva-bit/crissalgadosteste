@@ -2,6 +2,10 @@
 
 import Script from "next/script"
 import {
+  browserSupportsWebAuthn,
+  startRegistration,
+} from "@simplewebauthn/browser"
+import {
   FormEvent,
   useEffect,
   useMemo,
@@ -63,6 +67,15 @@ type TwoFactorSecurityStatus = {
   recoveryCodesRemaining: number
   reconfigurationPending: boolean
   reconfigurationExpiresAt: string | null
+}
+
+type PasskeySummary = {
+  id: string
+  name: string
+  deviceType: "singleDevice" | "multiDevice"
+  backedUp: boolean
+  createdAt: string
+  lastUsedAt: string | null
 }
 
 type SecurityData = {
@@ -267,6 +280,37 @@ export function SecurityPanel({
 
 
   const [
+    passkeys,
+    setPasskeys,
+  ] = useState<PasskeySummary[]>([])
+
+  const [
+    passkeySupported,
+    setPasskeySupported,
+  ] = useState(true)
+
+  const [
+    passkeyBusy,
+    setPasskeyBusy,
+  ] = useState(false)
+
+  const [
+    passkeyMessage,
+    setPasskeyMessage,
+  ] = useState("")
+
+  const [
+    passkeyName,
+    setPasskeyName,
+  ] = useState("")
+
+  const [
+    passkeyVerifier,
+    setPasskeyVerifier,
+  ] = useState("")
+
+
+  const [
     timeZone,
     setTimeZone,
   ] = useState(
@@ -362,6 +406,32 @@ export function SecurityPanel({
     }
   }
 
+  async function reloadPasskeys() {
+    const response =
+      await fetch(
+        "/api/admin/passkeys",
+        {
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    if (
+      response?.ok &&
+      Array.isArray(
+        result?.passkeys,
+      )
+    ) {
+      setPasskeys(
+        result.passkeys,
+      )
+    }
+  }
+
   async function reloadStorage() {
     const response = await fetch("/api/admin/storage", { cache: "no-store" }).catch(() => null)
     if (!response?.ok) return
@@ -414,6 +484,11 @@ export function SecurityPanel({
     void reloadGoogle()
     void reloadStorage()
     void reloadTwoFactor()
+    void reloadPasskeys()
+
+    setPasskeySupported(
+      browserSupportsWebAuthn(),
+    )
   }, [])
 
   useEffect(() => {
@@ -687,6 +762,209 @@ export function SecurityPanel({
     )
 
     await reloadTwoFactor()
+  }
+
+  async function addPasskey() {
+    setPasskeyMessage("")
+
+    if (
+      !browserSupportsWebAuthn()
+    ) {
+      setPasskeySupported(false)
+      setPasskeyMessage(
+        "Este navegador não oferece suporte a Passkeys/WebAuthn.",
+      )
+      return
+    }
+
+    const name =
+      passkeyName
+        .trim()
+        .replace(/\s+/g, " ")
+
+    const code =
+      passkeyVerifier.trim()
+
+    if (
+      name.length < 2 ||
+      name.length > 80
+    ) {
+      setPasskeyMessage(
+        "Informe um nome de 2 a 80 caracteres para identificar esta Passkey.",
+      )
+      return
+    }
+
+    if (!code) {
+      setPasskeyMessage(
+        "Confirme com o código atual do Authenticator ou um código de recuperação.",
+      )
+      return
+    }
+
+    setPasskeyBusy(true)
+
+    try {
+      const optionsResponse =
+        await fetch(
+          "/api/admin/passkeys/register/options",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              name,
+              code,
+            }),
+          },
+        )
+
+      const optionsData =
+        await optionsResponse
+          .json()
+          .catch(() => null)
+
+      if (!optionsResponse.ok) {
+        throw new Error(
+          optionsData?.error ||
+            "Não foi possível preparar a Passkey.",
+        )
+      }
+
+      const registrationResponse =
+        await startRegistration({
+          optionsJSON:
+            optionsData.options,
+        })
+
+      const verifyResponse =
+        await fetch(
+          "/api/admin/passkeys/register/verify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              response:
+                registrationResponse,
+            }),
+          },
+        )
+
+      const verifyData =
+        await verifyResponse
+          .json()
+          .catch(() => null)
+
+      if (!verifyResponse.ok) {
+        throw new Error(
+          verifyData?.error ||
+            "Não foi possível confirmar a Passkey.",
+        )
+      }
+
+      setPasskeyName("")
+      setPasskeyVerifier("")
+      setPasskeyMessage(
+        "Passkey cadastrada com sucesso. Ela já pode ser usada como segundo fator no próximo login.",
+      )
+
+      await reloadPasskeys()
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Não foi possível cadastrar a Passkey."
+
+      setPasskeyMessage(
+        message.includes(
+          "The operation either timed out or was not allowed",
+        ) ||
+          message.includes(
+            "NotAllowedError",
+          )
+          ? "O cadastro da Passkey foi cancelado ou expirou."
+          : message,
+      )
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }
+
+  async function removePasskey(
+    credentialId: string,
+    name: string,
+  ) {
+    setPasskeyMessage("")
+
+    const code =
+      passkeyVerifier.trim()
+
+    if (!code) {
+      setPasskeyMessage(
+        "Informe o código atual do Authenticator ou um código de recuperação antes de remover uma Passkey.",
+      )
+      return
+    }
+
+    if (
+      !window.confirm(
+        `Remover a Passkey "${name}" desta conta?`,
+      )
+    ) {
+      return
+    }
+
+    setPasskeyBusy(true)
+
+    try {
+      const response =
+        await fetch(
+          "/api/admin/passkeys",
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              credentialId,
+              code,
+            }),
+          },
+        )
+
+      const result =
+        await response
+          .json()
+          .catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            "Não foi possível remover a Passkey.",
+        )
+      }
+
+      setPasskeyVerifier("")
+      setPasskeyMessage(
+        "Passkey removida. Ela não pode mais ser usada no login.",
+      )
+
+      await reloadPasskeys()
+    } catch (err) {
+      setPasskeyMessage(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível remover a Passkey.",
+      )
+    } finally {
+      setPasskeyBusy(false)
+    }
   }
 
   async function changePassword(
@@ -1295,6 +1573,153 @@ export function SecurityPanel({
         {twoFactorMessage && (
           <p className="mt-4 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
             {twoFactorMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">
+              Passkeys e chaves de segurança
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">
+              Cadastre Windows Hello, biometria do celular, Passkeys sincronizadas ou uma chave física FIDO2. No login, elas podem substituir o código de 6 dígitos como segundo fator.
+            </p>
+          </div>
+
+          <span className="w-fit rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">
+            {passkeys.length} cadastrada(s)
+          </span>
+        </div>
+
+        {!passkeySupported ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Este navegador ou dispositivo não oferece suporte a Passkeys/WebAuthn. Você pode continuar usando o Authenticator normalmente.
+          </div>
+        ) : !twoFactorStatus?.enabled ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Conclua primeiro a ativação obrigatória do 2FA para cadastrar Passkeys.
+          </div>
+        ) : (
+          <>
+            <div className="mt-5 rounded-2xl border border-gray-200 p-4">
+              <h3 className="text-sm font-black text-gray-950">
+                Adicionar uma Passkey
+              </h3>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                A confirmação abaixo protege o cadastro de novas chaves. Se acabou de usar um código do Authenticator, aguarde o próximo código antes de confirmar.
+              </p>
+
+              <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+                <input
+                  type="text"
+                  maxLength={80}
+                  placeholder="Nome, ex.: Notebook principal"
+                  value={passkeyName}
+                  onChange={(event) =>
+                    setPasskeyName(
+                      event.target.value,
+                    )
+                  }
+                  className="h-11 min-w-0 rounded-xl border border-gray-200 px-3 text-sm"
+                />
+
+                <input
+                  type="text"
+                  autoComplete="one-time-code"
+                  placeholder="Código atual ou de recuperação"
+                  value={passkeyVerifier}
+                  onChange={(event) =>
+                    setPasskeyVerifier(
+                      event.target.value,
+                    )
+                  }
+                  className="h-11 min-w-0 rounded-xl border border-gray-200 px-3 text-sm"
+                />
+
+                <button
+                  type="button"
+                  disabled={passkeyBusy}
+                  onClick={() =>
+                    void addPasskey()
+                  }
+                  className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-60"
+                >
+                  {passkeyBusy
+                    ? "Aguarde..."
+                    : "Adicionar Passkey"}
+                </button>
+              </div>
+
+              <p className="mt-2 text-xs leading-5 text-gray-500">
+                A chave privada fica protegida no seu dispositivo ou chave física. O SaborFlow armazena somente a credencial pública necessária para verificar o login.
+              </p>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {passkeys.map(
+                (passkey) => (
+                  <div
+                    key={passkey.id}
+                    className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black text-gray-950">
+                        {passkey.name}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        Cadastrada em{" "}
+                        {new Date(
+                          passkey.createdAt,
+                        ).toLocaleString(
+                          "pt-BR",
+                        )}
+                        {" · "}
+                        {passkey.backedUp ||
+                        passkey.deviceType ===
+                          "multiDevice"
+                          ? "Passkey sincronizável"
+                          : "Dispositivo/chave física"}
+                        {passkey.lastUsedAt
+                          ? ` · último uso ${new Date(
+                              passkey.lastUsedAt,
+                            ).toLocaleString(
+                              "pt-BR",
+                            )}`
+                          : " · ainda não utilizada"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={passkeyBusy}
+                      onClick={() =>
+                        void removePasskey(
+                          passkey.id,
+                          passkey.name,
+                        )
+                      }
+                      className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-60"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ),
+              )}
+
+              {!passkeys.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
+                  Nenhuma Passkey ou chave de segurança cadastrada ainda.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+        {passkeyMessage && (
+          <p className="mt-4 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {passkeyMessage}
           </p>
         )}
       </section>

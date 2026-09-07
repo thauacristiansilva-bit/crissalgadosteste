@@ -3,6 +3,10 @@
 import Link from "next/link"
 import Script from "next/script"
 import {
+  browserSupportsWebAuthn,
+  startAuthentication,
+} from "@simplewebauthn/browser"
+import {
   FormEvent,
   useEffect,
   useRef,
@@ -118,6 +122,59 @@ export function LoginForm() {
       .NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
     ""
 
+  const [
+    passkeyAvailable,
+    setPasskeyAvailable,
+  ] = useState(false)
+
+  const [
+    passkeySupported,
+    setPasskeySupported,
+  ] = useState(false)
+
+  async function loadPasskeyAvailability() {
+    const supported =
+      browserSupportsWebAuthn()
+
+    setPasskeySupported(
+      supported,
+    )
+
+    if (!supported) {
+      setPasskeyAvailable(
+        false,
+      )
+      return
+    }
+
+    const response =
+      await fetch(
+        "/api/auth/passkey/options",
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    if (!response?.ok) {
+      setPasskeyAvailable(
+        false,
+      )
+      return
+    }
+
+    const data =
+      await response
+        .json()
+        .catch(() => null)
+
+    setPasskeyAvailable(
+      Boolean(
+        data?.available,
+      ),
+    )
+  }
+
   async function loadSetupInfo() {
     const response =
       await fetch(
@@ -175,8 +232,12 @@ export function LoginForm() {
     setStep("twoFactor")
 
     if (mode === "setup") {
+      setPasskeyAvailable(false)
       await loadSetupInfo()
+      return
     }
+
+    await loadPasskeyAvailability()
   }
 
   async function submit(
@@ -312,6 +373,107 @@ export function LoginForm() {
     }
   }
 
+  async function authenticateWithPasskey() {
+    setBusy(true)
+    setError("")
+
+    try {
+      if (
+        !browserSupportsWebAuthn()
+      ) {
+        throw new Error(
+          "Este navegador não oferece suporte a Passkeys/WebAuthn.",
+        )
+      }
+
+      const optionsResponse =
+        await fetch(
+          "/api/auth/passkey/options",
+          {
+            method: "POST",
+          },
+        )
+
+      const optionsData =
+        await optionsResponse
+          .json()
+          .catch(() => null)
+
+      if (!optionsResponse.ok) {
+        throw new Error(
+          optionsData?.error ||
+            "Não foi possível iniciar a Passkey.",
+        )
+      }
+
+      const authenticationResponse =
+        await startAuthentication({
+          optionsJSON:
+            optionsData.options,
+        })
+
+      const verifyResponse =
+        await fetch(
+          "/api/auth/passkey/verify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              response:
+                authenticationResponse,
+            }),
+          },
+        )
+
+      const verifyData =
+        await verifyResponse
+          .json()
+          .catch(() => null)
+
+      if (!verifyResponse.ok) {
+        throw new Error(
+          verifyData?.error ||
+            "Não foi possível validar a Passkey.",
+        )
+      }
+
+      const redirectTo =
+        typeof verifyData?.redirectTo ===
+          "string" &&
+        verifyData.redirectTo.startsWith(
+          "/",
+        )
+          ? verifyData.redirectTo
+          : "/admin"
+
+      router.replace(
+        redirectTo,
+      )
+      router.refresh()
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Não foi possível usar a Passkey."
+
+      setError(
+        message.includes(
+          "The operation either timed out or was not allowed",
+        ) ||
+          message.includes(
+            "NotAllowedError",
+          )
+          ? "A autenticação com Passkey foi cancelada ou expirou."
+          : message,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function submitTwoFactor(
     event: FormEvent,
   ) {
@@ -399,6 +561,7 @@ export function LoginForm() {
     setTwoFactorCode("")
     setSetupInfo(null)
     setRecoveryCodes([])
+    setPasskeyAvailable(false)
     setError("")
   }
 
@@ -702,6 +865,37 @@ export function LoginForm() {
                   : "Confirmar código"}
             </button>
           </form>
+
+          {twoFactorMode ===
+            "verify" &&
+            passkeySupported &&
+            passkeyAvailable && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-gray-200" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                    ou
+                  </span>
+                  <div className="h-px flex-1 bg-gray-200" />
+                </div>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void authenticateWithPasskey()
+                  }
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 text-sm font-black text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Usar Passkey / Windows Hello
+                </button>
+
+                <p className="text-center text-[11px] leading-4 text-gray-400">
+                  Também funciona com biometria do dispositivo e chaves de segurança FIDO2 cadastradas.
+                </p>
+              </div>
+            )}
 
           <button
             type="button"
