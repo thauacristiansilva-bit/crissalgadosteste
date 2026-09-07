@@ -21,7 +21,12 @@ type MfaRow = {
   enabled: boolean
   last_totp_step: string | null
   recovery_code_hashes: unknown
+  pending_secret_encrypted: string | null
+  pending_secret_created_at: Date | string | null
 }
+
+const RECONFIGURATION_TTL_MS =
+  10 * 60 * 1000
 
 function getEncryptionKey() {
   const configured =
@@ -410,7 +415,9 @@ async function getMfaRow(
             secret_encrypted,
             enabled,
             last_totp_step::text,
-            recovery_code_hashes
+            recovery_code_hashes,
+            pending_secret_encrypted,
+            pending_secret_created_at
           FROM sf_user_mfa
           WHERE user_id = $1
           LIMIT 1
@@ -421,16 +428,87 @@ async function getMfaRow(
   return result.rows[0] || null
 }
 
+function recoveryCodeCount(
+  value: unknown,
+) {
+  if (Array.isArray(value)) {
+    return value.length
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed =
+        JSON.parse(value)
+      return Array.isArray(parsed)
+        ? parsed.length
+        : 0
+    } catch {
+      return 0
+    }
+  }
+
+  return 0
+}
+
+function pendingReconfigurationExpiresAt(
+  row: MfaRow | null,
+) {
+  if (
+    !row?.pending_secret_encrypted ||
+    !row.pending_secret_created_at
+  ) {
+    return null
+  }
+
+  const createdAt =
+    new Date(
+      row.pending_secret_created_at,
+    ).getTime()
+
+  if (
+    !Number.isFinite(createdAt)
+  ) {
+    return null
+  }
+
+  const expiresAt =
+    createdAt +
+    RECONFIGURATION_TTL_MS
+
+  if (expiresAt <= Date.now()) {
+    return null
+  }
+
+  return expiresAt
+}
+
 export async function getTwoFactorState(
   userId: string,
 ) {
   const row =
     await getMfaRow(userId)
 
+  const pendingExpiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
   return {
     configured: Boolean(row),
     enabled:
       Boolean(row?.enabled),
+    recoveryCodesRemaining:
+      recoveryCodeCount(
+        row?.recovery_code_hashes,
+      ),
+    reconfigurationPending:
+      Boolean(pendingExpiresAt),
+    reconfigurationExpiresAt:
+      pendingExpiresAt
+        ? new Date(
+            pendingExpiresAt,
+          ).toISOString()
+        : null,
   }
 }
 
@@ -718,6 +796,284 @@ export async function verifySecondFactor(
     userId,
     trimmed,
   )
+}
+
+export async function regenerateRecoveryCodes(
+  userId: string,
+  currentTotpCode: string,
+) {
+  const verified =
+    await verifyAndConsumeTotp(
+      userId,
+      currentTotpCode,
+    )
+
+  if (!verified) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            recovery_code_hashes =
+              $2::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+          RETURNING user_id
+        `,
+        [
+          userId,
+          JSON.stringify(
+            hashes,
+          ),
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+export async function beginTwoFactorReconfiguration(
+  userId: string,
+  email: string,
+  currentSecondFactor: string,
+) {
+  const verified =
+    await verifySecondFactor(
+      userId,
+      currentSecondFactor,
+    )
+
+  if (!verified) {
+    return null
+  }
+
+  const secret =
+    createTotpSecret()
+
+  const encrypted =
+    encryptSecret(
+      userId,
+      secret,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            pending_secret_encrypted = $2,
+            pending_secret_created_at = now(),
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+          RETURNING
+            pending_secret_created_at
+        `,
+        [
+          userId,
+          encrypted,
+        ],
+      )
+
+  const createdAt =
+    updated.rows[0]
+      ?.pending_secret_created_at
+
+  if (!createdAt) {
+    return null
+  }
+
+  const expiresAt =
+    new Date(
+      new Date(
+        createdAt,
+      ).getTime() +
+        RECONFIGURATION_TTL_MS,
+    ).toISOString()
+
+  return {
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+    expiresAt,
+  }
+}
+
+export async function getPendingTwoFactorReconfiguration(
+  userId: string,
+  email: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const expiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  if (
+    !row?.enabled ||
+    !row.pending_secret_encrypted ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.pending_secret_encrypted,
+    )
+
+  return {
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+    expiresAt:
+      new Date(
+        expiresAt,
+      ).toISOString(),
+  }
+}
+
+export async function confirmTwoFactorReconfiguration(
+  userId: string,
+  newTotpCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const expiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  if (
+    !row?.enabled ||
+    !row.pending_secret_encrypted ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  const pendingEncrypted =
+    row.pending_secret_encrypted
+
+  const secret =
+    decryptSecret(
+      userId,
+      pendingEncrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      newTotpCode,
+    )
+
+  if (step === null) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            secret_encrypted =
+              pending_secret_encrypted,
+            pending_secret_encrypted =
+              NULL,
+            pending_secret_created_at =
+              NULL,
+            verified_at = now(),
+            last_totp_step = $2,
+            recovery_code_hashes =
+              $3::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND pending_secret_encrypted = $4
+            AND pending_secret_created_at >=
+              now() - interval '10 minutes'
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+          JSON.stringify(
+            hashes,
+          ),
+          pendingEncrypted,
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+export async function cancelTwoFactorReconfiguration(
+  userId: string,
+) {
+  await getPostgresPool()
+    .query(
+      `
+        UPDATE sf_user_mfa
+        SET
+          pending_secret_encrypted =
+            NULL,
+          pending_secret_created_at =
+            NULL,
+          updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId],
+    )
 }
 
 export async function markAdminUserLoginCompleted(

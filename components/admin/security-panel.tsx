@@ -57,6 +57,14 @@ type StorageStatus = {
   replicaReady: boolean
 }
 
+type TwoFactorSecurityStatus = {
+  configured: boolean
+  enabled: boolean
+  recoveryCodesRemaining: number
+  reconfigurationPending: boolean
+  reconfigurationExpiresAt: string | null
+}
+
 type SecurityData = {
   organization: {
     id: string
@@ -127,6 +135,47 @@ function DnsCopyRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+function RecoveryCodesBox({
+  codes,
+  title = "Códigos de recuperação",
+}: {
+  codes: string[]
+  title?: string
+}) {
+  if (!codes.length) {
+    return null
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black text-amber-950">
+            {title}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-amber-900">
+            Estes códigos aparecem somente agora. Cada código funciona uma única vez.
+          </p>
+        </div>
+        <CopyButton
+          value={codes.join("\n")}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {codes.map((code) => (
+          <code
+            key={code}
+            className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-center text-xs font-black tracking-wide text-amber-950"
+          >
+            {code}
+          </code>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function SecurityPanel({
   canManageSecurity,
 }: {
@@ -167,6 +216,55 @@ export function SecurityPanel({
   const [storageBusy, setStorageBusy] = useState(false)
   const googleButtonRef = useRef<HTMLDivElement | null>(null)
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
+
+  const [
+    twoFactorStatus,
+    setTwoFactorStatus,
+  ] =
+    useState<TwoFactorSecurityStatus | null>(
+      null,
+    )
+  const [
+    twoFactorMessage,
+    setTwoFactorMessage,
+  ] = useState("")
+  const [
+    twoFactorBusy,
+    setTwoFactorBusy,
+  ] = useState(false)
+  const [
+    recoveryVerifier,
+    setRecoveryVerifier,
+  ] = useState("")
+  const [
+    recoveryCodes,
+    setRecoveryCodes,
+  ] = useState<string[]>([])
+  const [
+    reconfigureVerifier,
+    setReconfigureVerifier,
+  ] = useState("")
+  const [
+    reconfigureManualKey,
+    setReconfigureManualKey,
+  ] = useState("")
+  const [
+    reconfigureExpiresAt,
+    setReconfigureExpiresAt,
+  ] = useState("")
+  const [
+    reconfigureQrUrl,
+    setReconfigureQrUrl,
+  ] = useState("")
+  const [
+    reconfigureNewCode,
+    setReconfigureNewCode,
+  ] = useState("")
+  const [
+    reconfigureRecoveryCodes,
+    setReconfigureRecoveryCodes,
+  ] = useState<string[]>([])
+
 
   const [
     timeZone,
@@ -240,6 +338,30 @@ export function SecurityPanel({
     if (response.ok && result) setGoogleLink(result)
   }
 
+  async function reloadTwoFactor() {
+    const response =
+      await fetch(
+        "/api/admin/2fa/security",
+        {
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    if (
+      response?.ok &&
+      result
+    ) {
+      setTwoFactorStatus(
+        result,
+      )
+    }
+  }
+
   async function reloadStorage() {
     const response = await fetch("/api/admin/storage", { cache: "no-store" }).catch(() => null)
     if (!response?.ok) return
@@ -291,6 +413,7 @@ export function SecurityPanel({
     void reload()
     void reloadGoogle()
     void reloadStorage()
+    void reloadTwoFactor()
   }, [])
 
   useEffect(() => {
@@ -323,6 +446,248 @@ export function SecurityPanel({
 
       return `powershell -ExecutionPolicy Bypass -File .\\INICIAR-IMPRESSAO-AUTOMATICA.ps1 -ServerUrl "${window.location.origin}" -Token "${newAgent.token}"`
     }, [newAgent])
+
+  async function generateNewRecoveryCodes() {
+    setTwoFactorMessage("")
+    setRecoveryCodes([])
+
+    if (
+      !/^\d{6}$/.test(
+        recoveryVerifier.trim(),
+      )
+    ) {
+      setTwoFactorMessage(
+        "Informe o código de 6 dígitos do aplicativo autenticador.",
+      )
+      return
+    }
+
+    if (
+      !window.confirm(
+        "Gerar novos códigos de recuperação? Todos os códigos antigos deixarão de funcionar imediatamente.",
+      )
+    ) {
+      return
+    }
+
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/recovery-codes",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            code:
+              recoveryVerifier,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível gerar novos códigos.",
+      )
+      return
+    }
+
+    const nextCodes =
+      Array.isArray(
+        result?.recoveryCodes,
+      )
+        ? result.recoveryCodes
+        : []
+
+    setRecoveryVerifier("")
+    setRecoveryCodes(
+      nextCodes,
+    )
+    setTwoFactorMessage(
+      "Novos códigos gerados. Os códigos anteriores foram invalidados. Guarde estes novos códigos em local seguro.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function startAuthenticatorChange() {
+    setTwoFactorMessage("")
+    setReconfigureRecoveryCodes([])
+
+    const code =
+      reconfigureVerifier.trim()
+
+    if (!code) {
+      setTwoFactorMessage(
+        "Informe o código atual do Authenticator ou um código de recuperação.",
+      )
+      return
+    }
+
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/reconfigure",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            code,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível iniciar a troca do autenticador.",
+      )
+      return
+    }
+
+    setReconfigureVerifier("")
+    setReconfigureManualKey(
+      result?.manualKey || "",
+    )
+    setReconfigureExpiresAt(
+      result?.expiresAt || "",
+    )
+    setReconfigureQrUrl(
+      result?.qrUrl || "",
+    )
+    setReconfigureNewCode("")
+    setTwoFactorMessage(
+      "Novo Authenticator preparado. O autenticador atual continuará funcionando até você confirmar o novo.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function confirmAuthenticatorChange() {
+    setTwoFactorMessage("")
+
+    const code =
+      reconfigureNewCode.trim()
+
+    if (!/^\d{6}$/.test(code)) {
+      setTwoFactorMessage(
+        "Informe o código de 6 dígitos exibido no novo Authenticator.",
+      )
+      return
+    }
+
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/reconfigure",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            code,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível confirmar o novo Authenticator.",
+      )
+      return
+    }
+
+    const nextCodes =
+      Array.isArray(
+        result?.recoveryCodes,
+      )
+        ? result.recoveryCodes
+        : []
+
+    setReconfigureNewCode("")
+    setReconfigureManualKey("")
+    setReconfigureExpiresAt("")
+    setReconfigureQrUrl("")
+    setReconfigureRecoveryCodes(
+      nextCodes,
+    )
+    setRecoveryCodes([])
+    setTwoFactorMessage(
+      "Authenticator trocado com sucesso. O antigo não é mais válido. Guarde os novos códigos de recuperação.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function cancelAuthenticatorChange() {
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/reconfigure",
+        {
+          method: "DELETE",
+        },
+      ).catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      const result =
+        await response
+          ?.json()
+          .catch(() => null)
+
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível cancelar a troca.",
+      )
+      return
+    }
+
+    setReconfigureManualKey("")
+    setReconfigureExpiresAt("")
+    setReconfigureQrUrl("")
+    setReconfigureNewCode("")
+    setTwoFactorMessage(
+      "Troca de Authenticator cancelada. O autenticador atual continua ativo.",
+    )
+
+    await reloadTwoFactor()
+  }
 
   async function changePassword(
     event: FormEvent,
@@ -690,6 +1055,246 @@ export function SecurityPanel({
         {passwordMessage && (
           <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
             {passwordMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">
+              Autenticação em duas etapas
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">
+              O 2FA protege sua conta com o aplicativo autenticador. Não existe botão de desativação simples: alterações sensíveis exigem uma nova confirmação.
+            </p>
+          </div>
+
+          <div
+            className={
+              twoFactorStatus?.enabled
+                ? "w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700"
+                : "w-fit rounded-full bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-800"
+            }
+          >
+            {twoFactorStatus?.enabled
+              ? "2FA ativo"
+              : "2FA não confirmado"}
+          </div>
+        </div>
+
+        {twoFactorStatus?.enabled ? (
+          <>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="text-sm font-black text-gray-950">
+                  Códigos de recuperação
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  Restam <strong>{twoFactorStatus.recoveryCodesRemaining}</strong> código(s). Gere novos códigos somente se perdeu os antigos ou acredita que foram expostos.
+                </p>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    placeholder="Código atual de 6 dígitos"
+                    value={recoveryVerifier}
+                    onChange={(event) =>
+                      setRecoveryVerifier(
+                        event.target.value.replace(/\D/g, "").slice(0, 6),
+                      )
+                    }
+                    className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={generateNewRecoveryCodes}
+                    className="h-11 rounded-xl bg-[#2f1c13] px-4 text-sm font-black text-white disabled:opacity-60"
+                  >
+                    Gerar novos códigos
+                  </button>
+                </div>
+
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Por segurança, esta ação exige um código novo do Authenticator. Os códigos antigos são invalidados imediatamente.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="text-sm font-black text-gray-950">
+                  Trocar Authenticator
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  Use esta opção ao trocar ou perder o celular. O autenticador atual continua válido até a confirmação do novo.
+                </p>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    autoComplete="one-time-code"
+                    placeholder="Código atual ou de recuperação"
+                    value={reconfigureVerifier}
+                    onChange={(event) =>
+                      setReconfigureVerifier(
+                        event.target.value,
+                      )
+                    }
+                    className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={startAuthenticatorChange}
+                    className="h-11 rounded-xl border border-gray-300 px-4 text-sm font-black text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    Preparar troca
+                  </button>
+                </div>
+
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Se você perdeu o celular, pode usar um dos seus códigos de recuperação para autorizar esta troca.
+                </p>
+              </div>
+            </div>
+
+            {twoFactorStatus.reconfigurationPending &&
+              !reconfigureManualKey && (
+                <div className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-amber-950">
+                      Existe uma troca de Authenticator pendente.
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-amber-900">
+                      Para continuar, autorize novamente com o código atual. Se você não iniciou a troca, cancele agora.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={cancelAuthenticatorChange}
+                    className="rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-black text-amber-900 disabled:opacity-60"
+                  >
+                    Cancelar troca pendente
+                  </button>
+                </div>
+              )}
+
+            <RecoveryCodesBox
+              codes={recoveryCodes}
+              title="Novos códigos de recuperação"
+            />
+
+            {reconfigureManualKey && (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-blue-950">
+                      Configure o novo Authenticator
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-blue-900">
+                      Escaneie o QR Code abaixo com o novo celular. O autenticador antigo só será substituído depois da confirmação.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={cancelAuthenticatorChange}
+                    className="rounded-xl border border-blue-300 bg-white px-3 py-2 text-xs font-black text-blue-900 disabled:opacity-60"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
+                  <div className="overflow-hidden rounded-2xl border border-blue-200 bg-white p-3">
+                    {reconfigureQrUrl && (
+                      <img
+                        src={reconfigureQrUrl}
+                        alt="QR Code do novo Authenticator"
+                        width={280}
+                        height={280}
+                        className="h-auto w-full"
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold uppercase text-blue-800">
+                      Chave manual
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <code className="min-w-0 flex-1 break-all rounded-xl bg-white px-3 py-3 text-xs font-black text-blue-950">
+                        {reconfigureManualKey}
+                      </code>
+                      <CopyButton
+                        value={reconfigureManualKey.replace(/\s+/g, "")}
+                      />
+                    </div>
+
+                    {reconfigureExpiresAt && (
+                      <p className="mt-2 text-xs text-blue-800">
+                        Esta troca expira às{" "}
+                        <strong>
+                          {new Date(
+                            reconfigureExpiresAt,
+                          ).toLocaleTimeString(
+                            "pt-BR",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
+                        </strong>.
+                      </p>
+                    )}
+
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="Código do novo Authenticator"
+                        value={reconfigureNewCode}
+                        onChange={(event) =>
+                          setReconfigureNewCode(
+                            event.target.value.replace(/\D/g, "").slice(0, 6),
+                          )
+                        }
+                        className="h-11 min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={twoFactorBusy}
+                        onClick={confirmAuthenticatorChange}
+                        className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-60"
+                      >
+                        Confirmar novo Authenticator
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <RecoveryCodesBox
+              codes={reconfigureRecoveryCodes}
+              title="Novos códigos após a troca"
+            />
+          </>
+        ) : (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            O 2FA ainda não está confirmado nesta conta. Saia e entre novamente para concluir a ativação obrigatória.
+          </div>
+        )}
+
+        {twoFactorMessage && (
+          <p className="mt-4 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {twoFactorMessage}
           </p>
         )}
       </section>
