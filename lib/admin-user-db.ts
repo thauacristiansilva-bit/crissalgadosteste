@@ -10,11 +10,13 @@ import {
   revokeOutstandingAuthTokens,
 } from "@/lib/security-tokens"
 import { runWithRlsBypass } from "@/lib/rls-context"
+import { clearPersistentLoginFailuresForUser } from "@/lib/security/login-lockout"
 
 const PREFIX = "scrypt$v1"
-const MIN_ADMIN_PASSWORD_LENGTH = 8
+const MIN_ADMIN_PASSWORD_LENGTH = 12
+const MAX_ADMIN_PASSWORD_LENGTH = 128
 const PASSWORD_POLICY_MESSAGE =
-  "A senha deve ter pelo menos 8 caracteres, 1 letra maiúscula e 1 caractere especial."
+  "A senha deve ter entre 12 e 128 caracteres, 1 letra maiúscula e 1 caractere especial."
 
 const DUMMY_PASSWORD_HASH = `${PREFIX}$saborflow-auth-dummy$${scryptSync(
   "__saborflow_invalid_password__",
@@ -64,6 +66,7 @@ function hasSpecialCharacter(password: string) {
 export function validateAdminPasswordPolicy(password: string) {
   if (
     password.length < MIN_ADMIN_PASSWORD_LENGTH ||
+    password.length > MAX_ADMIN_PASSWORD_LENGTH ||
     !hasUppercaseLetter(password) ||
     !hasSpecialCharacter(password)
   ) {
@@ -208,17 +211,6 @@ export async function authenticateAdminUser(
     return null
   }
 
-  await getPostgresPool().query(
-    `
-      UPDATE sf_users
-      SET
-        last_login_at = now(),
-        updated_at = now()
-      WHERE id = $1
-    `,
-    [row.id],
-  )
-
   return {
     id: row.id,
     name: row.name,
@@ -295,17 +287,6 @@ export async function authenticateAdminGoogleUser(
   ) {
     return null
   }
-
-  await getPostgresPool().query(
-    `
-      UPDATE sf_users
-      SET
-        last_login_at = now(),
-        updated_at = now()
-      WHERE id = $1
-    `,
-    [row.id],
-  )
 
   return {
     id: row.id,
@@ -415,6 +396,10 @@ export async function changeAdminUserPassword(
   await revokeOutstandingAuthTokens(
     userId,
     "password_reset",
+  )
+
+  await clearPersistentLoginFailuresForUser(
+    userId,
   )
 
   return true
@@ -555,6 +540,14 @@ export async function resetAdminUserPassword(
             preview.userId,
             preview.tokenId,
           ],
+        )
+
+        await client.query(
+          `
+            DELETE FROM sf_auth_login_lockouts
+            WHERE user_id = $1
+          `,
+          [preview.userId],
         )
 
         await client.query("COMMIT")

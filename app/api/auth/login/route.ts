@@ -29,6 +29,11 @@ import {
   getTwoFactorState,
 } from "@/lib/security/two-factor"
 import {
+  checkPersistentLoginLock,
+  clearPersistentLoginFailures,
+  registerPersistentLoginFailure,
+} from "@/lib/security/login-lockout"
+import {
   TWO_FACTOR_CHALLENGE_COOKIE,
   createTwoFactorChallenge,
   twoFactorChallengeCookieOptions,
@@ -49,7 +54,12 @@ function jsonError(
 ) {
   const response =
     NextResponse.json(
-      { error: message },
+      {
+        error: message,
+        ...(retryAfterSeconds > 0
+          ? { retryAfterSeconds }
+          : {}),
+      },
       { status },
     )
 
@@ -224,6 +234,19 @@ export async function POST(
   }
 
   try {
+    const persistentLock =
+      await checkPersistentLoginLock(
+        identifier,
+      )
+
+    if (persistentLock.locked) {
+      return jsonError(
+        "Muitas tentativas de login. Tente novamente mais tarde.",
+        429,
+        persistentLock.retryAfterSeconds,
+      )
+    }
+
     const user =
       await authenticateAdminUser(
         identifier,
@@ -240,11 +263,36 @@ export async function POST(
         RATE_WINDOW_MS,
       )
 
+      const persistentFailure =
+        await registerPersistentLoginFailure(
+          identifier,
+        )
+
+      if (persistentFailure.locked) {
+        return jsonError(
+          "Muitas tentativas de login. Tente novamente mais tarde.",
+          429,
+          persistentFailure.retryAfterSeconds,
+        )
+      }
+
       return jsonError(
         "CPF/e-mail ou senha inválidos.",
         401,
       )
     }
+
+    await clearPersistentLoginFailures(
+      identifier,
+      user.id,
+    )
+
+    clearAuthFailures(
+      accountKey,
+    )
+    clearAuthFailures(
+      ipKey,
+    )
 
     const tenantContext =
       await getDefaultAdminTenantContextForUserId(
@@ -278,10 +326,6 @@ export async function POST(
       await getTwoFactorState(
         user.id,
       )
-
-    clearAuthFailures(
-      accountKey,
-    )
 
     const mode =
       mfa.enabled

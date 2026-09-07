@@ -973,9 +973,19 @@ export function SecurityPanel({
     event.preventDefault()
     setPasswordMessage("")
 
-    if (newPassword.length < 12) {
+    if (
+      newPassword.length < 12 ||
+      newPassword.length > 128 ||
+      newPassword ===
+        newPassword.toLocaleLowerCase(
+          "pt-BR",
+        ) ||
+      !/[^\p{L}\p{N}\s]/u.test(
+        newPassword,
+      )
+    ) {
       return setPasswordMessage(
-        "A nova senha precisa ter pelo menos 12 caracteres.",
+        "Use de 12 a 128 caracteres, com pelo menos 1 letra maiúscula e 1 caractere especial.",
       )
     }
 
@@ -1295,6 +1305,7 @@ export function SecurityPanel({
             type="password"
             autoComplete="new-password"
             minLength={12}
+            maxLength={128}
             required
             placeholder="Nova senha"
             value={newPassword}
@@ -1309,6 +1320,7 @@ export function SecurityPanel({
             type="password"
             autoComplete="new-password"
             minLength={12}
+            maxLength={128}
             required
             placeholder="Confirmar nova senha"
             value={confirmPassword}
@@ -1319,6 +1331,10 @@ export function SecurityPanel({
             }
             className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
           />
+
+          <p className="text-xs leading-5 text-gray-500 md:col-span-3">
+            Use de 12 a 128 caracteres, com pelo menos 1 letra maiúscula e 1 caractere especial. A troca encerra as sessões administrativas atuais.
+          </p>
 
           <button
             disabled={passwordBusy}
