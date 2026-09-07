@@ -3,6 +3,13 @@ import {
   NextResponse,
 } from "next/server"
 import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_IDLE_SECONDS,
+  SUPERADMIN_SESSION_COOKIE,
+  refreshAdminSessionToken,
+  refreshSuperadminSessionToken,
+} from "@/lib/auth"
+import {
   browserRequestLooksCrossSite,
   requestIsSameOrigin,
 } from "@/lib/security/request-security"
@@ -14,6 +21,13 @@ const CROSS_ORIGIN_API_EXCEPTIONS = [
   "/api/billing/webhooks/mercado-pago",
   "/api/integrations/webhooks/",
   "/api/internal/integrations/process",
+]
+
+const AUTH_PATHS_WITHOUT_REFRESH = [
+  "/api/auth/login",
+  "/api/auth/google",
+  "/api/auth/logout",
+  "/api/auth/2fa/",
 ]
 
 function normalizeHost(value: string) {
@@ -60,12 +74,105 @@ function protectStateChangingApiRequest(request: NextRequest) {
   return null
 }
 
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: ADMIN_SESSION_IDLE_SECONDS,
+    priority: "high" as const,
+  }
+}
+
+function clearSessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  }
+}
+
+function requestShouldRefreshAuthentication(pathname: string) {
+  return !AUTH_PATHS_WITHOUT_REFRESH.some((prefix) =>
+    pathname.startsWith(prefix),
+  )
+}
+
+function refreshAuthenticationCookies(
+  request: NextRequest,
+  response: NextResponse,
+) {
+  if (!requestShouldRefreshAuthentication(request.nextUrl.pathname)) {
+    return
+  }
+
+  const currentAdminToken =
+    request.cookies.get(ADMIN_SESSION_COOKIE)?.value
+
+  if (!currentAdminToken) {
+    return
+  }
+
+  const refreshedAdminToken =
+    refreshAdminSessionToken(currentAdminToken)
+
+  if (!refreshedAdminToken) {
+    response.cookies.set(
+      ADMIN_SESSION_COOKIE,
+      "",
+      clearSessionCookieOptions(),
+    )
+    response.cookies.set(
+      SUPERADMIN_SESSION_COOKIE,
+      "",
+      clearSessionCookieOptions(),
+    )
+    return
+  }
+
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE,
+    refreshedAdminToken,
+    sessionCookieOptions(),
+  )
+
+  const currentSuperadminToken =
+    request.cookies.get(SUPERADMIN_SESSION_COOKIE)?.value
+
+  if (!currentSuperadminToken) {
+    return
+  }
+
+  const refreshedSuperadminToken =
+    refreshSuperadminSessionToken(currentSuperadminToken)
+
+  if (!refreshedSuperadminToken) {
+    response.cookies.set(
+      SUPERADMIN_SESSION_COOKIE,
+      "",
+      clearSessionCookieOptions(),
+    )
+    return
+  }
+
+  response.cookies.set(
+    SUPERADMIN_SESSION_COOKIE,
+    refreshedSuperadminToken,
+    sessionCookieOptions(),
+  )
+}
+
 export function proxy(request: NextRequest) {
   const blocked = protectStateChangingApiRequest(request)
   if (blocked) return blocked
 
   const response = NextResponse.next()
   const pathname = request.nextUrl.pathname
+
+  refreshAuthenticationCookies(request, response)
 
   const match = pathname.match(
     /^\/loja\/([^/]+)(?:\/|$)/,
@@ -108,5 +215,17 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/loja/:path*", "/api/:path*"],
+  matcher: [
+    "/",
+    "/loja/:path*",
+    "/api/:path*",
+    "/admin/:path*",
+    "/superadmin/:path*",
+    "/gerente/:path*",
+    "/pdv/:path*",
+    "/cozinha/:path*",
+    "/entregador/:path*",
+    "/onboarding/:path*",
+    "/minha-loja/:path*",
+  ],
 }

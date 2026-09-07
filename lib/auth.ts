@@ -9,6 +9,9 @@ export const SUPERADMIN_SESSION_COOKIE = "saborflow_superadmin_session"
 // Mantido apenas para que logout/login removam cookies antigos do navegador.
 export const LEGACY_ADMIN_SESSION_COOKIE = "cris_admin_session"
 
+export const ADMIN_SESSION_IDLE_SECONDS = 60 * 60 * 24 * 10
+const ADMIN_SESSION_IDLE_MS = ADMIN_SESSION_IDLE_SECONDS * 1000
+
 /** @deprecated Mantido apenas para compatibilidade de componentes antigos. */
 export const getAdminEmail = () => ""
 
@@ -70,13 +73,40 @@ function signaturesMatch(actual: string, expected: string) {
   return timingSafeEqual(actualBuffer, expectedBuffer)
 }
 
+function tenantTokenFromSession(
+  session: Pick<
+    Extract<AdminSession, { mode: "tenant" }>,
+    | "userId"
+    | "email"
+    | "organizationId"
+    | "organizationName"
+    | "organizationSlug"
+    | "role"
+    | "sessionVersion"
+  >,
+) {
+  const payload = {
+    v: 3,
+    userId: session.userId,
+    email: session.email,
+    organizationId: session.organizationId,
+    organizationName: session.organizationName,
+    organizationSlug: session.organizationSlug,
+    role: session.role,
+    sessionVersion: session.sessionVersion,
+    expiresAt: Date.now() + ADMIN_SESSION_IDLE_MS,
+  }
+
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  return `v3.${encoded}.${sign(encoded)}`
+}
+
 export function createSessionToken(context: AdminTenantContext) {
   if (!context) {
     throw new Error("Sessão administrativa exige contexto tenant PostgreSQL.")
   }
 
-  const payload = {
-    v: 3,
+  return tenantTokenFromSession({
     userId: context.userId,
     email: context.email,
     organizationId: context.organizationId,
@@ -84,11 +114,7 @@ export function createSessionToken(context: AdminTenantContext) {
     organizationSlug: context.organizationSlug,
     role: context.role,
     sessionVersion: context.sessionVersion,
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
-  }
-
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return `v3.${encoded}.${sign(encoded)}`
+  })
 }
 
 export function createSuperadminSessionToken(userId: string) {
@@ -101,7 +127,7 @@ export function createSuperadminSessionToken(userId: string) {
     v: 1,
     purpose: "superadmin-cpf",
     userId: normalizedUserId,
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    expiresAt: Date.now() + ADMIN_SESSION_IDLE_MS,
   }
 
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
@@ -204,6 +230,28 @@ function parseSuperadminSessionToken(
   } catch {
     return null
   }
+}
+
+export function refreshAdminSessionToken(token?: string | null) {
+  const session = parseTenantSessionToken(token)
+  if (!session || session.mode !== "tenant") return null
+
+  return tenantTokenFromSession({
+    userId: session.userId,
+    email: session.email,
+    organizationId: session.organizationId,
+    organizationName: session.organizationName,
+    organizationSlug: session.organizationSlug,
+    role: session.role,
+    sessionVersion: session.sessionVersion,
+  })
+}
+
+export function refreshSuperadminSessionToken(token?: string | null) {
+  const session = parseSuperadminSessionToken(token)
+  if (!session) return null
+
+  return createSuperadminSessionToken(session.userId)
 }
 
 export function sessionTokenIsValid(token?: string | null) {

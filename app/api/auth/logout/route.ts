@@ -4,6 +4,9 @@ import {
   LEGACY_ADMIN_SESSION_COOKIE,
   SUPERADMIN_SESSION_COOKIE,
 } from "@/lib/auth"
+import {
+  TWO_FACTOR_CHALLENGE_COOKIE,
+} from "@/lib/security/two-factor-challenge"
 
 export async function POST() {
   const response =
@@ -15,6 +18,7 @@ export async function POST() {
     ADMIN_SESSION_COOKIE,
     SUPERADMIN_SESSION_COOKIE,
     LEGACY_ADMIN_SESSION_COOKIE,
+    TWO_FACTOR_CHALLENGE_COOKIE,
   ]) {
     response.cookies.set(
       cookieName,
