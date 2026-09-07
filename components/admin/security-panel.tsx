@@ -78,6 +78,19 @@ type PasskeySummary = {
   lastUsedAt: string | null
 }
 
+type AdminSessionSummary = {
+  id: string
+  organizationId: string
+  organizationName: string
+  authSource: "cpf" | "email" | "google" | "commercial" | "demo"
+  superadminAuthorized: boolean
+  deviceLabel: string
+  createdAt: string
+  lastSeenAt: string
+  expiresAt: string
+  current: boolean
+}
+
 type SecurityData = {
   organization: {
     id: string
@@ -309,6 +322,18 @@ export function SecurityPanel({
     setPasskeyVerifier,
   ] = useState("")
 
+  const [
+    adminSessions,
+    setAdminSessions,
+  ] = useState<AdminSessionSummary[]>([])
+  const [
+    sessionsMessage,
+    setSessionsMessage,
+  ] = useState("")
+  const [
+    sessionsBusy,
+    setSessionsBusy,
+  ] = useState(false)
 
   const [
     timeZone,
@@ -432,6 +457,32 @@ export function SecurityPanel({
     }
   }
 
+  async function reloadSessions() {
+    const response =
+      await fetch(
+        "/api/admin/sessions",
+        {
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    if (
+      response?.ok &&
+      Array.isArray(
+        result?.sessions,
+      )
+    ) {
+      setAdminSessions(
+        result.sessions,
+      )
+    }
+  }
+
   async function reloadStorage() {
     const response = await fetch("/api/admin/storage", { cache: "no-store" }).catch(() => null)
     if (!response?.ok) return
@@ -485,6 +536,7 @@ export function SecurityPanel({
     void reloadStorage()
     void reloadTwoFactor()
     void reloadPasskeys()
+    void reloadSessions()
 
     setPasskeySupported(
       browserSupportsWebAuthn(),
@@ -967,6 +1019,131 @@ export function SecurityPanel({
     }
   }
 
+  async function revokeSession(
+    sessionId: string,
+    current: boolean,
+  ) {
+    setSessionsMessage("")
+
+    if (
+      !window.confirm(
+        current
+          ? "Encerrar esta sessão agora? Você precisará entrar novamente."
+          : "Encerrar esta sessão em outro dispositivo?",
+      )
+    ) {
+      return
+    }
+
+    setSessionsBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/sessions",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            sessionId,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setSessionsBusy(false)
+
+    if (!response?.ok) {
+      setSessionsMessage(
+        result?.error ||
+          "Não foi possível encerrar a sessão.",
+      )
+      return
+    }
+
+    if (
+      result?.currentRevoked
+    ) {
+      window.location.href =
+        "/login"
+      return
+    }
+
+    setSessionsMessage(
+      "Sessão encerrada com sucesso.",
+    )
+    await reloadSessions()
+  }
+
+  async function revokeOtherSessions() {
+    setSessionsMessage("")
+
+    const others =
+      adminSessions.filter(
+        (session) =>
+          !session.current,
+      )
+
+    if (!others.length) {
+      setSessionsMessage(
+        "Não existem outras sessões ativas.",
+      )
+      return
+    }
+
+    if (
+      !window.confirm(
+        `Encerrar ${others.length} outra(s) sessão(ões) ativa(s)?`,
+      )
+    ) {
+      return
+    }
+
+    setSessionsBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/sessions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            action:
+              "revoke_others",
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setSessionsBusy(false)
+
+    if (!response?.ok) {
+      setSessionsMessage(
+        result?.error ||
+          "Não foi possível encerrar as outras sessões.",
+      )
+      return
+    }
+
+    setSessionsMessage(
+      `${result?.revoked || 0} outra(s) sessão(ões) encerrada(s).`,
+    )
+    await reloadSessions()
+  }
+
   async function changePassword(
     event: FormEvent,
   ) {
@@ -1349,6 +1526,108 @@ export function SecurityPanel({
         {passwordMessage && (
           <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
             {passwordMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">
+              Sessões e dispositivos
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">
+              Cada login administrativo possui uma sessão revogável. As sessões expiram automaticamente após 10 dias sem atividade.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            disabled={sessionsBusy}
+            onClick={revokeOtherSessions}
+            className="h-10 rounded-xl border border-red-200 px-3 text-xs font-black text-red-700 hover:bg-red-50 disabled:opacity-60"
+          >
+            Encerrar outras sessões
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          {adminSessions.length ? (
+            adminSessions.map(
+              (session) => (
+                <div
+                  key={session.id}
+                  className="rounded-2xl border border-gray-200 p-4"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-black text-gray-950">
+                          {session.deviceLabel}
+                        </p>
+                        {session.current && (
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">
+                            Sessão atual
+                          </span>
+                        )}
+                        {session.superadminAuthorized && (
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-800">
+                            Superadmin por CPF
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        {session.organizationName} · entrada por{" "}
+                        {session.authSource === "cpf"
+                          ? "CPF"
+                          : session.authSource === "google"
+                            ? "Google"
+                            : session.authSource === "commercial"
+                              ? "contratação"
+                              : session.authSource === "demo"
+                                ? "demonstração"
+                                : "e-mail"}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        Última atividade:{" "}
+                        {new Date(
+                          session.lastSeenAt,
+                        ).toLocaleString(
+                          "pt-BR",
+                        )}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={sessionsBusy}
+                      onClick={() =>
+                        revokeSession(
+                          session.id,
+                          session.current,
+                        )
+                      }
+                      className="h-10 shrink-0 rounded-xl border border-gray-200 px-3 text-xs font-black text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      {session.current
+                        ? "Sair deste dispositivo"
+                        : "Encerrar sessão"}
+                    </button>
+                  </div>
+                </div>
+              ),
+            )
+          ) : (
+            <p className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-500">
+              Nenhuma sessão ativa encontrada.
+            </p>
+          )}
+        </div>
+
+        {sessionsMessage && (
+          <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {sessionsMessage}
           </p>
         )}
       </section>

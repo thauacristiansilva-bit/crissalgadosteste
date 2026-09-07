@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_IDLE_SECONDS,
   createSessionToken,
 } from "@/lib/auth"
 import {
@@ -9,6 +10,9 @@ import {
 import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
+import {
+  moveAdminSessionToOrganization,
+} from "@/lib/security/admin-sessions"
 
 export async function POST(
   request: Request,
@@ -60,6 +64,28 @@ export async function POST(
     )
   }
 
+  const moved =
+    await moveAdminSessionToOrganization({
+      sessionId:
+        session.sessionId,
+      userId:
+        session.userId,
+      organizationId:
+        context.organizationId,
+      sessionVersion:
+        context.sessionVersion,
+    })
+
+  if (!moved) {
+    return NextResponse.json(
+      {
+        error:
+          "Sua sessão expirou. Entre novamente.",
+      },
+      { status: 401 },
+    )
+  }
+
   const response =
     NextResponse.json({
       ok: true,
@@ -75,7 +101,10 @@ export async function POST(
 
   response.cookies.set(
     ADMIN_SESSION_COOKIE,
-    createSessionToken(context),
+    createSessionToken(
+      context,
+      session.sessionId,
+    ),
     {
       httpOnly: true,
       sameSite: "lax",
@@ -84,7 +113,8 @@ export async function POST(
         "production",
       path: "/",
       maxAge:
-        60 * 60 * 24 * 7,
+        ADMIN_SESSION_IDLE_SECONDS,
+      priority: "high",
     },
   )
 

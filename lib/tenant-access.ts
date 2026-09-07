@@ -13,6 +13,7 @@ import {
   type OrganizationRole,
 } from "@/lib/tenant-context"
 import { enterTenantRlsContext } from "@/lib/rls-context"
+import { validateAndTouchAdminSession } from "@/lib/security/admin-sessions"
 
 export type TenantAdminSession = Extract<
   AdminSession,
@@ -53,6 +54,22 @@ export async function getVerifiedTenantSession():
     return null
   }
 
+  const persistentSessionValid =
+    await validateAndTouchAdminSession({
+      sessionId:
+        session.sessionId,
+      userId:
+        session.userId,
+      organizationId:
+        session.organizationId,
+      sessionVersion:
+        session.sessionVersion,
+    })
+
+  if (!persistentSessionValid) {
+    return null
+  }
+
   await touchDemoEnvironment(session.organizationId)
 
   // Reafirma o tenant após verificações que usam AsyncLocalStorage.run().
@@ -79,6 +96,10 @@ export async function getVerifiedTenantSession():
   return {
     mode: "tenant",
     ...current,
+    sessionId:
+      session.sessionId,
+    issuedAt:
+      session.issuedAt,
     expiresAt: session.expiresAt,
     operationalPermissions: access.permissions,
     operationalPermissionMode: access.mode,

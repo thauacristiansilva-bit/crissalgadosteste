@@ -8,6 +8,9 @@ import { getCommercialBillingSession } from "@/lib/billing-commercial-session"
 import { createDemoEnvironment } from "@/lib/demo-db"
 import { PUBLIC_TENANT_COOKIE } from "@/lib/public-tenant"
 import { requestIsSameOrigin } from "@/lib/demo-request"
+import {
+  createAdminSessionRecord,
+} from "@/lib/security/admin-sessions"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -31,6 +34,17 @@ export async function POST(request: Request) {
       requestedByUserId: commercialSession.userId,
     })
     const remainingSeconds = Math.max(60, Math.floor((new Date(demo.expiresAt).getTime() - Date.now()) / 1000))
+
+    const persistentSession = await createAdminSessionRecord({
+      userId: demo.tenantContext.userId,
+      organizationId: demo.tenantContext.organizationId,
+      sessionVersion: demo.tenantContext.sessionVersion,
+      authSource: "demo",
+      superadminAuthorized: false,
+      request,
+      maxAgeSeconds: remainingSeconds,
+    })
+
     const response = NextResponse.json({
       ok: true,
       kind: demo.kind,
@@ -40,13 +54,18 @@ export async function POST(request: Request) {
       storeUrl: `/loja/${encodeURIComponent(demo.organization.slug)}`,
     })
 
-    response.cookies.set(ADMIN_SESSION_COOKIE, createSessionToken(demo.tenantContext), {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: remainingSeconds,
-    })
+    response.cookies.set(
+      ADMIN_SESSION_COOKIE,
+      createSessionToken(demo.tenantContext, persistentSession.id),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: remainingSeconds,
+        priority: "high",
+      },
+    )
     response.cookies.set(LEGACY_ADMIN_SESSION_COOKIE, "", {
       httpOnly: true,
       sameSite: "lax",

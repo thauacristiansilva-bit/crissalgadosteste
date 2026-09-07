@@ -29,6 +29,9 @@ import {
   requestIsSameOrigin,
 } from "@/lib/security/request-security"
 import {
+  createAdminSessionRecord,
+} from "@/lib/security/admin-sessions"
+import {
   getWebAuthnRequestConfig,
   verifyPasskeyAuthentication,
 } from "@/lib/security/passkeys"
@@ -313,6 +316,21 @@ export async function POST(
       twoFactorChallenge.userId,
     )
 
+    const persistentSession =
+      await createAdminSessionRecord({
+        userId:
+          twoFactorChallenge.userId,
+        organizationId:
+          tenantContext.organizationId,
+        sessionVersion:
+          tenantContext.sessionVersion,
+        authSource:
+          twoFactorChallenge.authSource,
+        superadminAuthorized:
+          allowSuperadmin,
+        request,
+      })
+
     clearAuthFailures(
       accountKey,
     )
@@ -335,6 +353,7 @@ export async function POST(
       ADMIN_SESSION_COOKIE,
       createSessionToken(
         tenantContext,
+        persistentSession.id,
       ),
       sessionCookieOptions(),
     )
@@ -350,6 +369,7 @@ export async function POST(
         SUPERADMIN_SESSION_COOKIE,
         createSuperadminSessionToken(
           twoFactorChallenge.userId,
+          persistentSession.id,
         ),
         sessionCookieOptions(),
       )

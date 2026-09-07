@@ -32,6 +32,7 @@ const getSessionSecret = () => {
 export type AdminSession =
   | {
       mode: "tenant"
+      sessionId: string
       userId: string
       email: string
       organizationId: string
@@ -39,6 +40,7 @@ export type AdminSession =
       organizationSlug: string
       role: OrganizationRole
       sessionVersion: number
+      issuedAt: number
       expiresAt: number
     }
   | {
@@ -49,9 +51,11 @@ export type AdminSession =
     }
 
 type SuperadminSessionPayload = {
-  v: 1
+  v: 2
   purpose: "superadmin-cpf"
+  sessionId: string
   userId: string
+  issuedAt: number
   expiresAt: number
 }
 
@@ -76,6 +80,7 @@ function signaturesMatch(actual: string, expected: string) {
 function tenantTokenFromSession(
   session: Pick<
     Extract<AdminSession, { mode: "tenant" }>,
+    | "sessionId"
     | "userId"
     | "email"
     | "organizationId"
@@ -85,8 +90,10 @@ function tenantTokenFromSession(
     | "sessionVersion"
   >,
 ) {
+  const now = Date.now()
   const payload = {
-    v: 3,
+    v: 4,
+    sessionId: session.sessionId,
     userId: session.userId,
     email: session.email,
     organizationId: session.organizationId,
@@ -94,19 +101,29 @@ function tenantTokenFromSession(
     organizationSlug: session.organizationSlug,
     role: session.role,
     sessionVersion: session.sessionVersion,
-    expiresAt: Date.now() + ADMIN_SESSION_IDLE_MS,
+    issuedAt: now,
+    expiresAt: now + ADMIN_SESSION_IDLE_MS,
   }
 
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return `v3.${encoded}.${sign(encoded)}`
+  return `v4.${encoded}.${sign(encoded)}`
 }
 
-export function createSessionToken(context: AdminTenantContext) {
+export function createSessionToken(
+  context: AdminTenantContext,
+  sessionId: string,
+) {
   if (!context) {
     throw new Error("Sessão administrativa exige contexto tenant PostgreSQL.")
   }
 
+  const normalizedSessionId = sessionId.trim()
+  if (!normalizedSessionId) {
+    throw new Error("Sessão administrativa exige identificador persistente.")
+  }
+
   return tenantTokenFromSession({
+    sessionId: normalizedSessionId,
     userId: context.userId,
     email: context.email,
     organizationId: context.organizationId,
@@ -117,26 +134,40 @@ export function createSessionToken(context: AdminTenantContext) {
   })
 }
 
-export function createSuperadminSessionToken(userId: string) {
+export function createSuperadminSessionToken(
+  userId: string,
+  sessionId: string,
+) {
   const normalizedUserId = userId.trim()
-  if (!normalizedUserId) {
-    throw new Error("Sessão Superadmin exige usuário válido.")
+  const normalizedSessionId = sessionId.trim()
+
+  if (!normalizedUserId || !normalizedSessionId) {
+    throw new Error(
+      "Sessão Superadmin exige usuário e sessão persistente válidos.",
+    )
   }
 
+  const now = Date.now()
   const payload: SuperadminSessionPayload = {
-    v: 1,
+    v: 2,
     purpose: "superadmin-cpf",
+    sessionId: normalizedSessionId,
     userId: normalizedUserId,
-    expiresAt: Date.now() + ADMIN_SESSION_IDLE_MS,
+    issuedAt: now,
+    expiresAt: now + ADMIN_SESSION_IDLE_MS,
   }
 
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
   const signature = sign(`superadmin:${encoded}`)
-  return `sa1.${encoded}.${signature}`
+  return `sa2.${encoded}.${signature}`
 }
 
-function parseTenantSessionToken(token?: string | null): AdminSession | null {
-  if (!token || (!token.startsWith("v2.") && !token.startsWith("v3."))) {
+export function parseAdminSessionToken(
+  token?: string | null,
+): AdminSession | null {
+  // A Etapa 13.6 invalida os antigos v2/v3 porque eles não possuem sessionId
+  // persistente e, portanto, não podem ser revogados por dispositivo.
+  if (!token || !token.startsWith("v4.")) {
     return null
   }
 
@@ -152,6 +183,7 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
       Buffer.from(encoded, "base64url").toString("utf8"),
     ) as {
       v?: number
+      sessionId?: string
       userId?: string
       email?: string
       organizationId?: string
@@ -159,17 +191,21 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
       organizationSlug?: string
       role?: OrganizationRole
       sessionVersion?: number
+      issuedAt?: number
       expiresAt?: number
     }
 
     if (
-      ![2, 3].includes(Number(payload.v)) ||
+      payload.v !== 4 ||
+      !payload.sessionId ||
       !payload.userId ||
       !payload.email ||
       !payload.organizationId ||
       !payload.organizationName ||
       !payload.organizationSlug ||
       !payload.role ||
+      !payload.sessionVersion ||
+      !payload.issuedAt ||
       !payload.expiresAt ||
       payload.expiresAt <= Date.now()
     ) {
@@ -178,13 +214,15 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
 
     return {
       mode: "tenant",
+      sessionId: payload.sessionId,
       userId: payload.userId,
       email: payload.email,
       organizationId: payload.organizationId,
       organizationName: payload.organizationName,
       organizationSlug: payload.organizationSlug,
       role: payload.role,
-      sessionVersion: Number(payload.sessionVersion || 1),
+      sessionVersion: Number(payload.sessionVersion),
+      issuedAt: payload.issuedAt,
       expiresAt: payload.expiresAt,
     }
   } catch {
@@ -195,7 +233,7 @@ function parseTenantSessionToken(token?: string | null): AdminSession | null {
 function parseSuperadminSessionToken(
   token?: string | null,
 ): SuperadminSessionPayload | null {
-  if (!token || !token.startsWith("sa1.")) return null
+  if (!token || !token.startsWith("sa2.")) return null
 
   const parts = token.split(".")
   if (parts.length !== 3) return null
@@ -212,9 +250,11 @@ function parseSuperadminSessionToken(
     ) as Partial<SuperadminSessionPayload>
 
     if (
-      payload.v !== 1 ||
+      payload.v !== 2 ||
       payload.purpose !== "superadmin-cpf" ||
+      !payload.sessionId ||
       !payload.userId ||
+      !payload.issuedAt ||
       !payload.expiresAt ||
       payload.expiresAt <= Date.now()
     ) {
@@ -222,9 +262,11 @@ function parseSuperadminSessionToken(
     }
 
     return {
-      v: 1,
+      v: 2,
       purpose: "superadmin-cpf",
+      sessionId: payload.sessionId,
       userId: payload.userId,
+      issuedAt: payload.issuedAt,
       expiresAt: payload.expiresAt,
     }
   } catch {
@@ -233,10 +275,11 @@ function parseSuperadminSessionToken(
 }
 
 export function refreshAdminSessionToken(token?: string | null) {
-  const session = parseTenantSessionToken(token)
+  const session = parseAdminSessionToken(token)
   if (!session || session.mode !== "tenant") return null
 
   return tenantTokenFromSession({
+    sessionId: session.sessionId,
     userId: session.userId,
     email: session.email,
     organizationId: session.organizationId,
@@ -251,28 +294,35 @@ export function refreshSuperadminSessionToken(token?: string | null) {
   const session = parseSuperadminSessionToken(token)
   if (!session) return null
 
-  return createSuperadminSessionToken(session.userId)
+  return createSuperadminSessionToken(
+    session.userId,
+    session.sessionId,
+  )
 }
 
 export function sessionTokenIsValid(token?: string | null) {
-  return Boolean(parseTenantSessionToken(token))
+  return Boolean(parseAdminSessionToken(token))
 }
 
-export async function hasSuperadminCpfSession(userId: string) {
+export async function hasSuperadminCpfSession(
+  userId: string,
+  sessionId: string,
+) {
   const cookieStore = await cookies()
   const token = cookieStore.get(SUPERADMIN_SESSION_COOKIE)?.value
   const session = parseSuperadminSessionToken(token)
 
   return Boolean(
     session &&
-      session.userId === userId.trim(),
+      session.userId === userId.trim() &&
+      session.sessionId === sessionId.trim(),
   )
 }
 
 export async function getAdminSession(): Promise<AdminSession | null> {
   const cookieStore = await cookies()
   const tenantToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value
-  const tenantSession = parseTenantSessionToken(tenantToken)
+  const tenantSession = parseAdminSessionToken(tenantToken)
 
   if (tenantSession?.mode !== "tenant") return null
 

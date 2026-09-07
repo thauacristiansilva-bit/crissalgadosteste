@@ -28,6 +28,7 @@ const AUTH_PATHS_WITHOUT_REFRESH = [
   "/api/auth/google",
   "/api/auth/logout",
   "/api/auth/2fa/",
+  "/api/auth/passkey/",
 ]
 
 function normalizeHost(value: string) {

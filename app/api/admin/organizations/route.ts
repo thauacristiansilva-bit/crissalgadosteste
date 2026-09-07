@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_IDLE_SECONDS,
   createSessionToken,
 } from "@/lib/auth"
 import {
@@ -8,11 +9,17 @@ import {
   clearCommercialBillingCookieOptions,
   getCommercialBillingSession,
 } from "@/lib/billing-commercial-session"
-import { getBillingSnapshotForUser } from "@/lib/billing-db"
+import {
+  billingErrorStatus,
+  getBillingSnapshotForUser,
+} from "@/lib/billing-db"
 import { createOrganizationForUser } from "@/lib/organization-onboarding"
 import { listOrganizationMembershipsForUserId } from "@/lib/tenant-context"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
-import { billingErrorStatus } from "@/lib/billing-db"
+import {
+  createAdminSessionRecord,
+  moveAdminSessionToOrganization,
+} from "@/lib/security/admin-sessions"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -95,6 +102,35 @@ export async function POST(request: Request) {
       state: body.state,
     })
 
+    let sessionId = ""
+
+    if (tenantSession) {
+      const moved = await moveAdminSessionToOrganization({
+        sessionId: tenantSession.sessionId,
+        userId: tenantSession.userId,
+        organizationId: context.organizationId,
+        sessionVersion: context.sessionVersion,
+      })
+
+      if (!moved) {
+        return NextResponse.json({
+          error: "Sua sessão expirou. Entre novamente.",
+        }, { status: 401 })
+      }
+
+      sessionId = tenantSession.sessionId
+    } else {
+      const createdSession = await createAdminSessionRecord({
+        userId,
+        organizationId: context.organizationId,
+        sessionVersion: context.sessionVersion,
+        authSource: "commercial",
+        superadminAuthorized: false,
+        request,
+      })
+      sessionId = createdSession.id
+    }
+
     const response = NextResponse.json({
       ok: true,
       organization: {
@@ -111,13 +147,14 @@ export async function POST(request: Request) {
 
     response.cookies.set(
       ADMIN_SESSION_COOKIE,
-      createSessionToken(context),
+      createSessionToken(context, sessionId),
       {
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
         path: "/",
-        maxAge: 60 * 60 * 24 * 7,
+        maxAge: ADMIN_SESSION_IDLE_SECONDS,
+        priority: "high",
       },
     )
 

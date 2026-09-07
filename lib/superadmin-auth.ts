@@ -3,6 +3,7 @@ import {
   hasSuperadminCpfSession,
 } from "@/lib/auth"
 import { getPostgresPool } from "@/lib/postgres"
+import { validateAndTouchAdminSession } from "@/lib/security/admin-sessions"
 
 export type PlatformAdminRole =
   | "owner"
@@ -80,6 +81,22 @@ export async function getSuperadminAccess():
     return null
   }
 
+  const persistentSessionValid =
+    await validateAndTouchAdminSession({
+      sessionId:
+        session.sessionId,
+      userId:
+        session.userId,
+      organizationId:
+        session.organizationId,
+      sessionVersion:
+        session.sessionVersion,
+    })
+
+  if (!persistentSessionValid) {
+    return null
+  }
+
   const primaryUserId =
     primarySuperadminUserId()
 
@@ -93,6 +110,7 @@ export async function getSuperadminAccess():
   if (
     !(await hasSuperadminCpfSession(
       session.userId,
+      session.sessionId,
     ))
   ) {
     return null
