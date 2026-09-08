@@ -48,7 +48,7 @@ function apiKey() {
 export function configuredGeminiModel() {
   return (
     process.env.GEMINI_MODEL?.trim() ||
-    "gemini-2.5-flash-lite"
+    "gemini-3.5-flash-lite"
   )
 }
 
