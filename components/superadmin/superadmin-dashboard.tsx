@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import type { SuperadminSnapshot } from "@/lib/superadmin-db"
 import type { PlatformFinanceSnapshot } from "@/lib/platform-finance"
+import { HelpCenterAdminPanel } from "@/components/superadmin/help-center-admin-panel"
 
 function money(cents: number | null, currency = "BRL") {
   if (cents === null) return "—"
@@ -47,6 +48,7 @@ const tabs = [
   "Demos/Trials",
   "DRE SaborFlow",
   "Domínios",
+  "Tutoriais",
   "Suporte",
   "Logs",
 ] as const
@@ -59,7 +61,7 @@ const navigationGroups: Array<{ label: string; items: Tab[] }> = [
   { label: "Clientes", items: ["Cadastros", "Empresas", "Contas"] },
   { label: "Comercial", items: ["Planos", "Pagamentos", "Cupons", "Demos/Trials"] },
   { label: "Financeiro", items: ["DRE SaborFlow"] },
-  { label: "Operação", items: ["Domínios", "Suporte"] },
+  { label: "Operação", items: ["Domínios", "Tutoriais", "Suporte"] },
   { label: "Segurança", items: ["Logs"] },
 ]
 
@@ -74,6 +76,7 @@ const tabDescriptions: Record<Tab, string> = {
   "Demos/Trials": "Ambientes de demonstração e períodos de avaliação.",
   "DRE SaborFlow": "Receitas, despesas e resultado gerencial da plataforma.",
   "Domínios": "Domínios das empresas e situação de verificação.",
+  "Tutoriais": "Central de Ajuda, documentação e vídeos de treinamento do SaborFlow.",
   "Suporte": "Chamados das empresas e acompanhamento de atendimento.",
   "Logs": "Auditoria das ações administrativas da plataforma.",
 }
@@ -478,6 +481,8 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
         {tab === "Domínios" && <div className="space-y-2">{data.domains.map((domain) => <article key={domain.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-4"><div><p className="font-black">{domain.domain}</p><p className="text-xs text-stone-500">{domain.organizationName}</p></div><Globe2 className={`h-5 w-5 ${domain.verified ? "text-emerald-400" : "text-stone-600"}`} /></article>)}</div>}
 
         {tab === "Cupons" && <div className="space-y-4"><form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void action({ action: "create-coupon", code: form.get("code"), description: form.get("description"), discountType: form.get("discountType"), discountValue: Number(form.get("discountValue")) }); event.currentTarget.reset() }} className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-5 md:grid-cols-4"><input name="code" required placeholder="Código" className="rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm" /><input name="description" placeholder="Descrição" className="rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm" /><select name="discountType" className="rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm"><option value="percent">Percentual (%)</option><option value="fixed">Valor fixo em centavos</option></select><div className="flex gap-2"><input name="discountValue" type="number" min="1" required placeholder="Valor" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm" /><button disabled={busy} className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-black text-stone-950"><TicketPercent className="h-4 w-4" /></button></div></form>{data.coupons.map((coupon) => <article key={coupon.id} className="rounded-xl border border-white/10 bg-white/[0.04] p-4"><p className="font-black">{coupon.code}</p><p className="text-xs text-stone-400">{coupon.description || "Sem descrição"} · {coupon.discountType === "percent" ? `${coupon.discountValue}%` : money(coupon.discountValue)} · {coupon.active ? "ativo" : "inativo"}</p></article>)}</div>}
+
+        {tab === "Tutoriais" && <HelpCenterAdminPanel />}
 
         {tab === "Suporte" && <div className="space-y-2">{data.support.length === 0 && <p className="rounded-xl border border-white/10 bg-white/[0.04] p-5 text-sm text-stone-400">Nenhum chamado cadastrado.</p>}{data.support.map((support) => <article key={support.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-4"><div><p className="font-black">{support.subject}</p><p className="text-xs text-stone-500">{support.organizationName || support.billingEmail || "Sem vínculo"} · {support.priority} · {date(support.updatedAt)}</p></div><select disabled={busy} value={support.status} onChange={(event) => action({ action: "support-status", caseId: support.id, status: event.target.value })} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold"><option value="open">Aberto</option><option value="pending">Pendente</option><option value="resolved">Resolvido</option><option value="closed">Fechado</option></select></article>)}</div>}
 
