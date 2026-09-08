@@ -18,9 +18,9 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 const MAX_BODY_BYTES = 32 * 1024
-const MAX_MESSAGES = 12
+const MAX_MESSAGES = 6
 const MAX_MESSAGE_CHARS = 4_000
-const MAX_TOTAL_CHARS = 18_000
+const MAX_TOTAL_CHARS = 8_000
 
 function headers() {
   return {
