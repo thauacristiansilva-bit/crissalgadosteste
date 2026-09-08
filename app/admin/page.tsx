@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation"
 import { hasCurrentLegalAcceptance } from "@/lib/legal-db"
 import { AdminDashboard } from "@/components/admin/admin-dashboard"
-import { getAdminEmail, getAdminSession } from "@/lib/auth"
+import { getAdminEmail } from "@/lib/auth"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
 import { getOperationalAccessForSession } from "@/lib/operational-rbac"
 import { getDefaultOperationalPath } from "@/lib/operational-home"
@@ -11,7 +12,7 @@ import { demoOrganizationIsUsable, getDemoEnvironmentForOrganization } from "@/l
 export const dynamic = "force-dynamic"
 
 export default async function AdminPage() {
-  const session = await getAdminSession()
+  const session = await getVerifiedTenantSession()
   if (!session) redirect("/login")
 
   let demoEnvironment = null

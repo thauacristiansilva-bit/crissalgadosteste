@@ -1,3 +1,4 @@
+import { canManageSecurity } from "@/lib/admin-access"
 import { NextResponse } from "next/server"
 import {
   getCustomerAccounts,
@@ -26,6 +27,12 @@ export async function GET() {
     )
   }
 
+  if (!canManageSecurity(session.role, session.operationalPermissions)) {
+    return NextResponse.json(
+      { error: "Seu perfil nao pode acessar este diagnostico." },
+      { status: 403 },
+    )
+  }
   try {
     const stats = await getTenantCustomersStats(
       session.organizationId,

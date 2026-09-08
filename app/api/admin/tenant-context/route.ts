@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server"
 import {
-  getAdminSession,
-} from "@/lib/auth"
-import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import {
@@ -13,34 +10,6 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-  const rawSession =
-    await getAdminSession()
-
-  if (!rawSession) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Não autorizado.",
-      },
-      { status: 401 },
-    )
-  }
-
-  if (
-    rawSession.mode === "legacy"
-  ) {
-    return NextResponse.json({
-      ok: true,
-      sessionMode: "legacy",
-      email: rawSession.email,
-      organization: null,
-      organizations: [],
-      message:
-        "Login ainda está em modo legado.",
-    })
-  }
-
   const session =
     await getVerifiedTenantSession()
 
@@ -49,9 +18,9 @@ export async function GET() {
       {
         ok: false,
         error:
-          "A membership ativa não existe mais.",
+          "SessÃ£o administrativa invÃ¡lida ou expirada.",
       },
-      { status: 403 },
+      { status: 401 },
     )
   }
 

@@ -1,3 +1,4 @@
+import { canManageSecurity } from "@/lib/admin-access"
 import { NextResponse } from "next/server"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getPostgresPool, getRlsRuntimeBridgeStatus } from "@/lib/postgres"
@@ -19,6 +20,12 @@ export async function GET() {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
   }
 
+  if (!canManageSecurity(session.role, session.operationalPermissions)) {
+    return NextResponse.json(
+      { error: "Seu perfil nao pode acessar este diagnostico." },
+      { status: 403 },
+    )
+  }
   try {
     const pool = getPostgresPool()
 

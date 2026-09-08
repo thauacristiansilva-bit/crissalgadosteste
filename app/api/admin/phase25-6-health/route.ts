@@ -1,3 +1,4 @@
+import { canManageSecurity } from "@/lib/admin-access"
 import { NextResponse } from "next/server"
 import { legacyStoreRuntimeEnabled } from "@/lib/db"
 import { isTenantOperationsReady } from "@/lib/operations-db"
@@ -18,6 +19,12 @@ export async function GET() {
     )
   }
 
+  if (!canManageSecurity(session.role, session.operationalPermissions)) {
+    return NextResponse.json(
+      { error: "Seu perfil nao pode acessar este diagnostico." },
+      { status: 403 },
+    )
+  }
   try {
     return await runWithTenantRlsScope(
       [session.organizationId],

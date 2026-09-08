@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation"
 import { LoginForm } from "@/components/admin/login-form"
-import { isAdminAuthenticated } from "@/lib/auth"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
 
 export const dynamic = "force-dynamic"
 
 export default async function LoginPage() {
-  if (await isAdminAuthenticated()) redirect("/admin")
+  if (await getVerifiedTenantSession()) redirect("/admin")
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden p-5" style={{ background: "linear-gradient(145deg, #fff9f1 0%, #fff1dc 52%, #f7e3cc 100%)" }}>

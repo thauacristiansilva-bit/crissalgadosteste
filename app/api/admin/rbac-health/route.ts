@@ -1,3 +1,4 @@
+import { canManageAccess } from "@/lib/tenant-permissions"
 import { NextResponse } from "next/server"
 import {
   CUSTOM_PERMISSION_MARKER,
@@ -19,6 +20,12 @@ export async function GET() {
     )
   }
 
+  if (!canManageAccess(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil nao pode consultar a governanca de acessos." },
+      { status: 403 },
+    )
+  }
   const result = await getPostgresPool().query<{
     staff_members: number
     linked_logins: number

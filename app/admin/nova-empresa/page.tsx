@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation"
-import { getAdminSession } from "@/lib/auth"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getCommercialBillingSession } from "@/lib/billing-commercial-session"
 import { getBillingSnapshotForUser } from "@/lib/billing-db"
 import { OrganizationOnboardingForm } from "@/components/admin/organization-onboarding-form"
@@ -8,7 +8,7 @@ import { getCommercialRegistrationProfile } from "@/lib/commercial-registration"
 export const dynamic = "force-dynamic"
 
 export default async function NewOrganizationPage() {
-  const session = await getAdminSession()
+  const session = await getVerifiedTenantSession()
 
   if (session?.mode === "tenant") {
     if (session.role !== "owner") redirect("/admin")
