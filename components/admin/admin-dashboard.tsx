@@ -6,7 +6,6 @@ import {
   Bell,
   BookOpen,
   Building2,
-  Bot,
   ChefHat,
   ClipboardList,
   DollarSign,
@@ -60,10 +59,10 @@ import { BillingPanel } from "@/components/admin/billing-panel"
 import { MarketingPanel } from "@/components/admin/marketing-panel"
 import { ReviewsPanel } from "@/components/admin/reviews-panel"
 import { LinksPanel } from "@/components/admin/links-panel"
-import { ChatbotPanel } from "@/components/admin/chatbot-panel"
 import { TeamPanel } from "@/components/admin/team-panel"
 import { isStoreOpenNow, zonedDateString } from "@/lib/operations"
 import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
+import { AiQuickQuestion } from "@/components/admin/ai-quick-question"
 import { SecurityPanel } from "@/components/admin/security-panel"
 import { getAllowedAdminSections, type AdminSection } from "@/lib/admin-access"
 import type { OrganizationRole } from "@/lib/tenant-context"
@@ -118,7 +117,6 @@ const navItems: NavItem[] = [
   { key: "marketing", label: "Cupons e campanhas", icon: Megaphone, group: "clientes" },
   { key: "reviews", label: "Avaliações", icon: Star, group: "clientes" },
   { key: "links", label: "Links e QR Codes", icon: Link2, group: "clientes" },
-  { key: "chatbot", label: "Atendimento", icon: Bot, group: "clientes" },
   { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
   { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
   { key: "security", label: "Segurança da conta", icon: ShieldCheck, group: "gestao" },
@@ -572,6 +570,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
             </div>
           )}
           {section === "overview" && <div className="space-y-6">
+            <AiQuickQuestion settings={settings} onSettingsChanged={setSettings} />
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 { label: "Pedidos hoje", value: summary.todayOrders, icon: ReceiptText, description: `${summary.openOrders} em andamento`, cls: "text-blue-700 bg-blue-50" },
@@ -600,7 +599,6 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "marketing" && <MarketingPanel coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
           {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment)} />}
-          {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "security" && <SecurityPanel canManageSecurity={permissionListHas(operationalPermissions, "security.manage")} />}

@@ -97,7 +97,7 @@ export async function generateGeminiText(
           ),
           generationConfig: {
             temperature: 0.35,
-            maxOutputTokens: 320,
+            maxOutputTokens: 240,
           },
         }),
         cache: "no-store",
