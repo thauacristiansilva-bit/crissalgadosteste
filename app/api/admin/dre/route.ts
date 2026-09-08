@@ -4,8 +4,11 @@ import { getTenantDreReport } from "@/lib/dre-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { canViewFinance } from "@/lib/tenant-permissions"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
-
-const datePattern = /^\d{4}-\d{2}-\d{2}$/
+import {
+  InputValidationError,
+  strictDate,
+  validationErrorStatus,
+} from "@/lib/security/input-validation"
 
 function dateDiffDays(start: string, end: string) {
   const first = new Date(`${start}T12:00:00.000Z`).getTime()
@@ -51,13 +54,17 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url)
   const defaults = defaultPeriod()
-  const start = url.searchParams.get("start") || defaults.start
-  const end = url.searchParams.get("end") || defaults.end
 
-  if (!datePattern.test(start) || !datePattern.test(end)) {
+  let start: string
+  let end: string
+
+  try {
+    start = strictDate(url.searchParams.get("start") || defaults.start, "Data inicial")
+    end = strictDate(url.searchParams.get("end") || defaults.end, "Data final")
+  } catch (error) {
     return NextResponse.json(
-      { error: "Período inválido. Use datas no formato AAAA-MM-DD." },
-      { status: 400 },
+      { error: error instanceof Error ? error.message : "Período inválido." },
+      { status: error instanceof InputValidationError ? validationErrorStatus(error) : 400 },
     )
   }
 
@@ -68,6 +75,7 @@ export async function GET(request: Request) {
       { status: 400 },
     )
   }
+
   if (days > 400) {
     return NextResponse.json(
       { error: "Selecione um período de no máximo 400 dias." },

@@ -2,6 +2,10 @@ import { NextResponse } from "next/server"
 import { getVerifiedTenantSession, canManageCatalog } from "@/lib/tenant-access"
 import { detectSafeImageType } from "@/lib/security/image-validation"
 import { storeImage } from "@/lib/storage/media"
+import { requestBodyTooLarge } from "@/lib/security/input-validation"
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_REQUEST_BYTES = MAX_IMAGE_BYTES + 512 * 1024
 
 export async function POST(request: Request) {
   const session = await getVerifiedTenantSession().catch(() => null)
@@ -16,15 +20,26 @@ export async function POST(request: Request) {
     )
   }
 
-  const form = await request.formData()
+  if (requestBodyTooLarge(request, MAX_REQUEST_BYTES)) {
+    return NextResponse.json(
+      { error: "Upload muito grande." },
+      { status: 413 },
+    )
+  }
+
+  const form = await request.formData().catch(() => null)
+  if (!form) {
+    return NextResponse.json({ error: "Formulário de upload inválido." }, { status: 400 })
+  }
+
   const file = form.get("file")
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Selecione uma imagem." }, { status: 400 })
   }
 
-  if (file.size > 5 * 1024 * 1024) {
+  if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) {
     return NextResponse.json(
-      { error: "A imagem deve ter no máximo 5 MB." },
+      { error: "A imagem deve ter entre 1 byte e 5 MB." },
       { status: 400 },
     )
   }

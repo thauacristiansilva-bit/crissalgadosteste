@@ -6,6 +6,12 @@ import {
 import { getTenantSettings } from "@/lib/organization-db"
 import { authenticatePrintAgent } from "@/lib/organization-security-db"
 import { assertDemoActionAllowed } from "@/lib/demo-policy"
+import {
+  finiteNumber,
+  InputValidationError,
+  readJsonObject,
+  validationErrorStatus,
+} from "@/lib/security/input-validation"
 
 type PrintContext = {
   organizationId: string
@@ -15,11 +21,13 @@ type PrintContext = {
 }
 
 function requestToken(request: Request) {
-  return (
+  const token = (
     request.headers.get("x-print-token") ||
     new URL(request.url).searchParams.get("token") ||
     ""
-  )
+  ).trim()
+
+  return token.length <= 512 ? token : ""
 }
 
 async function resolvePrintContext(
@@ -137,15 +145,19 @@ export async function POST(request: Request) {
     )
   }
 
-  const body = (await request.json().catch(() => null)) as
-    | { orderId?: number }
-    | null
-  const id = Number(body?.orderId)
-
-  if (!Number.isInteger(id) || id <= 0) {
+  let id: number
+  try {
+    const body = await readJsonObject(request, 4 * 1024)
+    if (!body) throw new InputValidationError("Corpo da requisição obrigatório.")
+    id = finiteNumber(body.orderId, "Pedido", {
+      min: 1,
+      max: Number.MAX_SAFE_INTEGER,
+      integer: true,
+    })
+  } catch (error) {
     return NextResponse.json(
-      { error: "Pedido inválido." },
-      { status: 400 },
+      { error: error instanceof Error ? error.message : "Pedido inválido." },
+      { status: validationErrorStatus(error) },
     )
   }
 

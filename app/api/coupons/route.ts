@@ -16,16 +16,37 @@ import {
   resolvePublicOrganizationForRequest,
 } from "@/lib/public-tenant"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
+import {
+  finiteNumber,
+  InputValidationError,
+  oneOf,
+  optionalBoolean,
+  optionalIsoDateTime,
+  optionalText,
+  readJsonObject,
+  requiredText,
+  validationErrorStatus,
+} from "@/lib/security/input-validation"
+
+const COUPON_CODE_OPTIONS = {
+  maxLength: 40,
+  allowNewlines: false,
+  pattern: /^[A-Za-z0-9_-]+$/,
+} as const
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const code = url.searchParams.get("code")
-  const subtotal = Number(
-    url.searchParams.get("subtotal") || 0,
-  )
+  const rawCode = url.searchParams.get("code")
 
-  if (code) {
+  if (rawCode !== null && rawCode !== "") {
     try {
+      const code = requiredText(rawCode, "Código do cupom", COUPON_CODE_OPTIONS)
+      const subtotal = finiteNumber(
+        url.searchParams.get("subtotal") || 0,
+        "Subtotal",
+        { min: 0, max: 100_000_000 },
+      )
+
       const organization =
         await resolvePublicOrganizationForRequest(
           request,
@@ -74,7 +95,12 @@ export async function GET(request: Request) {
               ? error.message
               : "Cupom inválido.",
         },
-        { status: 400 },
+        {
+          status:
+            error instanceof InputValidationError
+              ? validationErrorStatus(error)
+              : 400,
+        },
       )
     }
   }
@@ -120,26 +146,10 @@ export async function POST(request: Request) {
     )
   }
 
-  const body = (await request.json().catch(() => null)) as
-    | Record<string, unknown>
-    | null
-
-  const input = {
-    code: String(body?.code || ""),
-    description: String(body?.description || ""),
-    type:
-      body?.type === "fixed"
-        ? ("fixed" as const)
-        : ("percent" as const),
-    value: Number(body?.value || 0),
-    minimumOrder: Number(body?.minimumOrder || 0),
-    active: body?.active !== false,
-    ...(body?.expiresAt
-      ? { expiresAt: String(body.expiresAt) }
-      : {}),
-  }
-
   try {
+    const body = await readJsonObject(request, 16 * 1024)
+    if (!body) throw new InputValidationError("Corpo da requisição obrigatório.")
+
     const session = await getVerifiedTenantSession()
     if (!session) {
       return NextResponse.json(
@@ -169,6 +179,27 @@ export async function POST(request: Request) {
       )
     }
 
+    const type = oneOf(body.type, "Tipo", ["percent", "fixed"] as const)
+    const value = finiteNumber(body.value, "Valor", {
+      min: 0.01,
+      max: type === "percent" ? 100 : 1_000_000_000,
+    })
+
+    const input = {
+      code: requiredText(body.code, "Código", COUPON_CODE_OPTIONS),
+      description: optionalText(body.description, "Descrição", { maxLength: 240 }) || "",
+      type,
+      value,
+      minimumOrder: finiteNumber(body.minimumOrder ?? 0, "Pedido mínimo", {
+        min: 0,
+        max: 100_000_000,
+      }),
+      active: optionalBoolean(body.active, "Ativo", true),
+      ...(body.expiresAt
+        ? { expiresAt: optionalIsoDateTime(body.expiresAt, "Validade") || undefined }
+        : {}),
+    }
+
     const coupon = await createTenantCoupon(
       session.organizationId,
       input,
@@ -186,7 +217,12 @@ export async function POST(request: Request) {
             ? error.message
             : "Erro ao criar cupom.",
       },
-      { status: 400 },
+      {
+        status:
+          error instanceof InputValidationError
+            ? validationErrorStatus(error)
+            : 400,
+      },
     )
   }
 }

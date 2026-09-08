@@ -18,28 +18,45 @@ import {
 } from "@/lib/delivery-pricing"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
+import {
+  finiteNumber,
+  InputValidationError,
+  latitude,
+  longitude,
+  validationErrorStatus,
+} from "@/lib/security/input-validation"
 
 export async function GET(request: NextRequest) {
-  const latitude = Number(
-    request.nextUrl.searchParams.get("lat"),
-  )
-  const longitude = Number(
-    request.nextUrl.searchParams.get("lng"),
-  )
-  const subtotal = Number(
-    request.nextUrl.searchParams.get("subtotal") || 0,
-  )
+  let latitudeValue: number
+  let longitudeValue: number
+  let subtotal: number
 
-  if (
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude)
-  ) {
+  try {
+    latitudeValue = latitude(
+      request.nextUrl.searchParams.get("lat"),
+    )
+    longitudeValue = longitude(
+      request.nextUrl.searchParams.get("lng"),
+    )
+    subtotal = finiteNumber(
+      request.nextUrl.searchParams.get("subtotal") || 0,
+      "Subtotal",
+      { min: 0, max: 100_000_000 },
+    )
+  } catch (error) {
     return NextResponse.json(
       {
         error:
-          "Latitude e longitude são obrigatórias.",
+          error instanceof Error
+            ? error.message
+            : "Parâmetros de entrega inválidos.",
       },
-      { status: 400 },
+      {
+        status:
+          error instanceof InputValidationError
+            ? validationErrorStatus(error)
+            : 400,
+      },
     )
   }
 
@@ -84,11 +101,9 @@ export async function GET(request: NextRequest) {
         const quote = await calculateDeliveryQuote(
           settings,
           zones,
-          latitude,
-          longitude,
-          Number.isFinite(subtotal)
-            ? subtotal
-            : 0,
+          latitudeValue,
+          longitudeValue,
+          subtotal,
         )
 
         return NextResponse.json({ quote })
