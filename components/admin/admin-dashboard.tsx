@@ -544,7 +544,25 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
 
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex min-h-20 items-center justify-between border-b bg-white/95 px-4 py-3 backdrop-blur sm:px-6" style={{ borderColor: saborFlowBrand.border }}>
-          <div className="flex items-center gap-3"><button onClick={() => setMobileNav(true)} type="button" className="rounded-2xl border p-2 text-gray-600 lg:hidden" style={{ borderColor: saborFlowBrand.border }} aria-label="Abrir menu"><Menu className="h-5 w-5" /></button><div><h1 className="font-black text-gray-950">{title}</h1><p className="hidden text-xs text-gray-500 sm:block">{settings.storeName} · {settings.city} - {settings.state}</p></div></div>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <button onClick={() => setMobileNav(true)} type="button" className="rounded-2xl border p-2 text-gray-600 lg:hidden" style={{ borderColor: saborFlowBrand.border }} aria-label="Abrir menu">
+              <Menu className="h-5 w-5" />
+            </button>
+
+            <div className="shrink-0">
+              <h1 className="font-black text-gray-950">{title}</h1>
+              <p className="hidden text-xs text-gray-500 sm:block">
+                {settings.storeName} · {settings.city} - {settings.state}
+              </p>
+            </div>
+
+            {section === "overview" && (
+              <AiQuickQuestion
+                settings={settings}
+                onSettingsChanged={setSettings}
+              />
+            )}
+          </div>
           <div className="flex items-center gap-2"><OrganizationSwitcher fallbackName={settings.storeName} variant="compact" /><button onClick={toggleOrderSound} type="button" className={`rounded-2xl border px-3 py-2 text-xs font-black transition ${orderSoundEnabled ? "bg-emerald-50 text-emerald-700" : "bg-white text-gray-500 hover:bg-gray-50"}`} style={{ borderColor: orderSoundEnabled ? "#a7f3d0" : saborFlowBrand.border }} aria-label={orderSoundEnabled ? "Desativar som de novos pedidos" : "Ativar som de novos pedidos"} title={orderSoundEnabled ? "Som de novos pedidos ligado" : "Som de novos pedidos desligado"}>{orderSoundEnabled ? "Som ON" : "Som OFF"}</button><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline-flex ${operatingNow ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>● {operatingNow ? "Loja aberta" : settings.acceptingOrders ? "Fora do expediente" : "Pedidos pausados"}</span><button onClick={() => changeSection("orders")} type="button" className="relative rounded-2xl border p-2.5 text-gray-600 hover:bg-gray-50" style={{ borderColor: saborFlowBrand.border }} aria-label="Notificações"><Bell className="h-4 w-4" />{summary.openOrders > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{summary.openOrders}</span>}</button></div>
         </header>
 
@@ -570,11 +588,10 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
             </div>
           )}
           {section === "overview" && <div className="space-y-6">
-            <AiQuickQuestion settings={settings} onSettingsChanged={setSettings} />
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 { label: "Pedidos hoje", value: summary.todayOrders, icon: ReceiptText, description: `${summary.openOrders} em andamento`, cls: "text-blue-700 bg-blue-50" },
-                { label: "Faturamento hoje", value: canViewFinancialData ? formatCurrency(summary.todayRevenue) : "Restrito", icon: DollarSign, description: canViewFinancialData ? "Pedidos não cancelados" : "Requer permissao financeira", cls: "text-violet-700 bg-violet-50" },
+                { label: "Faturamento hoje", value: canViewFinancialData ? formatCurrency(summary.todayRevenue) : "Restrito", icon: DollarSign, description: canViewFinancialData ? "Pedidos não cancelados" : "Requer permissão financeira", cls: "text-violet-700 bg-violet-50" },
                 { label: "Prontos", value: summary.readyOrders, icon: PackageCheck, description: "Aguardando retirada/entrega", cls: "text-emerald-700 bg-emerald-50" },
                 { label: "Não pagos", value: summary.unpaid, icon: ClipboardList, description: `${summary.totalOrders} pedidos no histórico`, cls: "text-amber-700 bg-amber-50" },
               ].map((card) => { const Icon = card.icon; return <article key={card.label} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-gray-500">{card.label}</p><p className="mt-2 text-3xl font-black tracking-tight text-gray-950">{card.value}</p></div><div className={`rounded-xl p-2.5 ${card.cls}`}><Icon className="h-5 w-5" /></div></div><p className="mt-3 text-xs text-gray-400">{card.description}</p></article> })}
