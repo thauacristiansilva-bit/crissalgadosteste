@@ -331,11 +331,7 @@ export async function listHelpCenterArticles(
             )
           )
         ORDER BY
-          CASE
-            WHEN $1 = ''
-              THEN 0
-            ELSE rank
-          END DESC,
+          rank DESC,
           article.sort_order ASC,
           article.title ASC
         LIMIT $4
