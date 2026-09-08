@@ -1,4 +1,8 @@
 import {
+  buildHelpCenterAiContext,
+  searchHelpCenterArticles,
+} from "@/lib/help-center-db"
+import {
   randomUUID,
 } from "node:crypto"
 
@@ -890,8 +894,21 @@ Faturamento dos pedidos carregados: R$ ${validOrders
 Dados financeiros: restritos para este usuário.
 `
 
+    const helpArticles =
+      await searchHelpCenterArticles(
+        question,
+        {
+          audience: "admin",
+          limit: 3,
+        },
+      ).catch(() => [])
+
+    const helpContext =
+      buildHelpCenterAiContext(
+        helpArticles,
+      )
     const aiContext = `
-CONTEXTO DA EMPRESA
+${helpContext ? `${helpContext}\n\n` : ""}CONTEXTO DA EMPRESA
 Empresa: ${settings.storeName}
 Cidade/UF: ${settings.city} - ${settings.state}
 Fuso horário: ${timeZone}
