@@ -5,6 +5,13 @@ export type HelpCenterAudience =
   | "customer"
   | "all"
 
+export type HelpCenterCategory = {
+  slug: string
+  name: string
+  description: string
+  articleCount: number
+}
+
 export type HelpCenterSearchResult = {
   id: string
   slug: string
@@ -39,18 +46,27 @@ type HelpCenterSearchRow = {
   rank: string | number | null
 }
 
+type HelpCenterCategoryRow = {
+  slug: string
+  name: string
+  description: string | null
+  article_count: string | number
+}
+
 function safeLimit(
   value: number | undefined,
+  fallback = 3,
+  maximum = 50,
 ) {
   if (
     !Number.isFinite(value) ||
     !value
   ) {
-    return 3
+    return fallback
   }
 
   return Math.min(
-    5,
+    maximum,
     Math.max(
       1,
       Math.floor(value),
@@ -104,29 +120,94 @@ function rowToResult(
   }
 }
 
-export async function searchHelpCenterArticles(
-  question: string,
+export async function listHelpCenterCategories(
+  audience: Exclude<
+    HelpCenterAudience,
+    "all"
+  > = "admin",
+): Promise<HelpCenterCategory[]> {
+  const pool =
+    getPostgresPool()
+
+  const result =
+    await pool.query<HelpCenterCategoryRow>(
+      `
+        SELECT
+          category.slug,
+          category.name,
+          category.description,
+          count(article.id)
+            FILTER (
+              WHERE
+                article.published = true
+                AND (
+                  article.audience = $1
+                  OR article.audience = 'all'
+                )
+            ) AS article_count
+        FROM sf_help_categories
+          AS category
+        LEFT JOIN sf_help_articles
+          AS article
+          ON article.category_id =
+            category.id
+        WHERE category.active = true
+        GROUP BY
+          category.id,
+          category.slug,
+          category.name,
+          category.description,
+          category.sort_order
+        ORDER BY
+          category.sort_order ASC,
+          category.name ASC
+      `,
+      [audience],
+    )
+
+  return result.rows.map(
+    (row) => ({
+      slug: row.slug,
+      name: row.name,
+      description:
+        row.description || "",
+      articleCount:
+        Number(row.article_count) || 0,
+    }),
+  )
+}
+
+export async function listHelpCenterArticles(
   options?: {
     audience?: Exclude<
       HelpCenterAudience,
       "all"
     >
+    query?: string
+    categorySlug?: string
     limit?: number
   },
 ): Promise<HelpCenterSearchResult[]> {
-  const query =
-    cleanQuestion(question)
-
-  if (!query) {
-    return []
-  }
-
   const audience =
     options?.audience ||
     "admin"
 
+  const query =
+    cleanQuestion(
+      options?.query || "",
+    )
+
+  const categorySlug =
+    (options?.categorySlug || "")
+      .trim()
+      .slice(0, 100)
+
   const limit =
-    safeLimit(options?.limit)
+    safeLimit(
+      options?.limit,
+      30,
+      50,
+    )
 
   const pool =
     getPostgresPool()
@@ -136,10 +217,14 @@ export async function searchHelpCenterArticles(
       `
         WITH search_input AS (
           SELECT
-            plainto_tsquery(
-              'portuguese',
-              $1
-            ) AS query
+            CASE
+              WHEN $1 = ''
+                THEN NULL
+              ELSE plainto_tsquery(
+                'portuguese',
+                $1
+              )
+            END AS query
         )
         SELECT
           article.id,
@@ -157,53 +242,44 @@ export async function searchHelpCenterArticles(
             AS category_slug,
           category.name
             AS category_name,
-          (
-            ts_rank_cd(
-              to_tsvector(
-                'portuguese',
-                coalesce(
-                  article.title,
-                  ''
-                ) || ' ' ||
-                coalesce(
-                  article.summary,
-                  ''
-                ) || ' ' ||
-                coalesce(
-                  article.content,
-                  ''
-                )
-              ),
-              search_input.query
-            ) * 10
-            +
-            CASE
-              WHEN article.title
-                ILIKE '%' || $1 || '%'
-                THEN 5
-              ELSE 0
-            END
-            +
-            CASE
-              WHEN article.summary
-                ILIKE '%' || $1 || '%'
-                THEN 2
-              ELSE 0
-            END
-            +
-            CASE
-              WHEN EXISTS (
-                SELECT 1
-                FROM unnest(
-                  article.keywords
-                ) AS keyword
-                WHERE keyword
+          CASE
+            WHEN $1 = ''
+              THEN 0
+            ELSE (
+              ts_rank_cd(
+                to_tsvector(
+                  'portuguese',
+                  coalesce(
+                    article.title,
+                    ''
+                  ) || ' ' ||
+                  coalesce(
+                    article.summary,
+                    ''
+                  ) || ' ' ||
+                  coalesce(
+                    article.content,
+                    ''
+                  )
+                ),
+                search_input.query
+              ) * 10
+              +
+              CASE
+                WHEN article.title
                   ILIKE '%' || $1 || '%'
-              )
-                THEN 3
-              ELSE 0
-            END
-          ) AS rank
+                  THEN 5
+                ELSE 0
+              END
+              +
+              CASE
+                WHEN article.summary
+                  ILIKE '%' || $1 || '%'
+                  THEN 2
+                ELSE 0
+              END
+            )
+          END AS rank
         FROM sf_help_articles
           AS article
         CROSS JOIN search_input
@@ -218,44 +294,56 @@ export async function searchHelpCenterArticles(
             OR article.audience = 'all'
           )
           AND (
-            to_tsvector(
-              'portuguese',
-              coalesce(
-                article.title,
-                ''
-              ) || ' ' ||
-              coalesce(
-                article.summary,
-                ''
-              ) || ' ' ||
-              coalesce(
-                article.content,
-                ''
+            $3 = ''
+            OR category.slug = $3
+          )
+          AND (
+            $1 = ''
+            OR (
+              to_tsvector(
+                'portuguese',
+                coalesce(
+                  article.title,
+                  ''
+                ) || ' ' ||
+                coalesce(
+                  article.summary,
+                  ''
+                ) || ' ' ||
+                coalesce(
+                  article.content,
+                  ''
+                )
               )
-            )
-            @@ search_input.query
-            OR article.title
-              ILIKE '%' || $1 || '%'
-            OR article.summary
-              ILIKE '%' || $1 || '%'
-            OR EXISTS (
-              SELECT 1
-              FROM unnest(
-                article.keywords
-              ) AS keyword
-              WHERE keyword
+              @@ search_input.query
+              OR article.title
                 ILIKE '%' || $1 || '%'
+              OR article.summary
+                ILIKE '%' || $1 || '%'
+              OR EXISTS (
+                SELECT 1
+                FROM unnest(
+                  article.keywords
+                ) AS keyword
+                WHERE keyword
+                  ILIKE '%' || $1 || '%'
+              )
             )
           )
         ORDER BY
-          rank DESC,
+          CASE
+            WHEN $1 = ''
+              THEN 0
+            ELSE rank
+          END DESC,
           article.sort_order ASC,
           article.title ASC
-        LIMIT $3
+        LIMIT $4
       `,
       [
         query,
         audience,
+        categorySlug,
         limit,
       ],
     )
@@ -263,6 +351,30 @@ export async function searchHelpCenterArticles(
   return result.rows.map(
     rowToResult,
   )
+}
+
+export async function searchHelpCenterArticles(
+  question: string,
+  options?: {
+    audience?: Exclude<
+      HelpCenterAudience,
+      "all"
+    >
+    limit?: number
+  },
+): Promise<HelpCenterSearchResult[]> {
+  return listHelpCenterArticles({
+    audience:
+      options?.audience ||
+      "admin",
+    query: question,
+    limit:
+      safeLimit(
+        options?.limit,
+        3,
+        5,
+      ),
+  })
 }
 
 function compactText(

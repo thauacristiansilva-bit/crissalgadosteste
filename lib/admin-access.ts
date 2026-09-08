@@ -22,6 +22,7 @@ export type AdminSection =
   | "chatbot"
   | "team"
   | "settings"
+  | "help"
   | "security"
   | "billing"
 
@@ -42,6 +43,7 @@ const sectionPermission: Record<AdminSection, OperationalPermission> = {
   chatbot: "marketing.manage",
   team: "team.view",
   settings: "settings.view",
+  help: "dashboard.view",
   security: "security.view",
   billing: "billing.view",
 }
