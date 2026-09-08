@@ -1,3 +1,4 @@
+import { enterRlsUserContext } from "@/lib/rls-context"
 import {
   createHash,
   randomUUID,
@@ -91,7 +92,7 @@ function deviceLabel(
   userAgent: string,
 ) {
   if (!userAgent.trim()) {
-    return "Dispositivo nÃ£o identificado"
+    return "Dispositivo nÃƒÂ£o identificado"
   }
 
   return `${browserName(userAgent)} no ${operatingSystemName(userAgent)}`
@@ -114,6 +115,8 @@ export async function createAdminSessionRecord(
     maxAgeSeconds?: number
   },
 ) {
+  enterRlsUserContext(input.userId)
+
   const id = randomUUID()
   const maxAgeSeconds =
     Math.max(
@@ -239,6 +242,8 @@ export async function validateAndTouchAdminSession(
     sessionVersion: number
   },
 ) {
+  enterRlsUserContext(input.userId)
+
   const result =
     await getPostgresPool()
       .query<{ id: string }>(
@@ -281,6 +286,8 @@ export async function listAdminSessions(
   userId: string,
   currentSessionId: string,
 ) {
+  enterRlsUserContext(userId)
+
   const result =
     await getPostgresPool()
       .query<ActiveSessionRow>(
@@ -356,6 +363,8 @@ export async function moveAdminSessionToOrganization(
     sessionVersion: number
   },
 ) {
+  enterRlsUserContext(input.userId)
+
   const result =
     await getPostgresPool()
       .query<{ id: string }>(
@@ -405,6 +414,8 @@ export async function revokeAdminSession(
       | "security_reset"
   },
 ) {
+  enterRlsUserContext(input.userId)
+
   const result =
     await getPostgresPool()
       .query<{ id: string }>(
@@ -441,6 +452,8 @@ export async function revokeOtherAdminSessions(
   userId: string,
   currentSessionId: string,
 ) {
+  enterRlsUserContext(userId)
+
   const result =
     await getPostgresPool()
       .query(
@@ -466,6 +479,8 @@ export async function revokeOtherAdminSessions(
 export async function revokeAllAdminSessionsForUser(
   userId: string,
 ) {
+  enterRlsUserContext(userId)
+
   const result =
     await getPostgresPool()
       .query(
