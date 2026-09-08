@@ -32,6 +32,9 @@ import {
   getPostgresPool,
 } from "@/lib/postgres"
 import {
+  runWithTenantRlsScope,
+} from "@/lib/rls-context"
+import {
   requestIsSameOrigin,
 } from "@/lib/security/request-security"
 import {
@@ -420,32 +423,39 @@ async function tenantAiContext() {
     return null
   }
 
-  const settings =
-    await getTenantSettings(
-      session.organizationId,
-    )
+  return runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () => {
+      const settings =
+        await getTenantSettings(
+          session.organizationId,
+        )
 
-  if (!settings) {
-    return null
-  }
+      if (!settings) {
+        return null
+      }
 
-  const timeZone =
-    settings.timeZone ||
-    "America/Sao_Paulo"
+      const timeZone =
+        settings.timeZone ||
+        "America/Sao_Paulo"
 
-  const localDate =
-    zonedDateString(
-      new Date(),
-      timeZone,
-    )
+      const localDate =
+        zonedDateString(
+          new Date(),
+          timeZone,
+        )
 
-  return {
-    session,
-    settings,
-    timeZone,
-    periodKey:
-      `day:${localDate}`,
-  }
+      return {
+        session,
+        settings,
+        timeZone,
+        periodKey:
+          `day:${localDate}`,
+      }
+    },
+    "tenant-session",
+  )
 }
 
 export async function GET() {
