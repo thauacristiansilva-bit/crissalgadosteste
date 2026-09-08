@@ -141,12 +141,25 @@ function restrictTenantDataForAccess(
 
   return {
     ...data,
-    summary: canOrders ? data.summary : emptySummary(),
+    summary: canOrders
+      ? {
+          ...data.summary,
+          revenue: canFinance ? data.summary.revenue : 0,
+          todayRevenue: canFinance ? data.summary.todayRevenue : 0,
+        }
+      : emptySummary(),
     orders: canOrders ? data.orders : [],
     // O PDV precisa ler o catálogo de venda, mas isso não concede catalog.manage.
     products: canCatalog || canPdv ? data.products : [],
     categories: canCatalog ? data.categories : [],
-    customers: canCustomers ? data.customers : [],
+    customers: canCustomers
+      ? canFinance
+        ? data.customers
+        : data.customers.map((customer) => ({
+            ...customer,
+            totalSpent: 0,
+          }))
+      : [],
     deliveryZones:
       canCatalog || canOrders || canPdv ? data.deliveryZones : [],
     couriers: canOrders ? data.couriers : [],

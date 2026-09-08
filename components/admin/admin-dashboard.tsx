@@ -178,6 +178,10 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
     () => new Set(getAllowedAdminSections(adminRole, operationalPermissions)),
     [adminRole, operationalPermissions],
   )
+  const canViewFinancialData = permissionListHas(
+    operationalPermissions,
+    "finance.view",
+  )
   const visibleNavItems = useMemo(
     () => navItems.filter((item) =>
       allowedSections.has(item.key) &&
@@ -571,7 +575,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 { label: "Pedidos hoje", value: summary.todayOrders, icon: ReceiptText, description: `${summary.openOrders} em andamento`, cls: "text-blue-700 bg-blue-50" },
-                { label: "Faturamento hoje", value: formatCurrency(summary.todayRevenue), icon: DollarSign, description: "Pedidos não cancelados", cls: "text-violet-700 bg-violet-50" },
+                { label: "Faturamento hoje", value: canViewFinancialData ? formatCurrency(summary.todayRevenue) : "Restrito", icon: DollarSign, description: canViewFinancialData ? "Pedidos não cancelados" : "Requer permissao financeira", cls: "text-violet-700 bg-violet-50" },
                 { label: "Prontos", value: summary.readyOrders, icon: PackageCheck, description: "Aguardando retirada/entrega", cls: "text-emerald-700 bg-emerald-50" },
                 { label: "Não pagos", value: summary.unpaid, icon: ClipboardList, description: `${summary.totalOrders} pedidos no histórico`, cls: "text-amber-700 bg-amber-50" },
               ].map((card) => { const Icon = card.icon; return <article key={card.label} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-gray-500">{card.label}</p><p className="mt-2 text-3xl font-black tracking-tight text-gray-950">{card.value}</p></div><div className={`rounded-xl p-2.5 ${card.cls}`}><Icon className="h-5 w-5" /></div></div><p className="mt-3 text-xs text-gray-400">{card.description}</p></article> })}
@@ -592,7 +596,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "inventory" && <InventoryPanel products={products} onProductsChanged={setProducts} />}
           {section === "products" && <ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} />}
           {section === "categories" && <CategoriesPanel categories={categories} onCategoriesChanged={setCategories} />}
-          {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} />}
+          {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} canViewFinancialData={canViewFinancialData} />}
           {section === "marketing" && <MarketingPanel coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
           {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment)} />}
