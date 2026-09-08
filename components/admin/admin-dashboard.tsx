@@ -105,7 +105,7 @@ type NavItem = {
 }
 
 const navItems: NavItem[] = [
-  { key: "overview", label: "VisÃ£o geral", icon: LayoutDashboard, group: "inicio" },
+  { key: "overview", label: "Visão geral", icon: LayoutDashboard, group: "inicio" },
   { key: "orders", label: "Pedidos", icon: ClipboardList, group: "vendas" },
   { key: "pdv", label: "Nova venda / PDV", icon: ShoppingCart, group: "vendas" },
   { key: "kitchen", label: "Cozinha", icon: ChefHat, group: "vendas" },
@@ -116,21 +116,21 @@ const navItems: NavItem[] = [
   { key: "inventory", label: "Estoque", icon: PackageSearch, group: "catalogo" },
   { key: "customers", label: "Clientes", icon: Users, group: "clientes" },
   { key: "marketing", label: "Cupons e campanhas", icon: Megaphone, group: "clientes" },
-  { key: "reviews", label: "AvaliaÃ§Ãµes", icon: Star, group: "clientes" },
+  { key: "reviews", label: "Avaliações", icon: Star, group: "clientes" },
   { key: "links", label: "Links e QR Codes", icon: Link2, group: "clientes" },
   { key: "chatbot", label: "Atendimento", icon: Bot, group: "clientes" },
   { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
-  { key: "settings", label: "ConfiguraÃ§Ãµes da loja", icon: Settings, group: "gestao" },
-  { key: "security", label: "SeguranÃ§a da conta", icon: ShieldCheck, group: "gestao" },
-  { key: "billing", label: "Plano e cobranÃ§a", icon: CreditCard, group: "gestao" },
+  { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
+  { key: "security", label: "Segurança da conta", icon: ShieldCheck, group: "gestao" },
+  { key: "billing", label: "Plano e cobrança", icon: CreditCard, group: "gestao" },
 ]
 
 const navGroupLabels: Record<NavGroup, string> = {
-  inicio: "InÃ­cio",
+  inicio: "Início",
   vendas: "Vendas",
-  catalogo: "CardÃ¡pio e estoque",
+  catalogo: "Cardápio e estoque",
   clientes: "Clientes e marketing",
-  gestao: "GestÃ£o",
+  gestao: "Gestão",
 }
 
 const navGroupOrder: NavGroup[] = ["inicio", "vendas", "catalogo", "clientes", "gestao"]
@@ -206,6 +206,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
   const unlockOrderSound = async () => {
     const context = getOrderAudioContext()
     if (!context) return
+
     if (context.state === "suspended") {
       await context.resume().catch(() => undefined)
     }
@@ -267,23 +268,20 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
     const next = !orderSoundEnabledRef.current
     orderSoundEnabledRef.current = next
     setOrderSoundEnabled(next)
+
     window.localStorage.setItem(
       "saborflow-order-sound",
       next ? "on" : "off",
     )
 
     if (next) {
-      void unlockOrderSound().then(() =>
-        playNewOrderSound(),
-      )
+      void unlockOrderSound().then(() => playNewOrderSound())
     }
   }
 
   useEffect(() => {
     const enabled =
-      window.localStorage.getItem(
-        "saborflow-order-sound",
-      ) === "on"
+      window.localStorage.getItem("saborflow-order-sound") === "on"
 
     orderSoundEnabledRef.current = enabled
     setOrderSoundEnabled(enabled)
@@ -294,12 +292,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
       void unlockOrderSound()
     }
 
-    window.addEventListener("pointerdown", unlock, {
-      once: true,
-    })
-    window.addEventListener("keydown", unlock, {
-      once: true,
-    })
+    window.addEventListener("pointerdown", unlock, { once: true })
+    window.addEventListener("keydown", unlock, { once: true })
 
     return () => {
       window.removeEventListener("pointerdown", unlock)
@@ -498,7 +492,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
                 {showFoodOperations && (
                   <a href="/admin/operacao-alimentar" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
                     <Factory className="h-4 w-4 text-[#ffd39f]" />
-                    <span className="truncate">ProduÃ§Ã£o e fichas tÃ©cnicas</span>
+                    <span className="truncate">Produção e fichas técnicas</span>
                   </a>
                 )}
                 {showCrm && (
@@ -510,13 +504,13 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
                 {showReports && (
                   <a href="/admin/relatorios" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
                     <ReceiptText className="h-4 w-4 text-[#ffd39f]" />
-                    <span className="truncate">RelatÃ³rios</span>
+                    <span className="truncate">Relatórios</span>
                   </a>
                 )}
                 {showIntegrations && (
                   <a href="/admin/integracoes" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
                     <Link2 className="h-4 w-4 text-[#ffd39f]" />
-                    <span className="truncate">IntegraÃ§Ãµes</span>
+                    <span className="truncate">Integrações</span>
                   </a>
                 )}
                 {showCorporate && (
@@ -548,8 +542,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
 
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex min-h-20 items-center justify-between border-b bg-white/95 px-4 py-3 backdrop-blur sm:px-6" style={{ borderColor: saborFlowBrand.border }}>
-          <div className="flex items-center gap-3"><button onClick={() => setMobileNav(true)} type="button" className="rounded-2xl border p-2 text-gray-600 lg:hidden" style={{ borderColor: saborFlowBrand.border }} aria-label="Abrir menu"><Menu className="h-5 w-5" /></button><div><h1 className="font-black text-gray-950">{title}</h1><p className="hidden text-xs text-gray-500 sm:block">{settings.storeName} Â· {settings.city} - {settings.state}</p></div></div>
-          <div className="flex items-center gap-2"><OrganizationSwitcher fallbackName={settings.storeName} variant="compact" /><button onClick={toggleOrderSound} type="button" className={`rounded-2xl border px-3 py-2 text-xs font-black transition ${orderSoundEnabled ? "bg-emerald-50 text-emerald-700" : "bg-white text-gray-500 hover:bg-gray-50"}`} style={{ borderColor: orderSoundEnabled ? "#a7f3d0" : saborFlowBrand.border }} aria-label={orderSoundEnabled ? "Desativar som de novos pedidos" : "Ativar som de novos pedidos"} title={orderSoundEnabled ? "Som de novos pedidos ligado" : "Som de novos pedidos desligado"}>{orderSoundEnabled ? "Som ON" : "Som OFF"}</button><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline-flex ${operatingNow ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>â— {operatingNow ? "Loja aberta" : settings.acceptingOrders ? "Fora do expediente" : "Pedidos pausados"}</span><button onClick={() => changeSection("orders")} type="button" className="relative rounded-2xl border p-2.5 text-gray-600 hover:bg-gray-50" style={{ borderColor: saborFlowBrand.border }} aria-label="NotificaÃ§Ãµes"><Bell className="h-4 w-4" />{summary.openOrders > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{summary.openOrders}</span>}</button></div>
+          <div className="flex items-center gap-3"><button onClick={() => setMobileNav(true)} type="button" className="rounded-2xl border p-2 text-gray-600 lg:hidden" style={{ borderColor: saborFlowBrand.border }} aria-label="Abrir menu"><Menu className="h-5 w-5" /></button><div><h1 className="font-black text-gray-950">{title}</h1><p className="hidden text-xs text-gray-500 sm:block">{settings.storeName} · {settings.city} - {settings.state}</p></div></div>
+          <div className="flex items-center gap-2"><OrganizationSwitcher fallbackName={settings.storeName} variant="compact" /><button onClick={toggleOrderSound} type="button" className={`rounded-2xl border px-3 py-2 text-xs font-black transition ${orderSoundEnabled ? "bg-emerald-50 text-emerald-700" : "bg-white text-gray-500 hover:bg-gray-50"}`} style={{ borderColor: orderSoundEnabled ? "#a7f3d0" : saborFlowBrand.border }} aria-label={orderSoundEnabled ? "Desativar som de novos pedidos" : "Ativar som de novos pedidos"} title={orderSoundEnabled ? "Som de novos pedidos ligado" : "Som de novos pedidos desligado"}>{orderSoundEnabled ? "Som ON" : "Som OFF"}</button><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline-flex ${operatingNow ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>● {operatingNow ? "Loja aberta" : settings.acceptingOrders ? "Fora do expediente" : "Pedidos pausados"}</span><button onClick={() => changeSection("orders")} type="button" className="relative rounded-2xl border p-2.5 text-gray-600 hover:bg-gray-50" style={{ borderColor: saborFlowBrand.border }} aria-label="Notificações"><Bell className="h-4 w-4" />{summary.openOrders > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{summary.openOrders}</span>}</button></div>
         </header>
 
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
@@ -557,19 +551,19 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
             <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">Ambiente demonstrativo</p>
-                <p className="mt-1 text-sm font-black text-amber-950">{demoEnvironment.kind === "public" ? "Demo pÃºblica isolada" : "Trial individual isolado"}</p>
-                <p className="mt-1 text-xs text-amber-800">Dados fictÃ­cios Â· integraÃ§Ãµes externas bloqueadas Â· expira em {new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}</p>
+                <p className="mt-1 text-sm font-black text-amber-950">{demoEnvironment.kind === "public" ? "Demo pública isolada" : "Trial individual isolado"}</p>
+                <p className="mt-1 text-xs text-amber-800">Dados fictícios · integrações externas bloqueadas · expira em {new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}</p>
               </div>
               <a href="/demo" className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-xs font-black text-amber-900">Sobre a demo</a>
             </div>
           )}
           <div className="mb-5 flex flex-col gap-3 rounded-3xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: saborFlowBrand.border }}>
-            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment ? `Ambiente DEMO ativo Â· ${settings.storeName}` : `Empresa ativa Â· ${settings.storeName}`}</p></div>
+            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment ? `Ambiente DEMO ativo · ${settings.storeName}` : `Empresa ativa · ${settings.storeName}`}</p></div>
             <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>{demoEnvironment ? "PAINEL DEMO" : "Painel oficial"}</span>
           </div>
           {settings.cashRegisterEnabled && !openCash && (
             <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="font-black">âš ï¸ Seu caixa estÃ¡ fechado</p><p className="text-sm text-amber-800">Abra o caixa para manter o controle do turno, vendas e conferÃªncia financeira.</p></div>
+              <div><p className="font-black">⚠️ Seu caixa está fechado</p><p className="text-sm text-amber-800">Abra o caixa para manter o controle do turno, vendas e conferência financeira.</p></div>
               <button type="button" onClick={() => changeSection("sales")} className="h-10 rounded-xl bg-white px-4 text-sm font-black text-amber-900 shadow-sm ring-1 ring-amber-200">Abrir caixa</button>
             </div>
           )}
@@ -577,16 +571,16 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 { label: "Pedidos hoje", value: summary.todayOrders, icon: ReceiptText, description: `${summary.openOrders} em andamento`, cls: "text-blue-700 bg-blue-50" },
-                { label: "Faturamento hoje", value: formatCurrency(summary.todayRevenue), icon: DollarSign, description: "Pedidos nÃ£o cancelados", cls: "text-violet-700 bg-violet-50" },
+                { label: "Faturamento hoje", value: formatCurrency(summary.todayRevenue), icon: DollarSign, description: "Pedidos não cancelados", cls: "text-violet-700 bg-violet-50" },
                 { label: "Prontos", value: summary.readyOrders, icon: PackageCheck, description: "Aguardando retirada/entrega", cls: "text-emerald-700 bg-emerald-50" },
-                { label: "NÃ£o pagos", value: summary.unpaid, icon: ClipboardList, description: `${summary.totalOrders} pedidos no histÃ³rico`, cls: "text-amber-700 bg-amber-50" },
+                { label: "Não pagos", value: summary.unpaid, icon: ClipboardList, description: `${summary.totalOrders} pedidos no histórico`, cls: "text-amber-700 bg-amber-50" },
               ].map((card) => { const Icon = card.icon; return <article key={card.label} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-gray-500">{card.label}</p><p className="mt-2 text-3xl font-black tracking-tight text-gray-950">{card.value}</p></div><div className={`rounded-xl p-2.5 ${card.cls}`}><Icon className="h-5 w-5" /></div></div><p className="mt-3 text-xs text-gray-400">{card.description}</p></article> })}
             </section>
             <div className="grid gap-5 xl:grid-cols-[1.5fr_.5fr]">
               <OrdersPanel orders={orders.slice(0, 5)} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} />
               <aside className="space-y-4">
-                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-gray-900">Atalhos</h2><div className="mt-4 grid gap-2"><button onClick={() => changeSection("pdv")} className="flex items-center gap-3 rounded-xl bg-blue-50 px-4 py-3 text-left text-sm font-bold text-blue-800 hover:bg-blue-100"><ShoppingCart className="h-5 w-5" />Novo pedido no balcÃ£o</button><button onClick={() => changeSection("kitchen")} className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-left text-sm font-bold text-amber-800 hover:bg-amber-100"><ChefHat className="h-5 w-5" />Abrir cozinha</button><button onClick={() => changeSection("inventory")} className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left text-sm font-bold text-emerald-800 hover:bg-emerald-100"><PackageSearch className="h-5 w-5" />Ver inventÃ¡rio</button><button onClick={() => changeSection("products")} className="flex items-center gap-3 rounded-xl bg-violet-50 px-4 py-3 text-left text-sm font-bold text-violet-800 hover:bg-violet-100"><BookOpen className="h-5 w-5" />Editar cardÃ¡pio</button></div></div>
-                <div className="rounded-2xl p-5 text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.orangeStrong} 100%)` }}><p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#ffd39f" }}>Loja online</p><h2 className="mt-2 text-lg font-black">Site conectado ao admin</h2><p className="mt-2 text-sm leading-relaxed text-blue-100">CardÃ¡pio, disponibilidade, estoque, branding, taxas e pedidos usam a mesma base.</p><a href="/minha-loja" target="_blank" className="mt-4 inline-flex rounded-xl bg-white px-3 py-2 text-xs font-black text-blue-900">Abrir loja</a></div>
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-gray-900">Atalhos</h2><div className="mt-4 grid gap-2"><button onClick={() => changeSection("pdv")} className="flex items-center gap-3 rounded-xl bg-blue-50 px-4 py-3 text-left text-sm font-bold text-blue-800 hover:bg-blue-100"><ShoppingCart className="h-5 w-5" />Novo pedido no balcão</button><button onClick={() => changeSection("kitchen")} className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-left text-sm font-bold text-amber-800 hover:bg-amber-100"><ChefHat className="h-5 w-5" />Abrir cozinha</button><button onClick={() => changeSection("inventory")} className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left text-sm font-bold text-emerald-800 hover:bg-emerald-100"><PackageSearch className="h-5 w-5" />Ver inventário</button><button onClick={() => changeSection("products")} className="flex items-center gap-3 rounded-xl bg-violet-50 px-4 py-3 text-left text-sm font-bold text-violet-800 hover:bg-violet-100"><BookOpen className="h-5 w-5" />Editar cardápio</button></div></div>
+                <div className="rounded-2xl p-5 text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.orangeStrong} 100%)` }}><p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#ffd39f" }}>Loja online</p><h2 className="mt-2 text-lg font-black">Site conectado ao admin</h2><p className="mt-2 text-sm leading-relaxed text-blue-100">Cardápio, disponibilidade, estoque, branding, taxas e pedidos usam a mesma base.</p><a href="/minha-loja" target="_blank" className="mt-4 inline-flex rounded-xl bg-white px-3 py-2 text-xs font-black text-blue-900">Abrir loja</a></div>
               </aside>
             </div>
           </div>}
