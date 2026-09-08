@@ -90,7 +90,7 @@ export async function POST(
     )
 
   const rateState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       rateKey,
       CHANGE_PASSWORD_LIMIT,
       CHANGE_PASSWORD_WINDOW_MS,
@@ -123,7 +123,7 @@ export async function POST(
       body?.newPassword || "",
     )
 
-    clearAuthFailures(
+    await clearAuthFailures(
       rateKey,
     )
 
@@ -154,7 +154,7 @@ export async function POST(
       message ===
       "Senha atual incorreta."
     ) {
-      registerAuthFailure(
+      await registerAuthFailure(
         rateKey,
         CHANGE_PASSWORD_WINDOW_MS,
       )

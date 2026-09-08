@@ -153,7 +153,7 @@ export async function POST(
     )
 
   const ipLimit =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       ipKey,
       IP_LIMIT,
       RATE_WINDOW_MS,
@@ -190,7 +190,7 @@ export async function POST(
     !identifier ||
     !password
   ) {
-    registerAuthFailure(
+    await registerAuthFailure(
       ipKey,
       RATE_WINDOW_MS,
     )
@@ -217,7 +217,7 @@ export async function POST(
     )
 
   const accountLimit =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       accountKey,
       ACCOUNT_LIMIT,
       RATE_WINDOW_MS,
@@ -254,11 +254,11 @@ export async function POST(
       )
 
     if (!user) {
-      registerAuthFailure(
+      await registerAuthFailure(
         ipKey,
         RATE_WINDOW_MS,
       )
-      registerAuthFailure(
+      await registerAuthFailure(
         accountKey,
         RATE_WINDOW_MS,
       )
@@ -287,10 +287,10 @@ export async function POST(
       user.id,
     )
 
-    clearAuthFailures(
+    await clearAuthFailures(
       accountKey,
     )
-    clearAuthFailures(
+    await clearAuthFailures(
       ipKey,
     )
 
@@ -300,7 +300,7 @@ export async function POST(
       )
 
     if (!tenantContext) {
-      registerAuthFailure(
+      await registerAuthFailure(
         accountKey,
         RATE_WINDOW_MS,
       )

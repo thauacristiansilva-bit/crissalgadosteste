@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   }
 
   const key = authRateLimitKey("ip", `billing-google:${requestIp(request)}`)
-  const state = checkAuthRateLimit(key, LIMIT, WINDOW_MS)
+  const state = await checkAuthRateLimit(key, LIMIT, WINDOW_MS)
   if (!state.allowed) {
     return error("Muitas tentativas. Tente novamente mais tarde.", 429, state.retryAfterSeconds)
   }
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   } | null
 
   if (!body?.credential || !body.mode) {
-    registerAuthFailure(key, WINDOW_MS)
+    await registerAuthFailure(key, WINDOW_MS)
     return error("Não foi possível validar sua Conta Google.", 400)
   }
 
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
         })
 
     if (!account) {
-      registerAuthFailure(key, WINDOW_MS)
+      await registerAuthFailure(key, WINDOW_MS)
       return error(
         "Esta Conta Google ainda não está vinculada ao SaborFlow. Entre com e-mail e senha ou crie uma nova conta.",
         403,
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     )
     return response
   } catch (reason) {
-    registerAuthFailure(key, WINDOW_MS)
+    await registerAuthFailure(key, WINDOW_MS)
     console.error(
       "[SaborFlow Google Billing] Falha ao autenticar:",
       reason instanceof Error ? reason.message : reason,

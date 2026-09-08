@@ -130,7 +130,7 @@ export async function POST(request: Request) {
     requestIp(request),
   )
 
-  const ipLimit = checkAuthRateLimit(
+  const ipLimit = await checkAuthRateLimit(
     ipKey,
     IP_LIMIT,
     RATE_WINDOW_MS,
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
     body?.identifier?.trim() || ""
 
   if (!identifier) {
-    registerAuthFailure(
+    await registerAuthFailure(
       ipKey,
       RATE_WINDOW_MS,
     )
@@ -182,7 +182,7 @@ export async function POST(request: Request) {
   )
 
   const accountLimit =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       accountKey,
       ACCOUNT_LIMIT,
       RATE_WINDOW_MS,
@@ -199,7 +199,7 @@ export async function POST(request: Request) {
       )
 
     if (!reset) {
-      registerAuthFailure(
+      await registerAuthFailure(
         accountKey,
         RATE_WINDOW_MS,
       )

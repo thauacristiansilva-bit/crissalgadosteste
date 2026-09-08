@@ -130,7 +130,7 @@ export async function POST(
     )
 
   const state =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       key,
       LIMIT,
       WINDOW_MS,
@@ -154,7 +154,7 @@ export async function POST(
       | null
 
   if (!body?.credential) {
-    registerAuthFailure(
+    await registerAuthFailure(
       key,
       WINDOW_MS,
     )
@@ -178,7 +178,7 @@ export async function POST(
       )
 
     if (!user) {
-      registerAuthFailure(
+      await registerAuthFailure(
         key,
         WINDOW_MS,
       )
@@ -195,7 +195,7 @@ export async function POST(
       )
 
     if (!tenantContext) {
-      registerAuthFailure(
+      await registerAuthFailure(
         key,
         WINDOW_MS,
       )
@@ -211,7 +211,7 @@ export async function POST(
         user.id,
       )
 
-    clearAuthFailures(key)
+    await clearAuthFailures(key)
 
     const mode =
       mfa.enabled
@@ -249,7 +249,7 @@ export async function POST(
 
     return response
   } catch (reason) {
-    registerAuthFailure(
+    await registerAuthFailure(
       key,
       WINDOW_MS,
     )

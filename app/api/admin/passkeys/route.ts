@@ -141,7 +141,7 @@ export async function DELETE(
     )
 
   const accountState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       accountKey,
       ACCOUNT_LIMIT,
       RATE_WINDOW_MS,
@@ -156,7 +156,7 @@ export async function DELETE(
   }
 
   const ipState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       ipKey,
       IP_LIMIT,
       RATE_WINDOW_MS,
@@ -191,11 +191,11 @@ export async function DELETE(
     !credentialId ||
     !code
   ) {
-    registerAuthFailure(
+    await registerAuthFailure(
       accountKey,
       RATE_WINDOW_MS,
     )
-    registerAuthFailure(
+    await registerAuthFailure(
       ipKey,
       RATE_WINDOW_MS,
     )
@@ -214,11 +214,11 @@ export async function DELETE(
       )
 
     if (!verified) {
-      registerAuthFailure(
+      await registerAuthFailure(
         accountKey,
         RATE_WINDOW_MS,
       )
-      registerAuthFailure(
+      await registerAuthFailure(
         ipKey,
         RATE_WINDOW_MS,
       )
@@ -242,10 +242,10 @@ export async function DELETE(
       )
     }
 
-    clearAuthFailures(
+    await clearAuthFailures(
       accountKey,
     )
-    clearAuthFailures(
+    await clearAuthFailures(
       ipKey,
     )
 

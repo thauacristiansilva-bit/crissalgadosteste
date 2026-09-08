@@ -32,20 +32,20 @@ export async function POST(request: Request) {
   if (!requestIsSameOrigin(request)) return jsonError("Origem da requisição não autorizada.", 403)
 
   const ipKey = authRateLimitKey("ip", `billing-signin:${requestIp(request)}`)
-  const ipState = checkAuthRateLimit(ipKey, IP_LIMIT, WINDOW_MS)
+  const ipState = await checkAuthRateLimit(ipKey, IP_LIMIT, WINDOW_MS)
   if (!ipState.allowed) {
     return jsonError("Muitas tentativas de login. Tente novamente mais tarde.", 429, ipState.retryAfterSeconds)
   }
 
   const body = await request.json().catch(() => null) as { email?: string; password?: string } | null
   if (!body?.email || !body.password) {
-    registerAuthFailure(ipKey, WINDOW_MS)
+    await registerAuthFailure(ipKey, WINDOW_MS)
     return jsonError("E-mail ou senha inválidos.", 401)
   }
 
   const email = body.email.trim().toLowerCase()
   const accountKey = authRateLimitKey("account", `billing:${email}`)
-  const accountState = checkAuthRateLimit(accountKey, ACCOUNT_LIMIT, WINDOW_MS)
+  const accountState = await checkAuthRateLimit(accountKey, ACCOUNT_LIMIT, WINDOW_MS)
   if (!accountState.allowed) {
     return jsonError("Muitas tentativas de login. Tente novamente mais tarde.", 429, accountState.retryAfterSeconds)
   }
@@ -53,18 +53,18 @@ export async function POST(request: Request) {
   try {
     const user = await authenticateAdminUser(email, body.password)
     if (!user) {
-      registerAuthFailure(ipKey, WINDOW_MS)
-      registerAuthFailure(accountKey, WINDOW_MS)
+      await registerAuthFailure(ipKey, WINDOW_MS)
+      await registerAuthFailure(accountKey, WINDOW_MS)
       return jsonError("E-mail ou senha inválidos.", 401)
     }
 
     const account = await getBillingAccountForUser(user.id)
     if (!account) {
-      registerAuthFailure(accountKey, WINDOW_MS)
+      await registerAuthFailure(accountKey, WINDOW_MS)
       return jsonError("Não foi possível entrar nesta conta.", 403)
     }
 
-    clearAuthFailures(accountKey)
+    await clearAuthFailures(accountKey)
     const response = NextResponse.json({ ok: true, email: user.email })
     response.headers.set("Cache-Control", "no-store")
     response.cookies.set(

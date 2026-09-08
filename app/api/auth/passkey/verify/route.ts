@@ -183,7 +183,7 @@ export async function POST(
     )
 
   const accountState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       accountKey,
       ACCOUNT_LIMIT,
       RATE_WINDOW_MS,
@@ -198,7 +198,7 @@ export async function POST(
   }
 
   const ipState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       ipKey,
       IP_LIMIT,
       RATE_WINDOW_MS,
@@ -222,11 +222,11 @@ export async function POST(
       | null
 
   if (!body?.response) {
-    registerAuthFailure(
+    await registerAuthFailure(
       accountKey,
       RATE_WINDOW_MS,
     )
-    registerAuthFailure(
+    await registerAuthFailure(
       ipKey,
       RATE_WINDOW_MS,
     )
@@ -272,11 +272,11 @@ export async function POST(
       })
 
     if (!verified) {
-      registerAuthFailure(
+      await registerAuthFailure(
         accountKey,
         RATE_WINDOW_MS,
       )
-      registerAuthFailure(
+      await registerAuthFailure(
         ipKey,
         RATE_WINDOW_MS,
       )
@@ -331,10 +331,10 @@ export async function POST(
         request,
       })
 
-    clearAuthFailures(
+    await clearAuthFailures(
       accountKey,
     )
-    clearAuthFailures(
+    await clearAuthFailures(
       ipKey,
     )
 
@@ -395,11 +395,11 @@ export async function POST(
 
     return response
   } catch (error) {
-    registerAuthFailure(
+    await registerAuthFailure(
       accountKey,
       RATE_WINDOW_MS,
     )
-    registerAuthFailure(
+    await registerAuthFailure(
       ipKey,
       RATE_WINDOW_MS,
     )

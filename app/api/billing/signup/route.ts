@@ -16,7 +16,7 @@ const SIGNUP_WINDOW_MS = 60 * 60 * 1000
 
 export async function POST(request: Request) {
   const signupKey = authRateLimitKey("ip", `billing-signup:${requestIp(request)}`)
-  const signupState = checkAuthRateLimit(signupKey, SIGNUP_LIMIT, SIGNUP_WINDOW_MS)
+  const signupState = await checkAuthRateLimit(signupKey, SIGNUP_LIMIT, SIGNUP_WINDOW_MS)
   if (!signupState.allowed) {
     const response = NextResponse.json(
       { error: "Muitas tentativas de cadastro. Tente novamente mais tarde." },
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     response.headers.set("Retry-After", String(signupState.retryAfterSeconds))
     return response
   }
-  registerAuthFailure(signupKey, SIGNUP_WINDOW_MS)
+  await registerAuthFailure(signupKey, SIGNUP_WINDOW_MS)
 
   const body = await request.json().catch(() => null) as {
     name?: string

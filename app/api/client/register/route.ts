@@ -26,7 +26,7 @@ const REGISTER_WINDOW_MS = 60 * 60 * 1000
 
 export async function POST(request: Request) {
   const registerKey = authRateLimitKey("ip", `client-register:${requestIp(request)}`)
-  const registerState = checkAuthRateLimit(
+  const registerState = await checkAuthRateLimit(
     registerKey,
     REGISTER_LIMIT,
     REGISTER_WINDOW_MS,
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     return response
   }
 
-  registerAuthFailure(registerKey, REGISTER_WINDOW_MS)
+  await registerAuthFailure(registerKey, REGISTER_WINDOW_MS)
 
   const body = (await request.json().catch(() => null)) as
     | {

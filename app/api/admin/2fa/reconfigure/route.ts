@@ -73,12 +73,12 @@ function rateLimitKeys(
   }
 }
 
-function checkLimits(
+async function checkLimits(
   accountKey: string,
   ipKey: string,
 ) {
   const accountState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       accountKey,
       ACCOUNT_LIMIT,
       RATE_WINDOW_MS,
@@ -93,7 +93,7 @@ function checkLimits(
   }
 
   const ipState =
-    checkAuthRateLimit(
+    await checkAuthRateLimit(
       ipKey,
       IP_LIMIT,
       RATE_WINDOW_MS,
@@ -113,28 +113,28 @@ function checkLimits(
   }
 }
 
-function registerFailure(
+async function registerFailure(
   accountKey: string,
   ipKey: string,
 ) {
-  registerAuthFailure(
+  await registerAuthFailure(
     accountKey,
     RATE_WINDOW_MS,
   )
-  registerAuthFailure(
+  await registerAuthFailure(
     ipKey,
     RATE_WINDOW_MS,
   )
 }
 
-function clearFailures(
+async function clearFailures(
   accountKey: string,
   ipKey: string,
 ) {
-  clearAuthFailures(
+  await clearAuthFailures(
     accountKey,
   )
-  clearAuthFailures(
+  await clearAuthFailures(
     ipKey,
   )
 }
@@ -173,7 +173,7 @@ export async function POST(
   )
 
   const limit =
-    checkLimits(
+    await checkLimits(
       accountKey,
       ipKey,
     )
@@ -199,7 +199,7 @@ export async function POST(
     body?.code?.trim() || ""
 
   if (!code) {
-    registerFailure(
+    await registerFailure(
       accountKey,
       ipKey,
     )
@@ -219,7 +219,7 @@ export async function POST(
       )
 
     if (!result) {
-      registerFailure(
+      await registerFailure(
         accountKey,
         ipKey,
       )
@@ -230,7 +230,7 @@ export async function POST(
       )
     }
 
-    clearFailures(
+    await clearFailures(
       accountKey,
       ipKey,
     )
@@ -301,7 +301,7 @@ export async function PATCH(
   )
 
   const limit =
-    checkLimits(
+    await checkLimits(
       accountKey,
       ipKey,
     )
@@ -327,7 +327,7 @@ export async function PATCH(
     body?.code?.trim() || ""
 
   if (!/^\d{6}$/.test(code)) {
-    registerFailure(
+    await registerFailure(
       accountKey,
       ipKey,
     )
@@ -346,7 +346,7 @@ export async function PATCH(
       )
 
     if (!result) {
-      registerFailure(
+      await registerFailure(
         accountKey,
         ipKey,
       )
@@ -357,7 +357,7 @@ export async function PATCH(
       )
     }
 
-    clearFailures(
+    await clearFailures(
       accountKey,
       ipKey,
     )

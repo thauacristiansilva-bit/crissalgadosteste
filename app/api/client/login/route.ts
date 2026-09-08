@@ -40,7 +40,7 @@ function errorResponse(message: string, status: number, retryAfterSeconds = 0) {
 
 export async function POST(request: Request) {
   const ipKey = authRateLimitKey("ip", `client:${requestIp(request)}`)
-  const ipState = checkAuthRateLimit(ipKey, IP_LIMIT, RATE_WINDOW_MS)
+  const ipState = await checkAuthRateLimit(ipKey, IP_LIMIT, RATE_WINDOW_MS)
   if (!ipState.allowed) {
     return errorResponse(
       "Muitas tentativas de acesso. Tente novamente mais tarde.",
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     | null
 
   if (!body) {
-    registerAuthFailure(ipKey, RATE_WINDOW_MS)
+    await registerAuthFailure(ipKey, RATE_WINDOW_MS)
     return errorResponse("Informe CPF e PIN.", 400)
   }
 
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     "account",
     `client:${organization.id}:${String(body.cpf || "").replace(/\D/g, "")}`,
   )
-  const cpfState = checkAuthRateLimit(cpfKey, ACCOUNT_LIMIT, RATE_WINDOW_MS)
+  const cpfState = await checkAuthRateLimit(cpfKey, ACCOUNT_LIMIT, RATE_WINDOW_MS)
   if (!cpfState.allowed) {
     return errorResponse(
       "Muitas tentativas de acesso. Tente novamente mais tarde.",
@@ -105,8 +105,8 @@ export async function POST(request: Request) {
       ])
 
       if (!account) {
-        registerAuthFailure(ipKey, RATE_WINDOW_MS)
-        registerAuthFailure(cpfKey, RATE_WINDOW_MS)
+        await registerAuthFailure(ipKey, RATE_WINDOW_MS)
+        await registerAuthFailure(cpfKey, RATE_WINDOW_MS)
         return errorResponse("CPF ou PIN inválido.", 401)
       }
 
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
         )
       }
 
-      clearAuthFailures(cpfKey)
+      await clearAuthFailures(cpfKey)
 
       const days = body.remember === false ? 1 : settings.rememberClientDays
       const response = NextResponse.json({
