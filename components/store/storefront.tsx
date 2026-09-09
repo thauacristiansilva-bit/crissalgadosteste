@@ -152,6 +152,43 @@ export function Storefront({
     const id = window.setInterval(update, 30000)
     return () => window.clearInterval(id)
   }, [settings])
+
+  useEffect(() => {
+    const refreshPromotions = () => {
+      if (
+        document.visibilityState ===
+        "visible"
+      ) {
+        router.refresh()
+      }
+    }
+
+    window.addEventListener(
+      "focus",
+      refreshPromotions,
+    )
+    document.addEventListener(
+      "visibilitychange",
+      refreshPromotions,
+    )
+
+    const id = window.setInterval(
+      refreshPromotions,
+      30000,
+    )
+
+    return () => {
+      window.removeEventListener(
+        "focus",
+        refreshPromotions,
+      )
+      document.removeEventListener(
+        "visibilitychange",
+        refreshPromotions,
+      )
+      window.clearInterval(id)
+    }
+  }, [router])
   useEffect(() => {
     if (isOpen || !settings.acceptingOrders) return
     setCheckout((current) =>
@@ -331,7 +368,53 @@ export function Storefront({
     setCheckout((current) => ({ ...current, name: customer.name || current.name, phone: customer.phone || current.phone, address: customer.defaultAddress || current.address, number: customer.defaultNumber || current.number, district: customer.defaultDistrict || current.district, city: customer.defaultCity || current.city, state: customer.defaultState || current.state, zipCode: customer.defaultZipCode || current.zipCode, complement: customer.defaultComplement || current.complement, latitude: customer.defaultLatitude ?? current.latitude, longitude: customer.defaultLongitude ?? current.longitude }))
   }, [customer])
 
-  const filtered = useMemo(() => { const q = search.trim().toLowerCase(); return products.filter((p) => p.active).filter((p) => category === "Todos" || p.category === category).filter((p) => !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)).sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name, "pt-BR")) }, [products, search, category])
+  const filtered = useMemo(() => {
+    const q =
+      search.trim().toLowerCase()
+
+    return products
+      .filter((p) => p.active)
+      .filter(
+        (p) =>
+          category === "Todos" ||
+          p.category === category,
+      )
+      .filter(
+        (p) =>
+          !q ||
+          p.name
+            .toLowerCase()
+            .includes(q) ||
+          p.description
+            .toLowerCase()
+            .includes(q),
+      )
+      .sort(
+        (a, b) =>
+          Number(
+            Boolean(
+              b.promotion?.highlight,
+            ),
+          ) -
+            Number(
+              Boolean(
+                a.promotion?.highlight,
+              ),
+            ) ||
+          Number(
+            Boolean(b.promotion),
+          ) -
+            Number(
+              Boolean(a.promotion),
+            ) ||
+          Number(b.featured) -
+            Number(a.featured) ||
+          a.name.localeCompare(
+            b.name,
+            "pt-BR",
+          ),
+      )
+  }, [products, search, category])
   const categoryCounts = useMemo(() => {
     const activeProducts = products.filter((product) => product.active)
     const counts = new Map<string, number>()
@@ -369,9 +452,15 @@ export function Storefront({
   }, [checkout.timing, checkout.type, selectedDate, settings.businessHours, settings.deliveryMinMinutes, settings.pickupLeadMinutes, settings.slotIntervalMinutes, organizationTimeZone])
   const selectedTime = checkout.timing === "scheduled" && timeSlots.includes(checkout.scheduleTime) ? checkout.scheduleTime : ""
 
-  function productPriceForTiming(product: Product, timing: Checkout["timing"]) {
-    const promotion = product.promotion
-    if (!promotion) return product.price
+  function productPromotionDisplayPrice(
+    product: Product,
+  ) {
+    const promotion =
+      product.promotion
+
+    if (!promotion) {
+      return product.price
+    }
 
     const validUntil =
       new Date(
@@ -387,11 +476,27 @@ export function Storefront({
       return product.price
     }
 
-    if (timing === "now") {
-      return Math.min(
-        product.price,
-        promotion.promotionalPrice,
+    return Math.min(
+      product.price,
+      promotion.promotionalPrice,
+    )
+  }
+
+  function productPriceForTiming(product: Product, timing: Checkout["timing"]) {
+    const promotionalPrice =
+      productPromotionDisplayPrice(
+        product,
       )
+
+    if (
+      promotionalPrice >=
+      product.price
+    ) {
+      return product.price
+    }
+
+    if (timing === "now") {
+      return promotionalPrice
     }
 
     if (
@@ -400,10 +505,7 @@ export function Storefront({
       checkout.scheduleDate ===
         scheduleMinDate
     ) {
-      return Math.min(
-        product.price,
-        promotion.promotionalPrice,
-      )
+      return promotionalPrice
     }
 
     return product.price
@@ -1034,11 +1136,11 @@ export function Storefront({
                     )}
                   </div>
                   <button type="button" onClick={() => setCustomizingProduct(product)} disabled={unavailable} className="block w-full pt-2 text-left disabled:cursor-default">
-                    {product.promotion && productPriceForTiming(product, checkout.timing) < product.price ? (
+                    {product.promotion && productPromotionDisplayPrice(product) < product.price ? (
                       <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="text-xs font-bold text-gray-400 line-through">{money(product.price)}</span>
-                        <strong className="text-base text-orange-600">{money(productPriceForTiming(product, checkout.timing))}</strong>
-                        {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"}</span>}
+                        <strong className="text-base text-orange-600">{money(productPromotionDisplayPrice(product))}</strong>
+                        {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"} · hoje</span>}
                       </span>
                     ) : (
                       <strong className="text-base">{money(product.price)}</strong>

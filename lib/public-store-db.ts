@@ -213,17 +213,41 @@ export async function getPublicStoreForOrganization(
     snapshot = await refreshPublicStoreSnapshot(organization)
   }
 
-  const { promotions, ...publicSnapshot } = snapshot
+  // PROMOTIONS_LIVE_REFRESH_1484
+  // O snapshot do catalogo continua rapido, mas promocao e uma informacao
+  // sensivel a horario e alteracoes administrativas. Por isso ela e lida
+  // novamente em cada renderizacao publica, inclusive entre replicas.
+  const livePromotions =
+    await runWithTenantRlsScope(
+      [organization.id],
+      undefined,
+      () =>
+        getTenantProductPromotions(
+          organization.id,
+        ),
+      "public-store",
+    ).catch(
+      () => snapshot.promotions,
+    )
+
+  const {
+    promotions: _cachedPromotions,
+    ...publicSnapshot
+  } = snapshot
 
   return {
     ...publicSnapshot,
-    products: applyActivePromotionsToProducts(
-      snapshot.products,
-      promotions,
-      snapshot.settings.timeZone,
-    ),
+    products:
+      applyActivePromotionsToProducts(
+        snapshot.products,
+        livePromotions,
+        snapshot.settings.timeZone,
+      ),
     // Horario e promocao ativa continuam sendo calculados a cada request,
     // mesmo quando o catalogo esta em cache.
-    openNow: isStoreOpenNow(snapshot.settings),
+    openNow:
+      isStoreOpenNow(
+        snapshot.settings,
+      ),
   }
 }
