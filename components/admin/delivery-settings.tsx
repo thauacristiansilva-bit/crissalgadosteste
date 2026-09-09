@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Bike, Crosshair, MapPin, Plus, Power, Save, Trash2, UserPlus } from "lucide-react"
 import type { Courier, DeliveryDistanceBand, DeliveryPricingMode, DeliveryZone, GeoPoint, StaffMember, StoreSettings } from "@/lib/types"
-import { googleMapsMapId, hasGoogleMapsKey, loadGoogleMaps } from "@/lib/google-maps-client"
+import { hasGoogleMapsKey, loadGoogleMaps } from "@/lib/google-maps-client"
 import { deliveryZoneAreaScore, deliveryZoneColor, nextDeliveryZoneColor, snapPointToDeliveryBoundaries, validateDeliveryPolygon } from "@/lib/delivery-zone-geometry"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
@@ -89,16 +89,25 @@ export function DeliverySettings({
         const map = new google.maps.Map(mapContainer.current, {
           center,
           zoom: 18,
-          mapId: googleMapsMapId(),
+
+          // Mapa Google padrao, sem Map ID e sem Cloud Styling.
+          mapTypeId: google.maps.MapTypeId.ROADMAP,
+
           streetViewControl: true,
           mapTypeControl: true,
           fullscreenControl: true,
           zoomControl: true,
+
           clickableIcons: true,
           gestureHandling: "greedy",
         })
-        const { AdvancedMarkerElement } = await google.maps.importLibrary("marker")
-        storeMarkerRef.current = new AdvancedMarkerElement({ map, position: center, title: settings.storeName || "Empresa" })
+        storeMarkerRef.current = new google.maps.Marker({
+          map,
+          position: center,
+          title:
+            settings.storeName ||
+            "Empresa",
+        })
         map.addListener("click", (event: any) => {
           if (!event.latLng) return
           const rawPoint = { lat: event.latLng.lat(), lng: event.latLng.lng() }
@@ -117,8 +126,8 @@ export function DeliverySettings({
       if (pricing.mode === "customAreas" && mapRef.current) {
         existingShapesRef.current.forEach((shape) => shape.setMap?.(null))
         previewPolygonRef.current?.setMap?.(null)
-        vertexMarkersRef.current.forEach((marker) => { marker.map = null })
-        if (storeMarkerRef.current) storeMarkerRef.current.map = null
+        vertexMarkersRef.current.forEach((marker) => marker.setMap?.(null))
+        if (storeMarkerRef.current) storeMarkerRef.current.setMap?.(null)
         mapRef.current = null
         storeMarkerRef.current = null
         setMapReady(false)
@@ -131,7 +140,7 @@ export function DeliverySettings({
     const map = mapRef.current
     if (!map || !storeMarkerRef.current) return
     const center = { lat: settings.storeLatitude, lng: settings.storeLongitude }
-    storeMarkerRef.current.position = center
+    storeMarkerRef.current.setPosition?.(center)
     map.panTo(center)
   }, [settings.storeLatitude, settings.storeLongitude])
 
@@ -166,7 +175,7 @@ export function DeliverySettings({
     const map = mapRef.current
     if (!google?.maps || !map) return
     previewPolygonRef.current?.setMap?.(null)
-    vertexMarkersRef.current.forEach((marker) => { marker.map = null })
+    vertexMarkersRef.current.forEach((marker) => marker.setMap?.(null))
     vertexMarkersRef.current = []
     if (!zonePoints.length) return
 
@@ -182,27 +191,102 @@ export function DeliverySettings({
       clickable: false,
     })
 
-    void (async () => {
-      const { AdvancedMarkerElement } = await google.maps.importLibrary("marker")
-      if (!mapRef.current) return
-      vertexMarkersRef.current = zonePoints.map((point, index) => {
-        const content = document.createElement("div")
-        content.textContent = String(index + 1)
-        content.style.cssText = `width:24px;height:24px;border-radius:9999px;background:${previewColor};color:white;border:2px solid white;display:flex;align-items:center;justify-content:center;font:700 11px sans-serif;box-shadow:0 2px 8px #0003`
-        const marker = new AdvancedMarkerElement({ map, position: point, gmpDraggable: true, content, title: `Ponto ${index + 1}` })
-        marker.addListener("dragend", () => {
-          const position = marker.position
-          if (!position) return
-          const lat = typeof position.lat === "function" ? position.lat() : Number(position.lat)
-          const lng = typeof position.lng === "function" ? position.lng() : Number(position.lng)
-          const rawPoint = { lat, lng }
-          const snapped = snapPointToDeliveryBoundaries(rawPoint, deliveryZonesRef.current, { ignoreZoneId: editingZoneIdRef.current, maxDistanceMeters: 35 })
-          if (snapped) setZoneMessage(`Ponto encaixado no limite de “${snapped.zone.name}” (${Math.round(snapped.distanceMeters)} m).`)
-          setZonePoints((current) => current.map((item, itemIndex) => itemIndex === index ? (snapped?.point || rawPoint) : item))
-        })
-        return marker
-      })
-    })()
+    vertexMarkersRef.current =
+      zonePoints.map(
+        (point, index) => {
+          const marker =
+            new google.maps.Marker({
+              map,
+              position: point,
+              draggable: true,
+              title:
+                `Ponto ${index + 1}`,
+
+              label: {
+                text:
+                  String(index + 1),
+                color: "#ffffff",
+                fontSize: "11px",
+                fontWeight: "700",
+              },
+
+              icon: {
+                path:
+                  google.maps.SymbolPath.CIRCLE,
+                scale: 13,
+
+                fillColor:
+                  previewColor,
+                fillOpacity: 1,
+
+                strokeColor:
+                  "#ffffff",
+                strokeOpacity: 1,
+                strokeWeight: 2,
+              },
+            })
+
+          marker.addListener(
+            "dragend",
+            () => {
+              const position =
+                marker.getPosition()
+
+              if (!position) {
+                return
+              }
+
+              const lat =
+                position.lat()
+
+              const lng =
+                position.lng()
+
+              const rawPoint = {
+                lat,
+                lng,
+              }
+
+              const snapped =
+                snapPointToDeliveryBoundaries(
+                  rawPoint,
+                  deliveryZonesRef.current,
+                  {
+                    ignoreZoneId:
+                      editingZoneIdRef.current,
+                    maxDistanceMeters:
+                      35,
+                  },
+                )
+
+              if (snapped) {
+                setZoneMessage(
+                  `Ponto encaixado no limite de “${snapped.zone.name}” (${Math.round(snapped.distanceMeters)} m).`,
+                )
+              }
+
+              setZonePoints(
+                (current) =>
+                  current.map(
+                    (
+                      item,
+                      itemIndex,
+                    ) =>
+                      itemIndex ===
+                      index
+                        ? (
+                            snapped?.point ||
+                            rawPoint
+                          )
+                        : item,
+                  ),
+              )
+            },
+          )
+
+          return marker
+        },
+      )
   }, [zonePoints, mapReady, draftZoneColor, zoneValidationError])
 
   function setMode(mode: DeliveryPricingMode) {
