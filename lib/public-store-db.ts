@@ -13,6 +13,10 @@ import {
   type PublicOrganization,
 } from "@/lib/organization-db"
 import { isStoreOpenNow } from "@/lib/operations"
+import {
+  applyActivePromotionsToProducts,
+  getTenantProductPromotions,
+} from "@/lib/promotions-db"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 type PublicStoreSnapshot = {
@@ -20,6 +24,7 @@ type PublicStoreSnapshot = {
   categories: Awaited<ReturnType<typeof getTenantCategories>>
   settings: NonNullable<Awaited<ReturnType<typeof getTenantSettings>>>
   deliveryZones: Awaited<ReturnType<typeof getTenantDeliveryZones>>
+  promotions: Awaited<ReturnType<typeof getTenantProductPromotions>>
   organization: {
     id: string
     name: string
@@ -129,11 +134,12 @@ async function loadPublicStoreSnapshot(organization: PublicOrganization) {
         )
       }
 
-      const [settings, products, categories, deliveryZones] = await Promise.all([
+      const [settings, products, categories, deliveryZones, promotions] = await Promise.all([
         getTenantSettings(organization.id),
         getTenantProducts(organization.id),
         getTenantCategories(organization.id),
         getTenantDeliveryZones(organization.id),
+        getTenantProductPromotions(organization.id),
       ])
 
       if (!settings) {
@@ -152,6 +158,7 @@ async function loadPublicStoreSnapshot(organization: PublicOrganization) {
         categories,
         settings: publicSettings,
         deliveryZones,
+        promotions,
         organization: {
           id: organization.id,
           name: organization.name,
@@ -206,9 +213,17 @@ export async function getPublicStoreForOrganization(
     snapshot = await refreshPublicStoreSnapshot(organization)
   }
 
+  const { promotions, ...publicSnapshot } = snapshot
+
   return {
-    ...snapshot,
-    // Horário continua sendo calculado a cada request, mesmo quando catálogo está em cache.
+    ...publicSnapshot,
+    products: applyActivePromotionsToProducts(
+      snapshot.products,
+      promotions,
+      snapshot.settings.timeZone,
+    ),
+    // Horario e promocao ativa continuam sendo calculados a cada request,
+    // mesmo quando o catalogo esta em cache.
     openNow: isStoreOpenNow(snapshot.settings),
   }
 }

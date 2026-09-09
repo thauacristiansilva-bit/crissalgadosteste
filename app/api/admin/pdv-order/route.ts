@@ -97,8 +97,9 @@ export async function POST(
       },
     items: body.items,
     requestedFor:
-      body.requestedFor ||
-      new Date().toISOString(),
+      body.timing === "scheduled"
+        ? body.requestedFor
+        : undefined,
     timing:
       body.timing === "scheduled"
         ? ("scheduled" as const)

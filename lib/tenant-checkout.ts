@@ -1,3 +1,4 @@
+import { applyCheckoutPromotionUnitPrice, getCheckoutPromotionPriceMap } from "@/lib/promotions-db"
 import {
   randomBytes,
 } from "node:crypto"
@@ -364,6 +365,20 @@ async function createTenantCheckoutOrderInScope(
   try {
     await client.query("BEGIN")
 
+    const checkoutPromotionPrices =
+      await getCheckoutPromotionPriceMap(
+        client,
+        organizationId,
+        settings.timeZone,
+        input.timing,
+        input.requestedFor,
+        input.bypassLeadTime
+          ? 0
+          : input.type === "delivery"
+            ? settings.deliveryMinMinutes
+            : settings.pickupLeadMinutes,
+      )
+
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       [
@@ -588,8 +603,16 @@ async function createTenantCheckoutOrderInScope(
         productId: Number(product.id),
         name: product.name,
         quantity: requestedItem.quantity,
-        unitPrice: pricing.unitPrice,
-        subtotal: money(pricing.unitPrice * requestedItem.quantity),
+        unitPrice: applyCheckoutPromotionUnitPrice(
+          checkoutPromotionPrices,
+          Number(requestedItem.productId),
+          pricing.unitPrice,
+        ),
+        subtotal: money(applyCheckoutPromotionUnitPrice(
+          checkoutPromotionPrices,
+          Number(requestedItem.productId),
+          pricing.unitPrice,
+        ) * requestedItem.quantity),
         ...(pricing.modifiers.length ? { modifiers: pricing.modifiers } : {}),
       }
     })

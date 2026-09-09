@@ -109,6 +109,7 @@ export function Storefront({
       ? `${resolvedBasePath}/pedido/${encodeURIComponent(reference)}`
       : `/pedido/${encodeURIComponent(reference)}`
   const [isOpen, setIsOpen] = useState(openNow)
+  const [promotionClock, setPromotionClock] = useState(() => Date.now())
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState("Todos")
   const [cart, setCart] = useState<CartItem[]>([])
@@ -135,13 +136,22 @@ export function Storefront({
   const [couponBusy, setCouponBusy] = useState(false)
   const [couponDiscount, setCouponDiscount] = useState(0)
   const [couponMessage, setCouponMessage] = useState("")
+  const [promotionNotice, setPromotionNotice] = useState("")
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null)
   const [lastOrder, setLastOrder] = useState<Order | null>(null)
   const [checkout, setCheckout] = useState<Checkout>({
     name: "", phone: "", type: settings.pickupEnabled ? "pickup" : "delivery", timing: openNow ? "now" : "scheduled", scheduleDate: "", scheduleTime: "", zipCode: "", address: "", number: "", district: "", city: settings.city, state: settings.state, complement: "", latitude: null, longitude: null, paymentMethod: settings.pixEnabled ? "pix" : settings.cashEnabled ? "cash" : "card", changeFor: "", notes: "", couponCode: "",
   })
 
-  useEffect(() => { const update = () => setIsOpen(isStoreOpenNow(settings)); update(); const id = window.setInterval(update, 30000); return () => window.clearInterval(id) }, [settings])
+  useEffect(() => {
+    const update = () => {
+      setIsOpen(isStoreOpenNow(settings))
+      setPromotionClock(Date.now())
+    }
+    update()
+    const id = window.setInterval(update, 30000)
+    return () => window.clearInterval(id)
+  }, [settings])
   useEffect(() => {
     if (isOpen || !settings.acceptingOrders) return
     setCheckout((current) =>
@@ -150,6 +160,18 @@ export function Storefront({
         : { ...current, timing: "scheduled", scheduleDate: "", scheduleTime: "" },
     )
   }, [isOpen, settings.acceptingOrders])
+
+  useEffect(() => {
+    if (checkout.timing !== "scheduled") return
+    if (cart.some((item) => Boolean(item.product.promotion))) {
+      setPromotionNotice(
+        "Promocoes valem somente para pedidos Para agora. No agendamento, os itens voltam automaticamente ao preco normal.",
+      )
+    }
+    setCouponDiscount(0)
+    setCouponMessage("")
+  }, [checkout.timing])
+
   useEffect(() => { fetch("/api/client/me", { cache: "no-store" }).then((r) => r.json()).then((data) => { if (data.customer) setCustomer(data.customer) }).catch(() => undefined) }, [])
 
   useEffect(() => {
@@ -315,13 +337,42 @@ export function Storefront({
     return result
   }, [checkout.timing, checkout.type, selectedDate, settings.businessHours, settings.deliveryMinMinutes, settings.pickupLeadMinutes, settings.slotIntervalMinutes, organizationTimeZone])
   const selectedTime = checkout.timing === "scheduled" && timeSlots.includes(checkout.scheduleTime) ? checkout.scheduleTime : ""
-  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart])
+
+  function productPriceForTiming(product: Product, timing: Checkout["timing"]) {
+    const promotion = product.promotion
+    if (timing !== "now" || !promotion) return product.price
+
+    const validUntil = new Date(promotion.validUntil).getTime()
+    if (Number.isFinite(validUntil) && validUntil <= promotionClock) return product.price
+
+    return Math.min(product.price, promotion.promotionalPrice)
+  }
+
+  function cartItemUnitPrice(item: CartItem) {
+    const base = productPriceForTiming(item.product, checkout.timing)
+    const modifiers = item.modifiers.reduce(
+      (sum, modifier) => sum + Math.max(0, Number(modifier.priceDelta || 0)),
+      0,
+    )
+    return Number((base + modifiers).toFixed(2))
+  }
+
+  const subtotal = useMemo(
+    () => cart.reduce((sum, item) => sum + cartItemUnitPrice(item) * item.quantity, 0),
+    [cart, checkout.timing, promotionClock],
+  )
   const totalItems = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart])
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
   const total = Math.max(0, subtotal - couponDiscount) + deliveryFee
 
   function validateCartCustomization(product: Product, optionIds: number[]) {
-    const result = validateAndPriceModifierSelection(product, optionIds)
+    const result = validateAndPriceModifierSelection(
+      {
+        ...product,
+        price: productPriceForTiming(product, checkout.timing),
+      },
+      optionIds,
+    )
     return result.ok ? result : null
   }
 
@@ -917,7 +968,15 @@ export function Storefront({
                     )}
                   </div>
                   <button type="button" onClick={() => setCustomizingProduct(product)} disabled={unavailable} className="block w-full pt-2 text-left disabled:cursor-default">
-                    <strong className="text-base">{money(product.price)}</strong>
+                    {checkout.timing === "now" && product.promotion ? (
+                      <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="text-xs font-bold text-gray-400 line-through">{money(product.price)}</span>
+                        <strong className="text-base text-orange-600">{money(productPriceForTiming(product, "now"))}</strong>
+                        {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"}</span>}
+                      </span>
+                    ) : (
+                      <strong className="text-base">{money(product.price)}</strong>
+                    )}
                     {hasModifiers && <span className="ml-1 text-[10px] font-bold text-gray-400">+ adicionais</span>}
                     <h3 className="mt-1 line-clamp-2 text-sm font-bold leading-snug">{product.name}</h3>
                     {product.description && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{product.description}</p>}
@@ -955,14 +1014,14 @@ export function Storefront({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-bold">{item.product.name}</p>
-                      <p className="text-xs text-gray-500">{money(item.unitPrice)} cada</p>
+                      <p className="text-xs text-gray-500">{money(cartItemUnitPrice(item))} cada</p>
                     </div>
                     <div className="flex items-center gap-2 rounded-xl bg-gray-100 p-1">
                       <button onClick={() => setCartItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-4 w-4" /></button>
                       <strong className="min-w-5 text-center text-sm">{item.quantity}</strong>
                       <button onClick={() => setCartItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-4 w-4" /></button>
                     </div>
-                    <strong className="w-20 text-right text-sm">{money(item.unitPrice * item.quantity)}</strong>
+                    <strong className="w-20 text-right text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong>
                   </div>
                   {item.modifiers.length > 0 && (
                     <div className="ml-[60px] mt-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
@@ -1007,7 +1066,14 @@ export function Storefront({
 
               <section><h3 className="mb-3 font-black">Como você quer receber?</h3><div className="grid gap-3 sm:grid-cols-2">{settings.pickupEnabled && <button type="button" onClick={() => { setCheckout({ ...checkout, type: "pickup", scheduleTime: "" }); setShowDeliveryMap(false); setDeliveryQuote(null) }} className={`flex items-center gap-3 rounded-2xl border p-4 text-left ${checkout.type === "pickup" ? "border-orange-400 bg-orange-50" : "border-gray-200"}`}><Store className="h-5 w-5"/><span><strong className="block">Retirada</strong><small className="text-gray-500">Buscar no estabelecimento</small></span>{checkout.type === "pickup" && <Check className="ml-auto h-5 w-5 text-orange-600"/>}</button>}{settings.deliveryEnabled && <button type="button" onClick={() => { setCheckout({ ...checkout, type: "delivery", scheduleTime: "" }); setShowDeliveryMap(false) }} className={`flex items-center gap-3 rounded-2xl border p-4 text-left ${checkout.type === "delivery" ? "border-orange-400 bg-orange-50" : "border-gray-200"}`}><Bike className="h-5 w-5"/><span><strong className="block">Delivery</strong><small className="text-gray-500">Taxa pelo endereço</small></span>{checkout.type === "delivery" && <Check className="ml-auto h-5 w-5 text-orange-600"/>}</button>}</div></section>
 
-              <section><h3 className="mb-3 flex items-center gap-2 font-black"><CalendarDays className="h-5 w-5 text-orange-500" />Quando?</h3><div className="space-y-3">{!isOpen && settings.acceptingOrders && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-xs font-black uppercase text-amber-800">Loja fora do expediente</p><p className="mt-1 text-sm font-bold text-amber-950">Você pode deixar o pedido agendado para um horário disponível.</p></div>}<select value={checkout.timing} onChange={(e) => setCheckout({ ...checkout, timing: e.target.value as Checkout["timing"], scheduleDate: "", scheduleTime: "" })} className="h-12 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold">{isOpen && <option value="now">Para agora</option>}<option value="scheduled">{isOpen ? "Agendar para outro horário" : "Agendar pedido"}</option></select>{checkout.timing === "now" ? <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4"><p className="text-xs font-black uppercase text-emerald-700">{checkout.type === "delivery" ? "Entrega para agora" : "Retirada para agora"}</p><p className="mt-1 font-black text-emerald-950">{checkout.type === "delivery" ? `Previsão de ${IMMEDIATE_DELIVERY_MIN_MINUTES} a ${IMMEDIATE_DELIVERY_MAX_MINUTES} minutos` : `Previsão de aproximadamente ${settings.pickupLeadMinutes} minutos`}</p></div> : <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-4 sm:grid-cols-2"><label><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Data</span><input type="date" required min={scheduleMinDate} max={scheduleMaxDate} value={selectedDate} onChange={(e) => setCheckout({ ...checkout, scheduleDate: e.target.value, scheduleTime: "" })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"/></label><label><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Horário</span><select required disabled={!selectedDate || !timeSlots.length} value={selectedTime} onChange={(e) => setCheckout({ ...checkout, scheduleTime: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm disabled:bg-gray-100"><option value="">{!selectedDate ? "Escolha a data primeiro" : timeSlots.length ? "Escolha o horário" : "Sem horários"}</option>{timeSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}</select></label></div>}</div></section>
+              <section><h3 className="mb-3 flex items-center gap-2 font-black"><CalendarDays className="h-5 w-5 text-orange-500" />Quando?</h3><div className="space-y-3">{!isOpen && settings.acceptingOrders && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-xs font-black uppercase text-amber-800">Loja fora do expediente</p><p className="mt-1 text-sm font-bold text-amber-950">Você pode deixar o pedido agendado para um horário disponível.</p></div>}<select value={checkout.timing} onChange={(e) => {
+  const timing = e.target.value as Checkout["timing"]
+  const losesPromotion = timing === "scheduled" && cart.some((item) => Boolean(item.product.promotion))
+  setCheckout({ ...checkout, timing, scheduleDate: "", scheduleTime: "" })
+  setPromotionNotice(losesPromotion ? "Promocoes valem somente para pedidos Para agora. No agendamento, os itens voltam automaticamente ao preco normal." : "")
+  setCouponDiscount(0)
+  setCouponMessage("")
+}} className="h-12 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold">{isOpen && <option value="now">Para agora</option>}<option value="scheduled">{isOpen ? "Agendar para outro horário" : "Agendar pedido"}</option></select>{promotionNotice && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{promotionNotice}</div>}{checkout.timing === "now" ? <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4"><p className="text-xs font-black uppercase text-emerald-700">{checkout.type === "delivery" ? "Entrega para agora" : "Retirada para agora"}</p><p className="mt-1 font-black text-emerald-950">{checkout.type === "delivery" ? `Previsão de ${IMMEDIATE_DELIVERY_MIN_MINUTES} a ${IMMEDIATE_DELIVERY_MAX_MINUTES} minutos` : `Previsão de aproximadamente ${settings.pickupLeadMinutes} minutos`}</p></div> : <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-4 sm:grid-cols-2"><label><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Data</span><input type="date" required min={scheduleMinDate} max={scheduleMaxDate} value={selectedDate} onChange={(e) => setCheckout({ ...checkout, scheduleDate: e.target.value, scheduleTime: "" })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"/></label><label><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Horário</span><select required disabled={!selectedDate || !timeSlots.length} value={selectedTime} onChange={(e) => setCheckout({ ...checkout, scheduleTime: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm disabled:bg-gray-100"><option value="">{!selectedDate ? "Escolha a data primeiro" : timeSlots.length ? "Escolha o horário" : "Sem horários"}</option>{timeSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}</select></label></div>}</div></section>
 
               {checkout.type === "delivery" && <section><h3 className="mb-1 font-black">Endereço de entrega</h3><p className="mb-3 text-sm text-gray-500">Busque o endereço ou informe o CEP. Depois confira o número e a taxa.</p><div className="grid gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2 rounded-2xl border border-blue-100 bg-blue-50/50 p-3"><p className="mb-2 text-[11px] font-black uppercase text-blue-700">Pesquisar localização completa</p><GoogleAddressAutocomplete onSelect={selectGoogleAddress} placeholder="Digite rua, número, estabelecimento ou CEP" biasCenter={{ lat: settings.storeLatitude, lng: settings.storeLongitude }} biasRadiusMeters={settings.maxDeliveryDistanceKm > 0 ? Math.max(10000, settings.maxDeliveryDistanceKm * 1200) : 50000} /><p className="mt-2 text-[11px] text-gray-500">Escolha uma sugestão e confira o número abaixo. Você também pode informar somente o CEP.</p></div>
@@ -1033,7 +1099,7 @@ export function Storefront({
             </div>}
 
             {checkoutStep === 3 && <div className="space-y-5">
-              <section><div className="flex items-center justify-between"><div><h3 className="text-lg font-black">Revise seu pedido</h3><p className="text-sm text-gray-500">Nada será enviado antes de você confirmar.</p></div><button type="button" onClick={() => { setCheckoutOpen(false); setCartOpen(true) }} className="text-xs font-black text-orange-600">Editar itens</button></div><div className="mt-4 space-y-2">{cart.map((item) => <div key={item.key} className="rounded-xl border border-gray-100 p-3"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm">{item.quantity}x {item.product.name}</strong>{item.modifiers.length > 0 && <div className="mt-1 text-xs text-gray-500">{item.modifiers.map((modifier) => modifier.optionName).join(" · ")}</div>}</div><strong className="whitespace-nowrap text-sm">{money(item.unitPrice * item.quantity)}</strong></div></div>)}</div></section>
+              <section><div className="flex items-center justify-between"><div><h3 className="text-lg font-black">Revise seu pedido</h3><p className="text-sm text-gray-500">Nada será enviado antes de você confirmar.</p></div><button type="button" onClick={() => { setCheckoutOpen(false); setCartOpen(true) }} className="text-xs font-black text-orange-600">Editar itens</button></div><div className="mt-4 space-y-2">{cart.map((item) => <div key={item.key} className="rounded-xl border border-gray-100 p-3"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm">{item.quantity}x {item.product.name}</strong>{item.modifiers.length > 0 && <div className="mt-1 text-xs text-gray-500">{item.modifiers.map((modifier) => modifier.optionName).join(" · ")}</div>}</div><strong className="whitespace-nowrap text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong></div></div>)}</div></section>
               <section className="rounded-2xl bg-gray-50 p-4"><p className="text-xs font-black uppercase tracking-wide text-gray-400">Recebimento</p><p className="mt-2 text-sm font-bold">{checkout.type === "delivery" ? "Delivery" : "Retirada"} · {checkout.timing === "now" ? "para agora" : `${checkout.scheduleDate.split("-").reverse().join("/")} às ${selectedTime}`}</p>{checkout.type === "delivery" && <p className="mt-1 text-sm text-gray-600">{checkout.address}, {checkout.number}{checkout.district ? ` · ${checkout.district}` : ""}</p>}<p className="mt-1 text-sm text-gray-600">Pagamento: {checkout.paymentMethod === "pix" ? "PIX" : checkout.paymentMethod === "cash" ? "Dinheiro" : "Cartão na entrega"}</p></section>
               <section className="rounded-2xl bg-gray-950 p-4 text-white"><div className="flex justify-between text-sm text-gray-300"><span>Produtos</span><span>{money(subtotal)}</span></div>{couponDiscount > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Desconto</span><span>-{money(couponDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-2 flex justify-between text-sm text-gray-300"><span>Taxa de entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}<div className="mt-3 flex justify-between border-t border-white/10 pt-3"><strong>Total</strong><strong className="text-xl">{money(total)}</strong></div></section>
               <p className="text-center text-[11px] leading-5 text-gray-400">Seus dados serão utilizados para processar e acompanhar este pedido. Consulte o <a href="/privacidade" target="_blank" className="font-bold text-gray-500 underline">Aviso de Privacidade</a>.</p>
@@ -1121,7 +1187,14 @@ export function Storefront({
       </div>}
 
       <ProductCustomizer
-        product={customizingProduct}
+        product={
+          customizingProduct
+            ? {
+                ...customizingProduct,
+                price: productPriceForTiming(customizingProduct, checkout.timing),
+              }
+            : null
+        }
         primaryColor={settings.primaryColor}
         onClose={() => setCustomizingProduct(null)}
         onConfirm={(customization) => {

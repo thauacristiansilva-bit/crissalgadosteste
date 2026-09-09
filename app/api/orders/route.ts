@@ -243,7 +243,9 @@ export async function POST(
           },
           items: body.items,
           requestedFor:
-            body.requestedFor,
+            timing === "scheduled"
+              ? body.requestedFor
+              : undefined,
           timing,
           couponCode:
             body.couponCode,

@@ -134,12 +134,40 @@ export interface ProductComposition {
   ingredientStockAvailable: boolean
 }
 
+export interface ProductPromotionPreview {
+  id: string
+  promotionalPrice: number
+  label: string
+  highlight: boolean
+  validUntil: string
+}
+
+export interface ProductPromotion {
+  id: string
+  productId: number
+  productName: string
+  normalPrice: number
+  promotionalPrice: number
+  startDate?: string
+  endDate?: string
+  daysOfWeek: number[]
+  startTime: string
+  endTime: string
+  recurringWeekly: boolean
+  active: boolean
+  highlight: boolean
+  label: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Product {
   id: number
   name: string
   description: string
   category: string
   price: number
+  promotion?: ProductPromotionPreview
   active: boolean
   featured: boolean
   image?: string
