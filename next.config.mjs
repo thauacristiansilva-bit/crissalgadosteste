@@ -8,35 +8,94 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
+
   [
     "script-src",
-      "https://maps.googleapis.com",
-      "https://maps.gstatic.com",
     "'self'",
     "'unsafe-inline'",
-    process.env.NODE_ENV === "development" ? "'unsafe-eval'" : "",
+    process.env.NODE_ENV === "development"
+      ? "'unsafe-eval'"
+      : "",
     googleIdentityOrigin,
+
+    // Google Maps / Google APIs
+    "https://*.googleapis.com",
+    "https://*.gstatic.com",
+    "https://*.google.com",
+
+    // Upload direto para Cloudflare R2
     "https://*.r2.cloudflarestorage.com",
   ]
     .filter(Boolean)
     .join(" "),
+
   "script-src-attr 'none'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data: https://fonts.gstatic.com",
+
+  [
+    "style-src",
+    "'self'",
+    "'unsafe-inline'",
+    "https://fonts.googleapis.com",
+  ].join(" "),
+
+  [
+    "img-src",
+    "'self'",
+    "data:",
+    "blob:",
+    "https:",
+  ].join(" "),
+
+  [
+    "font-src",
+    "'self'",
+    "data:",
+    "https://fonts.gstatic.com",
+  ].join(" "),
+
   [
     "connect-src",
-      "https://maps.googleapis.com",
-      "https://maps.gstatic.com",
+    "'self'",
+
+    // Login Google
+    googleIdentityOrigin,
+
+    // Google Maps / Places / Geocoding
+    "https://*.googleapis.com",
+    "https://*.gstatic.com",
+    "https://*.google.com",
+    "https://*.googleusercontent.com",
+
+    // Upload direto de mídia para R2
+    "https://*.r2.cloudflarestorage.com",
+
+    // Recursos usados pelo navegador
+    "data:",
+    "blob:",
+  ].join(" "),
+
+  [
+    "frame-src",
     "'self'",
     googleIdentityOrigin,
-    "https://*.r2.cloudflarestorage.com",
     "https://*.google.com",
   ].join(" "),
-  `frame-src 'self' ${googleIdentityOrigin}`,
-  "worker-src 'self' blob:",
-  "media-src 'self' blob: https:",
+
+  [
+    "worker-src",
+    "'self'",
+    "blob:",
+  ].join(" "),
+
+  [
+    "media-src",
+    "'self'",
+    "blob:",
+    "https:",
+  ].join(" "),
+
   "manifest-src 'self'",
+
   process.env.NODE_ENV === "production"
     ? "upgrade-insecure-requests"
     : "",
@@ -117,14 +176,26 @@ const apiNoStoreHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
-  images: { unoptimized: true },
-  turbopack: { root: path.resolve(process.cwd()) },
+
+  images: {
+    unoptimized: true,
+  },
+
+  turbopack: {
+    root: path.resolve(process.cwd()),
+  },
+
   async headers() {
     return [
       {
         source: "/:path*",
         headers: securityHeaders,
       },
+
+      // =========================
+      // PAINÉIS PRIVADOS
+      // =========================
+
       {
         source: "/admin/:path*",
         headers: privateNoStoreHeaders,
@@ -157,6 +228,11 @@ const nextConfig = {
         source: "/minha-loja/:path*",
         headers: privateNoStoreHeaders,
       },
+
+      // =========================
+      // APIs SENSÍVEIS
+      // =========================
+
       {
         source: "/api/admin/:path*",
         headers: apiNoStoreHeaders,
