@@ -10,6 +10,8 @@ const contentSecurityPolicy = [
   "form-action 'self'",
   [
     "script-src",
+      "https://maps.googleapis.com",
+      "https://maps.gstatic.com",
     "'self'",
     "'unsafe-inline'",
     process.env.NODE_ENV === "development" ? "'unsafe-eval'" : "",
@@ -19,11 +21,13 @@ const contentSecurityPolicy = [
     .filter(Boolean)
     .join(" "),
   "script-src-attr 'none'",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
+  "font-src 'self' data: https://fonts.gstatic.com",
   [
     "connect-src",
+      "https://maps.googleapis.com",
+      "https://maps.gstatic.com",
     "'self'",
     googleIdentityOrigin,
     "https://*.r2.cloudflarestorage.com",
