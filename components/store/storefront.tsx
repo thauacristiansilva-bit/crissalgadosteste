@@ -11,6 +11,10 @@ import { DeliveryLocationMap } from "@/components/store/delivery-location-map"
 import { GoogleAddressAutocomplete, type GoogleAddressSelection } from "@/components/maps/google-address-autocomplete"
 import { ClientAccountModal } from "@/components/store/client-account-modal"
 import { StoreChatbot } from "@/components/store/store-chatbot"
+import {
+  AiOrderAssistant,
+  type AiOrderItem,
+} from "@/components/store/ai-order-assistant"
 import { ProductCustomizer, type ProductCustomization } from "@/components/catalog/product-customizer"
 import {
   modifierSelectionKey,
@@ -339,6 +343,93 @@ export function Storefront({
       if (existing) return current.map((item) => item.key === key ? { ...item, quantity } : item)
       return [...current, { key, product, quantity, optionIds: [], unitPrice: pricing.unitPrice, modifiers: pricing.modifiers }]
     })
+  }
+
+  function applyAiOrderItems(
+    items: AiOrderItem[],
+  ) {
+    const notes: string[] = []
+
+    let firstProductToCustomize:
+      Product | null = null
+
+    for (const item of items) {
+      const product =
+        products.find(
+          (current) =>
+            current.id ===
+            item.productId,
+        )
+
+      if (!product) {
+        continue
+      }
+
+      const unavailable =
+        (
+          product.trackStock &&
+          product.stock <= 0
+        ) ||
+        product
+          .ingredientStockAvailable ===
+          false
+
+      if (unavailable) {
+        continue
+      }
+
+      if (
+        productHasModifiers(
+          product,
+        )
+      ) {
+        if (
+          !firstProductToCustomize
+        ) {
+          firstProductToCustomize =
+            product
+        }
+
+        continue
+      }
+
+      setSimpleProductQuantity(
+        product,
+        totalProductQuantity(
+          product.id,
+        ) + item.quantity,
+      )
+
+      if (item.note) {
+        notes.push(
+          `${product.name}: ${item.note}`,
+        )
+      }
+    }
+
+    if (notes.length) {
+      setCheckout(
+        (current) => ({
+          ...current,
+          notes: [
+            current.notes,
+            ...notes,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        }),
+      )
+    }
+
+    if (
+      firstProductToCustomize
+    ) {
+      setCustomizingProduct(
+        firstProductToCustomize,
+      )
+    } else {
+      setCartOpen(true)
+    }
   }
 
   function setCartItemQuantity(key: string, quantity: number) {
@@ -759,6 +850,15 @@ export function Storefront({
             {pageMode === "catalog" && <a href={directOrderPath} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-white" style={{ backgroundColor: settings.primaryColor }}><ShoppingBag className="h-4 w-4" />Fazer pedido</a>}
           </div>
         </section>
+
+        {pageMode === "order" && (
+          <AiOrderAssistant
+            products={products}
+            primaryColor={settings.primaryColor}
+            storeName={settings.storeName}
+            onApply={applyAiOrderItems}
+          />
+        )}
 
         {lastOrder && !["completed", "cancelled"].includes(lastOrder.status) && <a href={orderPath(lastOrder.reference)} className="mt-4 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><div className="rounded-xl bg-white p-2 text-emerald-700"><PackageCheck className="h-5 w-5"/></div><div><p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Pedido em andamento</p><p className="mt-1 font-black text-gray-950">{lastOrder.code} · {compactOrderStatus[lastOrder.status]}</p><p className="mt-1 text-xs text-gray-600">O pedido continua no SaborFlow mesmo quando você conversa com a loja pelo WhatsApp.</p></div></div><span className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-700 px-4 text-xs font-black text-white">Acompanhar pedido</span></a>}
 
