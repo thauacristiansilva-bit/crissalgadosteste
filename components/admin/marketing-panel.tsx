@@ -24,6 +24,7 @@ import {
 import type {
   Coupon,
   CustomerSummary,
+  Product,
   ProductPromotion,
   StoreSettings,
 } from "@/lib/types"
@@ -34,6 +35,18 @@ type PromotionProduct = {
   category: string
   price: number
   active: boolean
+}
+
+function toPromotionProducts(
+  products: Product[],
+): PromotionProduct[] {
+  return products.map((product) => ({
+    id: product.id,
+    name: product.name,
+    category: product.category,
+    price: Number(product.price),
+    active: product.active,
+  }))
 }
 
 const dayOptions = [
@@ -87,11 +100,13 @@ function promotionPeriod(
 }
 
 export function MarketingPanel({
+  products: dashboardProducts,
   coupons: initialCoupons,
   customers,
   settings,
   onSettingsChanged,
 }: {
+  products: Product[]
   coupons: Coupon[]
   customers: CustomerSummary[]
   settings: StoreSettings
@@ -138,7 +153,12 @@ export function MarketingPanel({
     })
 
   const [promotionProducts, setPromotionProducts] =
-    useState<PromotionProduct[]>([])
+    useState<PromotionProduct[]>(
+      () =>
+        toPromotionProducts(
+          dashboardProducts,
+        ),
+    )
 
   const [promotions, setPromotions] =
     useState<ProductPromotion[]>([])
@@ -180,6 +200,19 @@ export function MarketingPanel({
     ) || null
 
   useEffect(() => {
+    const dashboardList =
+      toPromotionProducts(
+        dashboardProducts,
+      )
+
+    if (dashboardList.length) {
+      setPromotionProducts(
+        dashboardList,
+      )
+    }
+  }, [dashboardProducts])
+
+  useEffect(() => {
     let disposed = false
 
     fetch("/api/promotions", {
@@ -208,12 +241,19 @@ export function MarketingPanel({
             ? data.promotions
             : [],
         )
-        setPromotionProducts(
+        const apiProducts =
           Array.isArray(
             data.products,
           )
             ? data.products
-            : [],
+            : []
+
+        setPromotionProducts(
+          apiProducts.length
+            ? apiProducts
+            : toPromotionProducts(
+                dashboardProducts,
+              ),
         )
       })
       .catch((error) => {
@@ -629,14 +669,14 @@ export function MarketingPanel({
               Regra obrigatória
             </p>
             <h2 className="mt-1 text-lg font-black text-gray-950">
-              Promoção somente para pedido imediato
+              Promoção imediata ou agendada para o mesmo dia
             </h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-700">
-              O preço promocional vale apenas quando o cliente escolhe
-              <strong> Para agora</strong>. Qualquer agendamento,
-              inclusive para mais tarde no mesmo dia, volta automaticamente
-              ao preço normal. O servidor valida essa regra novamente antes
-              de criar o pedido.
+              Enquanto a promoção estiver ativa, o cliente pode pedir
+              <strong> Para agora</strong> ou agendar um horário
+              <strong> para o mesmo dia</strong>. Agendamentos para outro
+              dia usam automaticamente o preço normal. O servidor confere
+              novamente a promoção e a data antes de criar o pedido.
             </p>
           </div>
         </div>

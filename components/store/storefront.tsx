@@ -162,15 +162,46 @@ export function Storefront({
   }, [isOpen, settings.acceptingOrders])
 
   useEffect(() => {
-    if (checkout.timing !== "scheduled") return
-    if (cart.some((item) => Boolean(item.product.promotion))) {
-      setPromotionNotice(
-        "Promocoes valem somente para pedidos Para agora. No agendamento, os itens voltam automaticamente ao preco normal.",
-      )
+    if (checkout.timing !== "scheduled") {
+      setPromotionNotice("")
+      return
     }
+
+    if (
+      cart.some(
+        (item) =>
+          Boolean(
+            item.product.promotion,
+          ),
+      )
+    ) {
+      const today =
+        new Date().toLocaleDateString(
+          "en-CA",
+          {
+            timeZone:
+              settings.timeZone ||
+              "America/Sao_Paulo",
+          },
+        )
+
+      setPromotionNotice(
+        checkout.scheduleDate &&
+        checkout.scheduleDate === today
+          ? "Promoção mantida para o agendamento de hoje. Ela precisa continuar ativa no momento em que você finalizar o pedido."
+          : "Para usar a promoção no agendamento, escolha um horário de hoje enquanto a promoção estiver ativa.",
+      )
+    } else {
+      setPromotionNotice("")
+    }
+
     setCouponDiscount(0)
     setCouponMessage("")
-  }, [checkout.timing])
+  }, [
+    checkout.timing,
+    checkout.scheduleDate,
+    settings.timeZone,
+  ])
 
   useEffect(() => { fetch("/api/client/me", { cache: "no-store" }).then((r) => r.json()).then((data) => { if (data.customer) setCustomer(data.customer) }).catch(() => undefined) }, [])
 
@@ -340,12 +371,42 @@ export function Storefront({
 
   function productPriceForTiming(product: Product, timing: Checkout["timing"]) {
     const promotion = product.promotion
-    if (timing !== "now" || !promotion) return product.price
+    if (!promotion) return product.price
 
-    const validUntil = new Date(promotion.validUntil).getTime()
-    if (Number.isFinite(validUntil) && validUntil <= promotionClock) return product.price
+    const validUntil =
+      new Date(
+        promotion.validUntil,
+      ).getTime()
 
-    return Math.min(product.price, promotion.promotionalPrice)
+    if (
+      Number.isFinite(
+        validUntil,
+      ) &&
+      validUntil <= promotionClock
+    ) {
+      return product.price
+    }
+
+    if (timing === "now") {
+      return Math.min(
+        product.price,
+        promotion.promotionalPrice,
+      )
+    }
+
+    if (
+      timing === "scheduled" &&
+      checkout.scheduleDate &&
+      checkout.scheduleDate ===
+        scheduleMinDate
+    ) {
+      return Math.min(
+        product.price,
+        promotion.promotionalPrice,
+      )
+    }
+
+    return product.price
   }
 
   function cartItemUnitPrice(item: CartItem) {
@@ -359,7 +420,12 @@ export function Storefront({
 
   const subtotal = useMemo(
     () => cart.reduce((sum, item) => sum + cartItemUnitPrice(item) * item.quantity, 0),
-    [cart, checkout.timing, promotionClock],
+    [
+      cart,
+      checkout.timing,
+      checkout.scheduleDate,
+      promotionClock,
+    ],
   )
   const totalItems = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart])
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
@@ -968,10 +1034,10 @@ export function Storefront({
                     )}
                   </div>
                   <button type="button" onClick={() => setCustomizingProduct(product)} disabled={unavailable} className="block w-full pt-2 text-left disabled:cursor-default">
-                    {checkout.timing === "now" && product.promotion ? (
+                    {product.promotion && productPriceForTiming(product, checkout.timing) < product.price ? (
                       <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="text-xs font-bold text-gray-400 line-through">{money(product.price)}</span>
-                        <strong className="text-base text-orange-600">{money(productPriceForTiming(product, "now"))}</strong>
+                        <strong className="text-base text-orange-600">{money(productPriceForTiming(product, checkout.timing))}</strong>
                         {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"}</span>}
                       </span>
                     ) : (
@@ -1068,9 +1134,13 @@ export function Storefront({
 
               <section><h3 className="mb-3 flex items-center gap-2 font-black"><CalendarDays className="h-5 w-5 text-orange-500" />Quando?</h3><div className="space-y-3">{!isOpen && settings.acceptingOrders && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-xs font-black uppercase text-amber-800">Loja fora do expediente</p><p className="mt-1 text-sm font-bold text-amber-950">Você pode deixar o pedido agendado para um horário disponível.</p></div>}<select value={checkout.timing} onChange={(e) => {
   const timing = e.target.value as Checkout["timing"]
-  const losesPromotion = timing === "scheduled" && cart.some((item) => Boolean(item.product.promotion))
+  const hasPromotion = cart.some((item) => Boolean(item.product.promotion))
   setCheckout({ ...checkout, timing, scheduleDate: "", scheduleTime: "" })
-  setPromotionNotice(losesPromotion ? "Promocoes valem somente para pedidos Para agora. No agendamento, os itens voltam automaticamente ao preco normal." : "")
+  setPromotionNotice(
+    timing === "scheduled" && hasPromotion
+      ? "Para manter a promoção no agendamento, escolha um horário de hoje enquanto a promoção estiver ativa."
+      : "",
+  )
   setCouponDiscount(0)
   setCouponMessage("")
 }} className="h-12 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold">{isOpen && <option value="now">Para agora</option>}<option value="scheduled">{isOpen ? "Agendar para outro horário" : "Agendar pedido"}</option></select>{promotionNotice && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{promotionNotice}</div>}{checkout.timing === "now" ? <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4"><p className="text-xs font-black uppercase text-emerald-700">{checkout.type === "delivery" ? "Entrega para agora" : "Retirada para agora"}</p><p className="mt-1 font-black text-emerald-950">{checkout.type === "delivery" ? `Previsão de ${IMMEDIATE_DELIVERY_MIN_MINUTES} a ${IMMEDIATE_DELIVERY_MAX_MINUTES} minutos` : `Previsão de aproximadamente ${settings.pickupLeadMinutes} minutos`}</p></div> : <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-4 sm:grid-cols-2"><label><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Data</span><input type="date" required min={scheduleMinDate} max={scheduleMaxDate} value={selectedDate} onChange={(e) => setCheckout({ ...checkout, scheduleDate: e.target.value, scheduleTime: "" })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"/></label><label><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Horário</span><select required disabled={!selectedDate || !timeSlots.length} value={selectedTime} onChange={(e) => setCheckout({ ...checkout, scheduleTime: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm disabled:bg-gray-100"><option value="">{!selectedDate ? "Escolha a data primeiro" : timeSlots.length ? "Escolha o horário" : "Sem horários"}</option>{timeSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}</select></label></div>}</div></section>

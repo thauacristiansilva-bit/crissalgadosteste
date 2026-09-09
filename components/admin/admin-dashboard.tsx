@@ -619,7 +619,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "products" && <ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} />}
           {section === "categories" && <CategoriesPanel categories={categories} onCategoriesChanged={setCategories} />}
           {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} canViewFinancialData={canViewFinancialData} />}
-          {section === "marketing" && <MarketingPanel coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
+          {section === "marketing" && <MarketingPanel products={products} coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
           {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment)} />}
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}

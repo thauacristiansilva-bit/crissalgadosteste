@@ -735,9 +735,20 @@ export async function getCheckoutPromotionPriceMap(
       }
     >()
 
-  // Regra SaborFlow 14.8:
-  // qualquer agendamento usa preco normal.
-  if (timing !== "now") {
+  // PROMO_SCHEDULE_SAME_DAY_1482
+  // A promocao vale para "Para agora" e tambem para agendamento
+  // do mesmo dia, desde que esteja ativa no momento do checkout.
+  if (
+    timing !== "now" &&
+    timing !== "scheduled"
+  ) {
+    return prices
+  }
+
+  if (
+    timing === "scheduled" &&
+    !requestedFor
+  ) {
     return prices
   }
 
@@ -767,8 +778,8 @@ export async function getCheckoutPromotionPriceMap(
     fulfillment = now
   }
 
-  // Nao permite comprar hoje com preco
-  // promocional para receber em outro dia.
+  // Tanto no pedido imediato quanto no agendamento:
+  // nunca permite usar o preco promocional para receber em outro dia.
   if (
     zonedParts(
       fulfillment,
