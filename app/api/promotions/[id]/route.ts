@@ -7,6 +7,7 @@ import {
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { canManageMarketing } from "@/lib/tenant-permissions"
 import { requestIsSameOrigin } from "@/lib/security/request-security"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const dynamic = "force-dynamic"
 
@@ -172,10 +173,16 @@ export async function PATCH(
     }
 
     const promotion =
-      await updateTenantProductPromotion(
-        session.organizationId,
-        id,
-        patchFromBody(body),
+      await runWithTenantRlsScope(
+        [session.organizationId],
+        session.userId,
+        () =>
+          updateTenantProductPromotion(
+            session.organizationId,
+            id,
+            patchFromBody(body),
+          ),
+        "tenant-session",
       )
 
     if (!promotion) {
@@ -202,6 +209,11 @@ export async function PATCH(
       promotion,
     })
   } catch (error) {
+    console.error(
+      "[promotions:PATCH]",
+      error,
+    )
+
     return NextResponse.json(
       {
         error:

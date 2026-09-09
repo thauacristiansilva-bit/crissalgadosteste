@@ -10,6 +10,7 @@ import {
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { canManageMarketing } from "@/lib/tenant-permissions"
 import { requestIsSameOrigin } from "@/lib/security/request-security"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const dynamic = "force-dynamic"
 
@@ -88,36 +89,56 @@ export async function GET() {
     )
   }
 
-  const [
-    ready,
-    promotions,
-    products,
-  ] = await Promise.all([
-    isProductPromotionsReady()
-      .catch(() => false),
-    getTenantProductPromotions(
-      session.organizationId,
-      { includeInactive: true },
-    ),
-    getTenantProducts(
-      session.organizationId,
-      { includeInactive: true },
-    ),
-  ])
+  try {
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        const [
+          ready,
+          promotions,
+          products,
+        ] = await Promise.all([
+          isProductPromotionsReady()
+            .catch(() => false),
+          getTenantProductPromotions(
+            session.organizationId,
+            { includeInactive: true },
+          ),
+          getTenantProducts(
+            session.organizationId,
+            { includeInactive: true },
+          ),
+        ])
 
-  return NextResponse.json({
-    ready,
-    promotions,
-    products: products.map(
-      (product) => ({
-        id: product.id,
-        name: product.name,
-        category: product.category,
-        price: product.price,
-        active: product.active,
-      }),
-    ),
-  })
+        return NextResponse.json({
+          ready,
+          promotions,
+          products: products.map(
+            (product) => ({
+              id: product.id,
+              name: product.name,
+              category:
+                product.category,
+              price: product.price,
+              active: product.active,
+            }),
+          ),
+        })
+      },
+      "tenant-session",
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel carregar promocoes.",
+      },
+      { status: 400 },
+    )
+  }
 }
 
 export async function POST(
@@ -186,9 +207,15 @@ export async function POST(
     }
 
     const promotion =
-      await createTenantProductPromotion(
-        session.organizationId,
-        inputFromBody(body),
+      await runWithTenantRlsScope(
+        [session.organizationId],
+        session.userId,
+        () =>
+          createTenantProductPromotion(
+            session.organizationId,
+            inputFromBody(body),
+          ),
+        "tenant-session",
       )
 
     if (!promotion) {
@@ -212,6 +239,11 @@ export async function POST(
       { status: 201 },
     )
   } catch (error) {
+    console.error(
+      "[promotions:POST]",
+      error,
+    )
+
     return NextResponse.json(
       {
         error:

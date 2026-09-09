@@ -169,6 +169,9 @@ export function MarketingPanel({
   const [promotionBusy, setPromotionBusy] =
     useState(false)
 
+  const [promotionMessage, setPromotionMessage] =
+    useState("")
+
   const [editingPromotionId, setEditingPromotionId] =
     useState<string | null>(null)
 
@@ -501,9 +504,10 @@ export function MarketingPanel({
     if (
       !promotionDraft.productId
     ) {
-      setMessage(
-        "Selecione um produto.",
-      )
+      const text =
+        "Selecione um produto."
+      setPromotionMessage(text)
+      setMessage(text)
       return
     }
 
@@ -511,9 +515,10 @@ export function MarketingPanel({
       !promotionDraft
         .daysOfWeek.length
     ) {
-      setMessage(
-        "Selecione pelo menos um dia da semana.",
-      )
+      const text =
+        "Selecione pelo menos um dia da semana."
+      setPromotionMessage(text)
+      setMessage(text)
       return
     }
 
@@ -523,7 +528,23 @@ export function MarketingPanel({
           .replace(",", "."),
       )
 
+    if (
+      !Number.isFinite(
+        promotionalPrice,
+      ) ||
+      promotionalPrice <= 0
+    ) {
+      const text =
+        "Informe um preco promocional valido."
+      setPromotionMessage(text)
+      setMessage(text)
+      return
+    }
+
     setPromotionBusy(true)
+    setPromotionMessage(
+      "Salvando promocao...",
+    )
     setMessage("")
 
     try {
@@ -556,18 +577,41 @@ export function MarketingPanel({
           },
         )
 
-      const data =
-        await response.json()
+      const responseText =
+        await response.text()
+
+      let data: {
+        promotion?: ProductPromotion
+        error?: string
+      } = {}
+
+      try {
+        data = responseText
+          ? JSON.parse(responseText)
+          : {}
+      } catch {
+        data = {
+          error:
+            responseText ||
+            `Erro HTTP ${response.status} ao salvar promocao.`,
+        }
+      }
 
       if (!response.ok) {
         throw new Error(
           data.error ||
-            "Erro ao salvar promoção.",
+            `Erro HTTP ${response.status} ao salvar promocao.`,
+        )
+      }
+
+      if (!data.promotion) {
+        throw new Error(
+          "O servidor respondeu sem retornar a promocao criada.",
         )
       }
 
       const promotion =
-        data.promotion as ProductPromotion
+        data.promotion
 
       setPromotions(
         (current) =>
@@ -587,16 +631,28 @@ export function MarketingPanel({
 
       resetPromotionForm()
 
-      setMessage(
+      const successMessage =
         editing
-          ? "Promoção atualizada."
-          : "Promoção criada.",
+          ? "Promocao atualizada com sucesso."
+          : "Promocao criada com sucesso."
+
+      setPromotionMessage(
+        successMessage,
+      )
+      setMessage(
+        successMessage,
       )
     } catch (error) {
-      setMessage(
+      const errorMessage =
         error instanceof Error
           ? error.message
-          : "Erro ao salvar promoção.",
+          : "Erro ao salvar promocao."
+
+      setPromotionMessage(
+        errorMessage,
+      )
+      setMessage(
+        errorMessage,
       )
     } finally {
       setPromotionBusy(false)
@@ -1011,6 +1067,22 @@ export function MarketingPanel({
                 ? "Salvar alteracoes"
                 : "Criar promoção"}
           </button>
+
+          {promotionMessage && (
+            <div
+              className={`rounded-xl border px-4 py-3 text-sm font-bold ${
+                /criada|atualizada|sucesso/i.test(
+                  promotionMessage,
+                )
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : promotionBusy
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-red-200 bg-red-50 text-red-700"
+              }`}
+            >
+              {promotionMessage}
+            </div>
+          )}
         </form>
 
         <div className="mt-5 space-y-2">
