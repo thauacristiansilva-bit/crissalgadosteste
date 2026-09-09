@@ -18,10 +18,6 @@ import {
   Square,
 } from "lucide-react"
 
-import {
-  productHasModifiers,
-} from "@/lib/product-composition"
-
 import type {
   Product,
 } from "@/lib/types"
@@ -138,31 +134,6 @@ export function AiOrderAssistant({
     }
   }, [])
 
-  function catalog() {
-    return products.map(
-      (product) => ({
-        id: product.id,
-        name: product.name,
-        description:
-          product.description || "",
-        available:
-          !(
-            (
-              product.trackStock &&
-              product.stock <= 0
-            ) ||
-            product
-              .ingredientStockAvailable ===
-              false
-          ),
-        hasModifiers:
-          productHasModifiers(
-            product,
-          ),
-      }),
-    )
-  }
-
   async function send(
     audio?: Blob,
   ) {
@@ -213,13 +184,6 @@ export function AiOrderAssistant({
         )
 
         form.append(
-          "catalog",
-          JSON.stringify(
-            catalog(),
-          ),
-        )
-
-        form.append(
           "message",
           textEnabled
             ? text.trim()
@@ -247,8 +211,6 @@ export function AiOrderAssistant({
               body: JSON.stringify({
                 message:
                   text.trim(),
-                catalog:
-                  catalog(),
               }),
             },
           )
