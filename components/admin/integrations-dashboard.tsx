@@ -26,6 +26,7 @@ type Connection = {
   provider: Provider
   status: "disabled" | "active" | "error"
   settings: Record<string, unknown>
+  webhookPath?: string | null
   credentialConfigured: boolean
   lastSuccessAt: string | null
   lastErrorAt: string | null
@@ -133,6 +134,8 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
   const [authToken, setAuthToken] = useState("")
   const [accessToken, setAccessToken] = useState("")
   const [phoneNumberId, setPhoneNumberId] = useState("")
+  const [appSecret, setAppSecret] = useState("")
+  const [verifyToken, setVerifyToken] = useState("")
   const [apiVersion, setApiVersion] = useState("")
   const [templateName, setTemplateName] = useState("")
   const [languageCode, setLanguageCode] = useState("pt_BR")
@@ -209,6 +212,8 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
       settings.languageCode = languageCode
       credentials.accessToken = accessToken
       credentials.phoneNumberId = phoneNumberId
+      credentials.appSecret = appSecret
+      credentials.verifyToken = verifyToken
     } else {
       settings.endpointUrl = endpointUrl
       credentials.signingSecret = signingSecret
@@ -230,6 +235,8 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
       setAuthToken("")
       setAccessToken("")
       setPhoneNumberId("")
+      setAppSecret("")
+      setVerifyToken("")
       setTemplateName("")
       setEndpointUrl("")
       setSigningSecret("")
@@ -313,7 +320,92 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
 
                   {provider === "resend" && <><label className="text-sm font-bold">Remetente<input value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" placeholder="Loja <contato@dominio.com>" required /></label><label className="text-sm font-bold">API Key<input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label></>}
                   {provider === "twilio" && <><label className="text-sm font-bold">Número remetente<input value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" placeholder="+5511..." required /></label><label className="text-sm font-bold">Código do país<input value={defaultCountryCode} onChange={(e) => setDefaultCountryCode(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label><label className="text-sm font-bold">Account SID<input type="password" value={accountSid} onChange={(e) => setAccountSid(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label><label className="text-sm font-bold">Auth Token<input type="password" value={authToken} onChange={(e) => setAuthToken(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label></>}
-                  {provider === "whatsapp_meta" && <><label className="text-sm font-bold">Graph API version<input value={apiVersion} onChange={(e) => setApiVersion(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" placeholder="vNN.N" required /></label><label className="text-sm font-bold">Código do país<input value={defaultCountryCode} onChange={(e) => setDefaultCountryCode(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label><label className="text-sm font-bold">Template aprovado<input value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" placeholder="nome_do_template" required /></label><label className="text-sm font-bold">Idioma do template<input value={languageCode} onChange={(e) => setLanguageCode(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" placeholder="pt_BR" required /></label><label className="text-sm font-bold">Phone Number ID<input type="password" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label><label className="text-sm font-bold">Access Token<input type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" required /></label><p className="sm:col-span-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">A mensagem da campanha é enviada como o primeiro parâmetro do corpo do template. Use um template aprovado com um parâmetro de texto no corpo.</p></>}
+                  {provider === "whatsapp_meta" && (
+                    <>
+                      <label className="text-sm font-bold">
+                        Graph API version
+                        <input
+                          value={apiVersion}
+                          onChange={(e) => setApiVersion(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          placeholder="vNN.N"
+                          required
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        Código do país
+                        <input
+                          value={defaultCountryCode}
+                          onChange={(e) => setDefaultCountryCode(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          required
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        Template aprovado
+                        <input
+                          value={templateName}
+                          onChange={(e) => setTemplateName(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          placeholder="Opcional nesta etapa"
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        Idioma do template
+                        <input
+                          value={languageCode}
+                          onChange={(e) => setLanguageCode(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          placeholder="pt_BR"
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        Phone Number ID
+                        <input
+                          type="password"
+                          value={phoneNumberId}
+                          onChange={(e) => setPhoneNumberId(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          required
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        Access Token
+                        <input
+                          type="password"
+                          value={accessToken}
+                          onChange={(e) => setAccessToken(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          required
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        App Secret da Meta
+                        <input
+                          type="password"
+                          value={appSecret}
+                          onChange={(e) => setAppSecret(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          minLength={16}
+                          required
+                        />
+                      </label>
+                      <label className="text-sm font-bold">
+                        Verify Token do webhook
+                        <input
+                          type="password"
+                          value={verifyToken}
+                          onChange={(e) => setVerifyToken(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+                          minLength={16}
+                          required
+                        />
+                      </label>
+                      <p className="sm:col-span-2 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+                        App Secret e Verify Token protegem o webhook de entrada. O template é necessário apenas quando esta conexão também for usada para iniciar mensagens/campanhas.
+                      </p>
+                    </>
+                  )}
                   {provider === "webhook" && <><label className="text-sm font-bold sm:col-span-2">Endpoint HTTPS<input value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" placeholder="https://integracao.exemplo.com/saborflow" required /></label><label className="text-sm font-bold sm:col-span-2">Segredo HMAC<input type="password" value={signingSecret} onChange={(e) => setSigningSecret(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" minLength={16} required /></label></>}
                 </div>
                 <label className="mt-4 flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Ativar imediatamente</label>
@@ -328,6 +420,17 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
                     <div className="flex items-start justify-between gap-3"><div><p className="flex items-center gap-2 font-black"><IconForChannel channel={item.channel} />{item.name}</p><p className="mt-1 text-xs text-slate-500">{providerLabels[item.provider]} · {statusLabels[item.status]}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.status === "active" ? "bg-emerald-50 text-emerald-700" : item.status === "error" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"}`}>{statusLabels[item.status]}</span></div>
                     {item.lastSuccessAt && <p className="mt-2 text-xs text-emerald-700">Último sucesso: {dateTime(item.lastSuccessAt)}</p>}
                     {item.lastError && <p className="mt-2 rounded-xl bg-red-50 p-2 text-xs text-red-700">{item.lastError}</p>}
+                    {item.provider === "whatsapp_meta" && item.webhookPath && (
+                      <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800">
+                        <p className="font-black">Callback URL do webhook</p>
+                        <code className="mt-1 block break-all">
+                          https://appsaborflow.com.br{item.webhookPath}
+                        </code>
+                        <p className="mt-2">
+                          Na Meta, use exatamente o mesmo Verify Token informado ao criar esta conexão.
+                        </p>
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy} onClick={() => void action({ action: "set_connection_status", connectionId: item.id, enabled: item.status !== "active" })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black">{item.status === "active" ? "Desativar" : "Ativar"}</button><button disabled={busy} onClick={() => { if (window.confirm("Excluir esta conexão?")) void action({ action: "delete_connection", connectionId: item.id }) }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-black text-red-700"><Trash2 className="h-3.5 w-3.5" />Excluir</button></div>
                   </article>)}
                 </div>

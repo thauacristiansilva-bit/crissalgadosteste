@@ -25,6 +25,7 @@ export type IntegrationConnection = {
   provider: IntegrationProvider
   status: IntegrationConnectionStatus
   settings: Record<string, unknown>
+  webhookPath: string | null
   credentialConfigured: boolean
   lastSuccessAt: string | null
   lastErrorAt: string | null
@@ -122,10 +123,9 @@ function sanitizedConnectionSettings(provider: IntegrationProvider, input: Recor
     const apiVersion = cleanText(input.apiVersion, 20)
     const defaultCountryCode = cleanText(input.defaultCountryCode, 5).replace(/\D/g, "")
     const templateName = cleanText(input.templateName, 200)
-    const languageCode = cleanText(input.languageCode, 20)
+    const languageCode = cleanText(input.languageCode, 20) || "pt_BR"
     if (!/^v\d+\.\d+$/.test(apiVersion)) throw new Error("Informe a versão da Graph API no formato vNN.N.")
     if (!defaultCountryCode) throw new Error("Informe o código do país para os destinatários.")
-    if (!templateName || !languageCode) throw new Error("Informe o template aprovado e o idioma usados no WhatsApp.")
     return { apiVersion, defaultCountryCode, templateName, languageCode }
   }
   const endpointUrl = cleanText(input.endpointUrl, 1000)
@@ -155,8 +155,12 @@ function sanitizedCredentials(provider: IntegrationProvider, input: Record<strin
   if (provider === "whatsapp_meta") {
     const accessToken = cleanText(input.accessToken, 4000)
     const phoneNumberId = cleanText(input.phoneNumberId, 100)
+    const appSecret = cleanText(input.appSecret, 1000)
+    const verifyToken = cleanText(input.verifyToken, 500)
     if (!accessToken || !phoneNumberId) throw new Error("Informe Access Token e Phone Number ID da Meta.")
-    return { accessToken, phoneNumberId }
+    if (appSecret.length < 16) throw new Error("Informe o App Secret da Meta.")
+    if (verifyToken.length < 16) throw new Error("O Verify Token do webhook precisa ter pelo menos 16 caracteres.")
+    return { accessToken, phoneNumberId, appSecret, verifyToken }
   }
   const signingSecret = cleanText(input.signingSecret, 1000)
   if (signingSecret.length < 16) throw new Error("O segredo de assinatura do webhook precisa ter pelo menos 16 caracteres.")
@@ -243,6 +247,10 @@ export async function getIntegrationsOverview(session: TenantAdminSession) {
     provider: row.provider,
     status: row.status,
     settings: jsonObject(row.settings),
+    webhookPath:
+      row.provider === "whatsapp_meta"
+        ? `/api/integrations/whatsapp/${row.id}`
+        : null,
     credentialConfigured: Boolean(row.encrypted_credentials),
     lastSuccessAt: iso(row.last_success_at),
     lastErrorAt: iso(row.last_error_at),
