@@ -234,6 +234,46 @@ export async function getTenantSettings(
     systemName: "SaborFlow",
     timeZone: row.timezone || "America/Sao_Paulo",
     deliveryTrackingEnabled: settings.deliveryTrackingEnabled !== false,
+
+    // Central IA / automacoes.
+    chatbotEnabled:
+      settings.chatbotEnabled === true,
+
+    aiStorefrontChatEnabled:
+      settings.aiStorefrontChatEnabled !== false,
+
+    aiStorefrontTextEnabled:
+      settings.aiStorefrontTextEnabled !== false,
+
+    aiStorefrontAudioEnabled:
+      settings.aiStorefrontAudioEnabled !== false,
+
+    aiFloatingButtonEnabled:
+      settings.aiFloatingButtonEnabled !== false,
+
+    aiPdvEnabled:
+      settings.aiPdvEnabled === true,
+
+    aiPdvTextEnabled:
+      settings.aiPdvTextEnabled !== false,
+
+    aiPdvAudioEnabled:
+      settings.aiPdvAudioEnabled !== false,
+
+    whatsappAiEnabled:
+      settings.whatsappAiEnabled === true,
+
+    whatsappAutoServiceEnabled:
+      settings.whatsappAutoServiceEnabled === true,
+
+    whatsappOrdersEnabled:
+      settings.whatsappOrdersEnabled === true,
+
+    whatsappConfirmationsEnabled:
+      settings.whatsappConfirmationsEnabled === true,
+
+    whatsappHumanHandoffEnabled:
+      settings.whatsappHumanHandoffEnabled !== false,
   }
 }
 
@@ -314,6 +354,78 @@ function normalizedSettings(
           .filter(Boolean)
           .slice(0, 8)
       : current.galleryImages,
+    chatbotEnabled:
+      patch.chatbotEnabled !== undefined
+        ? Boolean(patch.chatbotEnabled)
+        : current.chatbotEnabled,
+
+    chatbotGreeting:
+      patch.chatbotGreeting !== undefined
+        ? String(patch.chatbotGreeting)
+            .trim()
+            .slice(0, 500)
+        : current.chatbotGreeting,
+
+    aiStorefrontChatEnabled:
+      patch.aiStorefrontChatEnabled !== undefined
+        ? Boolean(patch.aiStorefrontChatEnabled)
+        : current.aiStorefrontChatEnabled,
+
+    aiStorefrontTextEnabled:
+      patch.aiStorefrontTextEnabled !== undefined
+        ? Boolean(patch.aiStorefrontTextEnabled)
+        : current.aiStorefrontTextEnabled,
+
+    aiStorefrontAudioEnabled:
+      patch.aiStorefrontAudioEnabled !== undefined
+        ? Boolean(patch.aiStorefrontAudioEnabled)
+        : current.aiStorefrontAudioEnabled,
+
+    aiFloatingButtonEnabled:
+      patch.aiFloatingButtonEnabled !== undefined
+        ? Boolean(patch.aiFloatingButtonEnabled)
+        : current.aiFloatingButtonEnabled,
+
+    aiPdvEnabled:
+      patch.aiPdvEnabled !== undefined
+        ? Boolean(patch.aiPdvEnabled)
+        : current.aiPdvEnabled,
+
+    aiPdvTextEnabled:
+      patch.aiPdvTextEnabled !== undefined
+        ? Boolean(patch.aiPdvTextEnabled)
+        : current.aiPdvTextEnabled,
+
+    aiPdvAudioEnabled:
+      patch.aiPdvAudioEnabled !== undefined
+        ? Boolean(patch.aiPdvAudioEnabled)
+        : current.aiPdvAudioEnabled,
+
+    whatsappAiEnabled:
+      patch.whatsappAiEnabled !== undefined
+        ? Boolean(patch.whatsappAiEnabled)
+        : current.whatsappAiEnabled,
+
+    whatsappAutoServiceEnabled:
+      patch.whatsappAutoServiceEnabled !== undefined
+        ? Boolean(patch.whatsappAutoServiceEnabled)
+        : current.whatsappAutoServiceEnabled,
+
+    whatsappOrdersEnabled:
+      patch.whatsappOrdersEnabled !== undefined
+        ? Boolean(patch.whatsappOrdersEnabled)
+        : current.whatsappOrdersEnabled,
+
+    whatsappConfirmationsEnabled:
+      patch.whatsappConfirmationsEnabled !== undefined
+        ? Boolean(patch.whatsappConfirmationsEnabled)
+        : current.whatsappConfirmationsEnabled,
+
+    whatsappHumanHandoffEnabled:
+      patch.whatsappHumanHandoffEnabled !== undefined
+        ? Boolean(patch.whatsappHumanHandoffEnabled)
+        : current.whatsappHumanHandoffEnabled,
+
     deliveryPricingMode: [
       "free",
       "fixed",

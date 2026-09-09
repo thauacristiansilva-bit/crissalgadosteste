@@ -7,7 +7,13 @@ import type { StoreSettings } from "@/lib/types"
 export function StoreChatbot({ settings }: { settings: StoreSettings }) {
   const [open, setOpen] = useState(false)
   const [answer, setAnswer] = useState(settings.chatbotGreeting)
-  if (!settings.chatbotEnabled) return null
+  if (
+    !settings.chatbotEnabled ||
+    settings.aiStorefrontChatEnabled === false ||
+    settings.aiFloatingButtonEnabled === false
+  ) {
+    return null
+  }
 
   const payments = [settings.pixEnabled && "PIX", settings.cashEnabled && "Dinheiro", settings.cardEnabled && "Cartão"].filter(Boolean).join(", ")
   return <div className="fixed bottom-5 right-5 z-[90]">

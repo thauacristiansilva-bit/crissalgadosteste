@@ -394,6 +394,25 @@ export interface StoreSettings {
   whatsappBulkEnabled: boolean
   chatbotEnabled: boolean
   chatbotGreeting: string
+
+  /** Central de IA e automacoes. */
+  aiStorefrontChatEnabled?: boolean
+  aiStorefrontTextEnabled?: boolean
+  aiStorefrontAudioEnabled?: boolean
+  aiFloatingButtonEnabled?: boolean
+
+  /** IA operacional do caixa / PDV. */
+  aiPdvEnabled?: boolean
+  aiPdvTextEnabled?: boolean
+  aiPdvAudioEnabled?: boolean
+
+  /** Automacao futura do WhatsApp. */
+  whatsappAiEnabled?: boolean
+  whatsappAutoServiceEnabled?: boolean
+  whatsappOrdersEnabled?: boolean
+  whatsappConfirmationsEnabled?: boolean
+  whatsappHumanHandoffEnabled?: boolean
+
   cashRegisterEnabled: boolean
   fiscalEnabled: boolean
   fiscalProviderUrl: string
