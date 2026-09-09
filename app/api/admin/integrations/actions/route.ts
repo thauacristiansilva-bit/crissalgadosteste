@@ -10,7 +10,10 @@ import {
 } from "@/lib/integrations-db"
 import type { IntegrationProvider } from "@/lib/integration-providers"
 import { integrationsRequestIsSameOrigin } from "@/lib/integrations-request"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
+
+// HOTFIX_RLS_INTEGRATIONS_14112
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -43,27 +46,39 @@ export async function POST(request: Request) {
   if (!body?.action) return NextResponse.json({ error: "Ação inválida." }, { status: 400 })
 
   try {
-    let result: unknown = null
-    switch (body.action) {
-      case "upsert_connection":
-        result = await upsertIntegrationConnection(session, body)
-        break
-      case "set_connection_status":
-        result = await setIntegrationConnectionStatus(session, body)
-        break
-      case "delete_connection":
-        result = await deleteIntegrationConnection(session, body.connectionId)
-        break
-      case "enqueue_campaign":
-        result = await enqueueCrmCampaign(session, body)
-        break
-      case "cancel_job":
-        result = await cancelIntegrationJob(session, body.jobId)
-        break
-      default:
-        return NextResponse.json({ error: "Ação não reconhecida." }, { status: 400 })
-    }
-    return NextResponse.json({ ok: true, result })
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        let result: unknown = null
+
+        switch (body.action) {
+          case "upsert_connection":
+            result = await upsertIntegrationConnection(session, body)
+            break
+          case "set_connection_status":
+            result = await setIntegrationConnectionStatus(session, body)
+            break
+          case "delete_connection":
+            result = await deleteIntegrationConnection(session, body.connectionId)
+            break
+          case "enqueue_campaign":
+            result = await enqueueCrmCampaign(session, body)
+            break
+          case "cancel_job":
+            result = await cancelIntegrationJob(session, body.jobId)
+            break
+          default:
+            return NextResponse.json(
+              { error: "Ação não reconhecida." },
+              { status: 400 },
+            )
+        }
+
+        return NextResponse.json({ ok: true, result })
+      },
+      "tenant-session",
+    )
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Não foi possível concluir a ação." },
