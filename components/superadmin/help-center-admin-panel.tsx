@@ -179,13 +179,13 @@ export function HelpCenterAdminPanel() {
         key: form.videoStorageKey || null,
       }
     }
-
-    const payload = new FormData()
-    payload.append("file", videoFile)
-
-    const response = await fetch("/api/superadmin/help-center/video", {
+const response = await fetch("/api/superadmin/help-center/video", {
       method: "POST",
-      body: payload,
+      headers: {
+            "Content-Type":
+              videoFile.type,
+          },
+          body: videoFile,
     })
 
     const result = (await response.json()) as {
