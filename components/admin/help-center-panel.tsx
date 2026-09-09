@@ -369,16 +369,18 @@ export function HelpCenterPanel() {
                     </details>
 
                     {article.videoUrl ? (
-                      <a
-                        href={article.videoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 text-sm font-black text-white transition hover:bg-orange-600"
-                      >
-                        <PlayCircle className="h-4 w-4" />
-                        Assistir vídeo
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
+                      <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-black shadow-sm">
+                        <video
+                          controls
+                          playsInline
+                          preload="metadata"
+                          src={article.videoUrl}
+                          poster={article.videoThumbnailUrl || undefined}
+                          className="aspect-video w-full bg-black object-contain"
+                        >
+                          Seu navegador não suporta reprodução de vídeo.
+                        </video>
+                      </div>
                     ) : (
                       <div className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
                         <Sparkles className="h-4 w-4" />
