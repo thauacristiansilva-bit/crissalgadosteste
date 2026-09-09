@@ -14,6 +14,7 @@ const contentSecurityPolicy = [
     "'unsafe-inline'",
     process.env.NODE_ENV === "development" ? "'unsafe-eval'" : "",
     googleIdentityOrigin,
+    "https://*.r2.cloudflarestorage.com",
   ]
     .filter(Boolean)
     .join(" "),
@@ -25,6 +26,7 @@ const contentSecurityPolicy = [
     "connect-src",
     "'self'",
     googleIdentityOrigin,
+    "https://*.r2.cloudflarestorage.com",
     "https://*.google.com",
   ].join(" "),
   `frame-src 'self' ${googleIdentityOrigin}`,
