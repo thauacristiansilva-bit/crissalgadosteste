@@ -175,30 +175,93 @@ export function HelpCenterAdminPanel() {
   async function uploadVideoIfNeeded() {
     if (!videoFile) {
       return {
-        url: form.videoUrl || null,
-        key: form.videoStorageKey || null,
+        url: form.videoUrl || "",
+        key: "",
       }
     }
-const response = await fetch("/api/superadmin/help-center/video", {
-      method: "POST",
-      headers: {
+
+    if (
+      videoFile.size >
+      150 * 1024 * 1024
+    ) {
+      throw new Error(
+        "O vÃ­deo deve ter no mÃ¡ximo 150 MB.",
+      )
+    }
+
+    const prepareResponse =
+      await fetch(
+        "/api/superadmin/help-center/video",
+        {
+          method: "POST",
+          headers: {
             "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            contentType:
               videoFile.type,
+            size:
+              videoFile.size,
+          }),
+        },
+      )
+
+    const prepareResult =
+      (await prepareResponse.json()) as {
+        ok?: boolean
+        error?: string
+        video?: {
+          uploadUrl: string
+          url: string
+          key: string
+          size: number
+          contentType: string
+        }
+      }
+
+    if (
+      !prepareResponse.ok ||
+      !prepareResult.ok ||
+      !prepareResult.video
+    ) {
+      throw new Error(
+        prepareResult.error ||
+          "NÃ£o foi possÃ­vel preparar o upload do vÃ­deo.",
+      )
+    }
+
+    setMessage(
+      "Enviando vÃ­deo diretamente para o Cloudflare R2...",
+    )
+
+    const uploadResponse =
+      await fetch(
+        prepareResult.video.uploadUrl,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type":
+              prepareResult.video.contentType,
+            "Cache-Control":
+              "public, max-age=31536000, immutable",
           },
           body: videoFile,
-    })
+        },
+      )
 
-    const result = (await response.json()) as {
-      ok?: boolean
-      error?: string
-      video?: { url: string; key: string }
+    if (!uploadResponse.ok) {
+      throw new Error(
+        `Falha no envio direto para o R2 (${uploadResponse.status}).`,
+      )
     }
 
-    if (!response.ok || !result.ok || !result.video) {
-      throw new Error(result.error || "Falha ao enviar vídeo.")
+    return {
+      url:
+        prepareResult.video.url,
+      key:
+        prepareResult.video.key,
     }
-
-    return result.video
   }
 
   async function save() {

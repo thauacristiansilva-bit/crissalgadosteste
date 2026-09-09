@@ -1,4 +1,8 @@
 import {
+  randomUUID,
+} from "node:crypto"
+
+import {
   NextResponse,
 } from "next/server"
 
@@ -6,22 +10,39 @@ import {
   requestIsSameOrigin,
 } from "@/lib/security/request-security"
 import {
-  storeHelpCenterVideo,
-} from "@/lib/storage/help-center-media"
+  createR2PresignedPutUrl,
+} from "@/lib/storage/r2"
 import {
   getSuperadminAccess,
 } from "@/lib/superadmin-auth"
 
-export const dynamic =
-  "force-dynamic"
+export const dynamic = "force-dynamic"
+
+const MAX_HELP_VIDEO_BYTES =
+  150 * 1024 * 1024
+
+const allowedVideoTypes = {
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+} as const
+
+type AllowedVideoType =
+  keyof typeof allowedVideoTypes
 
 function headers() {
   return {
-    "Cache-Control":
-      "no-store, max-age=0",
-    "X-Content-Type-Options":
-      "nosniff",
+    "Cache-Control": "no-store, max-age=0",
+    "X-Content-Type-Options": "nosniff",
   }
+}
+
+function isAllowedVideoType(
+  value: string,
+): value is AllowedVideoType {
+  return Object.prototype.hasOwnProperty.call(
+    allowedVideoTypes,
+    value,
+  )
 }
 
 export async function POST(
@@ -38,26 +59,21 @@ export async function POST(
       {
         ok: false,
         error:
-          "Apenas o Superadmin proprietário pode enviar vídeos.",
+          "Apenas o Superadmin proprietÃ¡rio pode enviar vÃ­deos.",
       },
       {
-        status:
-          access ? 403 : 401,
+        status: access ? 403 : 401,
         headers: headers(),
       },
     )
   }
 
-  if (
-    !requestIsSameOrigin(
-      request,
-    )
-  ) {
+  if (!requestIsSameOrigin(request)) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Origem da requisição recusada.",
+          "Origem da requisiÃ§Ã£o recusada.",
       },
       {
         status: 403,
@@ -66,49 +82,78 @@ export async function POST(
     )
   }
 
-  const contentType =
-    (
-      request.headers.get(
-        "content-type",
-      ) || ""
-    )
-      .split(";")[0]
-      .trim()
-      .toLowerCase()
-
-  if (
-    contentType !== "video/mp4" &&
-    contentType !== "video/webm"
-  ) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Formato de vídeo inválido. Use MP4 ou WebM.",
-      },
-      {
-        status: 400,
-        headers: headers(),
-      },
-    )
-  }
-
   try {
-    const bytes =
-      new Uint8Array(
-        await request.arrayBuffer(),
-      )
+    const body =
+      (await request.json()) as {
+        contentType?: unknown
+        size?: unknown
+      }
 
-    const video =
-      await storeHelpCenterVideo({
-        bytes,
+    const contentType =
+      typeof body.contentType === "string"
+        ? body.contentType
+            .split(";")[0]
+            .trim()
+            .toLowerCase()
+        : ""
+
+    const size = Number(body.size)
+
+    if (!isAllowedVideoType(contentType)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Formato de vÃ­deo invÃ¡lido. Use MP4 ou WebM.",
+        },
+        {
+          status: 400,
+          headers: headers(),
+        },
+      )
+    }
+
+    if (
+      !Number.isFinite(size) ||
+      size <= 0 ||
+      size > MAX_HELP_VIDEO_BYTES
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "O vÃ­deo deve ter no mÃ¡ximo 150 MB.",
+        },
+        {
+          status: 400,
+          headers: headers(),
+        },
+      )
+    }
+
+    const extension =
+      allowedVideoTypes[contentType]
+
+    const key =
+      `help-center/videos/tutorial-${Date.now()}-${randomUUID()}.${extension}`
+
+    const signed =
+      await createR2PresignedPutUrl({
+        key,
         contentType,
+        expiresInSeconds: 300,
       })
 
     return NextResponse.json(
       {
         ok: true,
-        video,
+        video: {
+          uploadUrl: signed.uploadUrl,
+          url: signed.publicUrl,
+          key,
+          size,
+          contentType,
+        },
       },
       {
         headers: headers(),
@@ -116,7 +161,7 @@ export async function POST(
     )
   } catch (error) {
     console.error(
-      "Falha no upload de vídeo da Central de Ajuda.",
+      "Falha ao preparar upload de vÃ­deo da Central de Ajuda.",
       error,
     )
 
@@ -126,7 +171,7 @@ export async function POST(
         error:
           error instanceof Error
             ? error.message
-            : "Não foi possível enviar o vídeo.",
+            : "NÃ£o foi possÃ­vel preparar o envio do vÃ­deo.",
       },
       {
         status: 400,

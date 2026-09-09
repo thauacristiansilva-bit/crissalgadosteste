@@ -1,3 +1,10 @@
+import {
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3"
+import {
+  getSignedUrl,
+} from "@aws-sdk/s3-request-presigner"
 import { createHash, createHmac } from "node:crypto"
 
 type R2Config = {
@@ -193,4 +200,62 @@ export async function r2ObjectExists(key: string) {
     throw new Error(`Falha ao consultar mídia no R2 (${response.status}).`)
   }
   return true
+}
+
+export async function createR2PresignedPutUrl(
+  input: {
+    key: string
+    contentType: string
+    expiresInSeconds?: number
+  },
+) {
+  const config = getR2Config()
+
+  if (!config) {
+    throw new Error(
+      "Cloudflare R2 nÃ£o estÃ¡ configurado no Railway.",
+    )
+  }
+
+  const expiresIn = Math.min(
+    Math.max(
+      input.expiresInSeconds ?? 300,
+      60,
+    ),
+    900,
+  )
+
+  const client = new S3Client({
+    region: "auto",
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  })
+
+  const command = new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: input.key,
+    ContentType: input.contentType,
+    CacheControl: "public, max-age=31536000, immutable",
+  })
+
+  const uploadUrl = await getSignedUrl(
+    client,
+    command,
+    {
+      expiresIn,
+    },
+  )
+
+  return {
+    uploadUrl,
+    publicUrl: r2PublicUrl(
+      input.key,
+      config,
+    ),
+  }
 }
