@@ -11,10 +11,7 @@ import { DeliveryLocationMap } from "@/components/store/delivery-location-map"
 import { GoogleAddressAutocomplete, type GoogleAddressSelection } from "@/components/maps/google-address-autocomplete"
 import { ClientAccountModal } from "@/components/store/client-account-modal"
 import { StoreChatbot } from "@/components/store/store-chatbot"
-import {
-  AiOrderAssistant,
-  type AiOrderItem,
-} from "@/components/store/ai-order-assistant"
+import type { AiOrderItem } from "@/components/store/ai-order-assistant"
 import { ProductCustomizer, type ProductCustomization } from "@/components/catalog/product-customizer"
 import {
   modifierSelectionKey,
@@ -851,16 +848,7 @@ export function Storefront({
           </div>
         </section>
 
-        {pageMode === "order" && (
-          <AiOrderAssistant
-            products={products}
-            primaryColor={settings.primaryColor}
-            storeName={settings.storeName}
-            onApply={applyAiOrderItems}
-          />
-        )}
-
-        {lastOrder && !["completed", "cancelled"].includes(lastOrder.status) && <a href={orderPath(lastOrder.reference)} className="mt-4 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><div className="rounded-xl bg-white p-2 text-emerald-700"><PackageCheck className="h-5 w-5"/></div><div><p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Pedido em andamento</p><p className="mt-1 font-black text-gray-950">{lastOrder.code} · {compactOrderStatus[lastOrder.status]}</p><p className="mt-1 text-xs text-gray-600">O pedido continua no SaborFlow mesmo quando você conversa com a loja pelo WhatsApp.</p></div></div><span className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-700 px-4 text-xs font-black text-white">Acompanhar pedido</span></a>}
+{lastOrder && !["completed", "cancelled"].includes(lastOrder.status) && <a href={orderPath(lastOrder.reference)} className="mt-4 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><div className="rounded-xl bg-white p-2 text-emerald-700"><PackageCheck className="h-5 w-5"/></div><div><p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Pedido em andamento</p><p className="mt-1 font-black text-gray-950">{lastOrder.code} · {compactOrderStatus[lastOrder.status]}</p><p className="mt-1 text-xs text-gray-600">O pedido continua no SaborFlow mesmo quando você conversa com a loja pelo WhatsApp.</p></div></div><span className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-700 px-4 text-xs font-black text-white">Acompanhar pedido</span></a>}
 
         <section className="sticky top-14 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
@@ -1143,7 +1131,11 @@ export function Storefront({
 
       <ClientAccountModal open={accountOpen} onClose={() => setAccountOpen(false)} customer={customer} onCustomer={setCustomer} orderBasePath={resolvedBasePath} />
 
-      <StoreChatbot settings={settings} />
+      <StoreChatbot
+        settings={settings}
+        products={products}
+        onApplyOrder={applyAiOrderItems}
+      />
 
       {createdOrder && settings.checkoutAfterSubmit === "ask" && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido recebido!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · seu pedido já está salvo no SaborFlow e continuará disponível para acompanhamento.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} target="_blank" rel="noreferrer" className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(orderPath(createdOrder.reference))} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar meu pedido</button></div><p className="mt-3 text-center text-[11px] text-gray-400">O WhatsApp abre separadamente; seu pedido não sai do sistema.</p></div></div>}
     </div>
