@@ -50,6 +50,7 @@ import type {
 import { OrdersPanel } from "@/components/admin/orders-panel"
 import { ProductsPanel } from "@/components/admin/products-panel"
 import { CategoriesPanel } from "@/components/admin/categories-panel"
+import { CategoryOrderPanel } from "@/components/admin/category-order-panel"
 import { KitchenPanel } from "@/components/admin/kitchen-panel"
 import { CustomersPanel } from "@/components/admin/customers-panel"
 import { SettingsPanel } from "@/components/admin/settings-panel"
@@ -617,7 +618,12 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "kitchen" && <KitchenPanel orders={orders} settings={settings} onOrderUpdated={onOrderUpdated} />}
           {section === "inventory" && <InventoryPanel products={products} onProductsChanged={setProducts} />}
           {section === "products" && <ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} />}
-          {section === "categories" && <CategoriesPanel categories={categories} onCategoriesChanged={setCategories} />}
+          {section === "categories" && (
+            <div className="space-y-6">
+              <CategoriesPanel categories={categories} onCategoriesChanged={setCategories} />
+              <CategoryOrderPanel categories={categories} onCategoriesChanged={setCategories} />
+            </div>
+          )}
           {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} canViewFinancialData={canViewFinancialData} />}
           {section === "marketing" && <MarketingPanel products={products} coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}

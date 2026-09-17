@@ -997,6 +997,23 @@ export function Storefront({
   }
 
   const themeStyle = { "--primary": settings.primaryColor, "--secondary": settings.secondaryColor, "--store-bg": settings.backgroundColor } as React.CSSProperties
+
+  const brandFontFamily =
+    ({
+      modern: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      rounded: "'Trebuchet MS', 'Arial Rounded MT Bold', Arial, sans-serif",
+      elegant: "Georgia, 'Times New Roman', serif",
+      impact: "Impact, 'Arial Black', sans-serif",
+    } as const)[settings.storeTitleFont || "modern"]
+
+  const brandTextStyle = {
+    color: settings.storeTitleColor || settings.primaryColor || "#111827",
+    fontFamily: brandFontFamily,
+  } as React.CSSProperties
+
+  const showBrandTitleLogo =
+    settings.storeTitleMode === "logo" &&
+    Boolean(settings.logoImage?.trim())
   const activePaymentMethods: Array<[Checkout["paymentMethod"], string]> = []
   if (settings.pixEnabled) activePaymentMethods.push(["pix", "PIX"]); if (settings.cashEnabled) activePaymentMethods.push(["cash", "Dinheiro"]); if (settings.cardEnabled) activePaymentMethods.push(["card", "Cartão na entrega"])
   const publicAddress = [settings.address, settings.storeDistrict, settings.city, settings.state, settings.zipCode].filter(Boolean).join(", ")
@@ -1009,7 +1026,20 @@ export function Storefront({
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
           <a href={landingPath} className="inline-flex min-w-0 items-center gap-2 rounded-xl px-1 py-1 text-sm font-black text-gray-800">
             <Home className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{settings.storeName}</span>
+            {showBrandTitleLogo ? (
+              <img
+                src={settings.logoImage}
+                alt={settings.storeName}
+                className="hidden max-h-8 max-w-[180px] object-contain sm:block"
+              />
+            ) : (
+              <span
+                className="hidden truncate text-base font-black sm:inline"
+                style={brandTextStyle}
+              >
+                {settings.storeName}
+              </span>
+            )}
           </a>
           <div className="flex items-center gap-2">
             <a href={catalogPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "catalog" ? "bg-gray-950 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Ver cardápio</a>
@@ -1035,7 +1065,20 @@ export function Storefront({
               </div>
 
               <div className="min-w-0 pb-1 lg:pb-2">
-                <div className="flex min-w-0 flex-col items-start gap-2"><h1 className="max-w-full break-words text-2xl font-black leading-tight tracking-tight sm:text-3xl">{settings.storeName}</h1><span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-black leading-tight ${isOpen ? "border-emerald-200 bg-emerald-50 text-emerald-800" : settings.acceptingOrders ? "border-amber-200 bg-amber-50 text-amber-800" : "border-gray-200 bg-gray-100 text-gray-600"}`}><span className={`h-2 w-2 shrink-0 rounded-full ${isOpen ? "bg-emerald-500" : settings.acceptingOrders ? "bg-amber-500" : "bg-gray-400"}`}/><span className="break-words">{isOpen ? "Aberto" : settings.acceptingOrders ? "Fechado · aceitando agendamentos" : "Pedidos pausados"}</span></span></div>
+                <div className="flex min-w-0 flex-col items-start gap-2">{showBrandTitleLogo ? (
+                  <img
+                    src={settings.logoImage}
+                    alt={settings.storeName}
+                    className="max-h-16 max-w-[280px] object-contain sm:max-h-20 sm:max-w-[360px]"
+                  />
+                ) : (
+                  <h1
+                    className="max-w-full break-words text-2xl font-black leading-tight tracking-tight sm:text-3xl"
+                    style={brandTextStyle}
+                  >
+                    {settings.storeName}
+                  </h1>
+                )}<span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-black leading-tight ${isOpen ? "border-emerald-200 bg-emerald-50 text-emerald-800" : settings.acceptingOrders ? "border-amber-200 bg-amber-50 text-amber-800" : "border-gray-200 bg-gray-100 text-gray-600"}`}><span className={`h-2 w-2 shrink-0 rounded-full ${isOpen ? "bg-emerald-500" : settings.acceptingOrders ? "bg-amber-500" : "bg-gray-400"}`}/><span className="break-words">{isOpen ? "Aberto" : settings.acceptingOrders ? "Fechado · aceitando agendamentos" : "Pedidos pausados"}</span></span></div>
                 {settings.slogan && <p className="mt-1 text-sm text-gray-500">{settings.slogan}</p>}
                 <div className="mt-3 space-y-1 text-sm text-gray-600">
                   <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0"/><span>{settings.address}{settings.storeDistrict ? `, ${settings.storeDistrict}` : ""}{settings.city ? `, ${settings.city}` : ""}{settings.state ? ` - ${settings.state}` : ""}{settings.zipCode ? `, ${settings.zipCode}` : ""}</span></p>

@@ -5,6 +5,7 @@ import { Clock3, CreditCard, Globe2, Image as ImageIcon, Images, Link2, MonitorS
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
 import type { BusinessHour, Courier, DeliveryZone, StaffMember, StoreSettings } from "@/lib/types"
 import { DeliverySettings } from "@/components/admin/delivery-settings"
+import { StoreBrandingEditor } from "@/components/admin/store-branding-editor"
 import { StoreLocationEditor } from "@/components/admin/store-location-editor"
 import { HelpTip } from "@/components/admin/help-tip"
 
@@ -118,6 +119,7 @@ export function SettingsPanel({ settings, deliveryZones, couriers, staffMembers,
         />
       </section>
 
+      <StoreBrandingEditor settings={draft} onChange={setDraft} />
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="mb-5 flex items-center gap-3">
           <div className="rounded-xl bg-pink-50 p-2.5 text-pink-700"><InstagramBrandIcon className="h-5 w-5"/></div>

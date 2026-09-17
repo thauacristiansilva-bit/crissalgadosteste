@@ -399,6 +399,10 @@ export interface StoreSettings {
   secondaryColor: string
   backgroundColor: string
   logoImage: string
+  /** SABORFLOW_BRANDING_CATEGORIES_V1 */
+  storeTitleMode?: "text" | "logo"
+  storeTitleFont?: "modern" | "rounded" | "elegant" | "impact"
+  storeTitleColor?: string
   coverImage: string
   /** Conteúdo opcional da landing page pública da empresa. */
   aboutTitle?: string
