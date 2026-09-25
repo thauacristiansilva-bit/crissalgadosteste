@@ -31,6 +31,7 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>
   try { body = JSON.parse(raw) as Record<string, unknown> } catch { return json({ error: "Pedido inválido." }, 400) }
 
+  let reservedPreview: { accountId: string; period: string } | null = null
   try {
     if (body.action === "apply") {
       if (typeof body.previewToken !== "string" || !verifySetupPreview(body.previewToken, org, session.userId)) return json({ error: "Prévia expirada. Gere novamente antes de aplicar." }, 400)
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
       return pool.query("UPDATE sf_usage_counters SET value=value+1,updated_at=now() WHERE billing_account_id=$1 AND organization_id=$2 AND counter_key='ai_setup_previews' AND period_key=$3 AND value < 10 RETURNING value", [account.account!.id,org,period])
     }, "tenant-session")
     if (!usage.rows.length) return json({ error: "Limite de 10 gerações por dia atingido. Tente amanhã." }, 429)
+    reservedPreview = { accountId: account.account.id, period }
 
     const context = await runWithTenantRlsScope([org], session.userId, async () => {
       const [settings, categories, products] = await Promise.all([getTenantSettings(org), getTenantCategories(org), getTenantProducts(org)])
@@ -61,7 +63,7 @@ export async function POST(request: Request) {
     }, "tenant-session")
 
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 75_000)
+    const timer = setTimeout(() => controller.abort(), 50_000)
     let generated: unknown
     try {
       const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash"
@@ -70,16 +72,40 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: `Você ajuda uma loja a cadastrar site público e cardápio. Responda SOMENTE um JSON válido com chaves store, categories, groups, products. store: name,slogan,welcomeTitle,welcomeText,aboutTitle,aboutText,primaryColor,secondaryColor,phone,whatsapp,openingHours,clientAccountsEnabled (true/false/null se não solicitado). categories: nomes. groups: name,description,required,minSelect,maxSelect,selectionMode ('unique' ou 'bundle'),options [{name,priceDelta}]. products: name,description,category,price,featured,groups (nomes),suggestions (nomes de outros produtos gerados). Preços não fornecidos pelo usuário: use 0; não invente endereço, horário, fotos, promoções ou contatos. Para combos: bundle, escolha mínima indicada pelo usuário e máximo de sabores por unidade; opções podem se repetir e máximo multiplica pela quantidade comprada. Reuse nomes de grupos em vários produtos. Não ultrapasse 20 categorias, 20 grupos, 50 produtos, 60 opções/grupo. Se faltar dado, retorne listas vazias para esses itens. Faça sugestões apenas entre os produtos apresentados no JSON.` }] },
           contents: [{ role: "user", parts: [{ text: `Empresa atual: ${JSON.stringify(context)}\nInstrução do administrador: ${body.prompt}` }] }],
-          generationConfig: { temperature: 0.25, responseMimeType: "application/json", maxOutputTokens: 8192 },
+          generationConfig: {
+            temperature: 0.25,
+            responseMimeType: "application/json",
+            maxOutputTokens: 16384,
+            // Gemini 2.5 pode consumir o limite inteiro em raciocínio e devolver texto vazio.
+            ...(model.startsWith("gemini-2.5-") ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          },
         }),
       })
-      const payload = await response.json() as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
+      const rawPayload = await response.text()
+      let payload: { error?: { message?: string }; promptFeedback?: { blockReason?: string }; candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }> }
+      try { payload = JSON.parse(rawPayload) } catch { throw new Error(`O provedor da IA respondeu sem dados válidos (HTTP ${response.status}). Tente novamente.`) }
       if (!response.ok) throw new Error(`Gemini ${response.status}: ${payload.error?.message?.slice(0, 160) || "falha na geração"}`)
-      generated = JSON.parse(payload.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "")
+      const candidate = payload.candidates?.[0]
+      const finishReason = candidate?.finishReason
+      const answer = candidate?.content?.parts?.map((p) => p.text || "").join("").trim() || ""
+      if (finishReason === "MAX_TOKENS") throw new Error("A IA parou antes de terminar o cadastro. Tente dividir a descrição em partes menores.")
+      if (!answer) throw new Error(`A IA não devolveu um cadastro${payload.promptFeedback?.blockReason ? ` (${payload.promptFeedback.blockReason})` : ""}. Tente novamente com outra descrição.`)
+      try { generated = JSON.parse(answer) } catch { throw new Error("A IA devolveu uma prévia incompleta. Tente novamente com uma descrição mais curta.") }
     } finally { clearTimeout(timer) }
     const plan = validateSetupPlan(generated)
+    reservedPreview = null
     return json({ ok: true, plan, previewToken: signSetupPreview(org, session.userId, Date.now() + 30 * 60_000) })
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "Falha ao preparar o cadastro." }, 400)
+    if (reservedPreview) {
+      const { accountId, period } = reservedPreview
+      await runWithTenantRlsScope([org], session.userId, () => getPostgresPool().query(
+        "UPDATE sf_usage_counters SET value=GREATEST(value-1,0),updated_at=now() WHERE billing_account_id=$1 AND organization_id=$2 AND counter_key='ai_setup_previews' AND period_key=$3",
+        [accountId, org, period],
+      ), "tenant-session").catch(() => undefined)
+    }
+    const message = error instanceof Error && error.name === "AbortError"
+      ? "A IA demorou mais de 50 segundos. Tente novamente com uma descrição mais curta."
+      : error instanceof Error ? error.message : "Falha ao preparar o cadastro."
+    return json({ error: message }, 400)
   }
 }

@@ -29,9 +29,13 @@ export function AiStoreSetupPanel({ onApplied }: { onApplied: () => void }) {
     setBusy(true); setMessage("")
     try {
       const response = await fetch("/api/admin/ai/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "preview" ? { action, prompt } : { action, plan, previewToken }) })
-      const data = await response.json()
+      const rawResponse = await response.text()
+      let data: { error?: string; plan?: SetupPlan; previewToken?: string; createdProducts?: number; reusedProducts?: number }
+      try { data = JSON.parse(rawResponse) } catch {
+        throw new Error(`O servidor não respondeu corretamente (HTTP ${response.status}). Aguarde alguns segundos e tente novamente.`)
+      }
       if (!response.ok) throw new Error(data.error || "Não foi possível completar o pedido.")
-      if (action === "preview") { setPlan(data.plan); setPreviewToken(data.previewToken); setMessage("Confira a prévia. Você pode corrigir nomes, preços e regras antes de salvar.") }
+      if (action === "preview") { if (!data.plan || !data.previewToken) throw new Error("A IA não devolveu uma prévia completa. Tente novamente."); setPlan(data.plan); setPreviewToken(data.previewToken); setMessage("Confira a prévia. Você pode corrigir nomes, preços e regras antes de salvar.") }
       else { setPlan(null); setPreviewToken(""); setMessage(`Cadastro salvo: ${data.createdProducts} produto(s) novos; ${data.reusedProducts} já existentes.`); onApplied() }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha inesperada.") }
     finally { setBusy(false) }
