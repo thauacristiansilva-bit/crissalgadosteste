@@ -633,7 +633,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
-          {section === "ai_setup" && <AiStoreSetupPanel onApplied={() => { window.location.reload() }} />}
+          {section === "ai_setup" && <AiStoreSetupPanel publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}/pedir`} />}
           {section === "help" && <HelpCenterPanel />}
           {section === "security" && <SecurityPanel canManageSecurity={permissionListHas(operationalPermissions, "security.manage")} />}
           {section === "billing" && <BillingPanel />}

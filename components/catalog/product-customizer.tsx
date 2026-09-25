@@ -98,7 +98,8 @@ export function ProductCustomizer({ product, primaryColor, initialOptionIds = EM
         })}</div></details>
       })}</div>
       {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</div>}
-      <button type="button" onClick={confirm} style={{ backgroundColor: primaryColor || "#ea580c" }} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-black text-white"><Plus className="h-4 w-4" /> Adicionar {quantity} · {money((pricing && pricing.ok ? pricing.unitPrice : product.price) * quantity)}</button>
+      {pricing && !pricing.ok && <p className="mt-3 text-sm font-bold text-orange-700">{pricing.error}</p>}
+      <button type="button" disabled={!pricing?.ok} onClick={confirm} style={{ backgroundColor: primaryColor || "#ea580c" }} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-4 w-4" /> {pricing?.ok ? `Adicionar ${quantity} · ${money(pricing.unitPrice * quantity)}` : "Escolha os sabores antes de adicionar"}</button>
     </div>
   </div>
 }

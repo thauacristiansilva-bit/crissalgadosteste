@@ -38,6 +38,8 @@ export async function POST(request: Request) {
       const plan = validateSetupPlan(body.plan)
       const snapshot = await runWithTenantRlsScope([org], session.userId, () => getBillingSnapshotForOrganization(org), "tenant-session")
       const existing = await runWithTenantRlsScope([org], session.userId, () => getTenantProducts(org, { includeInactive: true }), "tenant-session")
+      const missingPrice = plan.products.find((product) => product.price <= 0 && !existing.some((item) => item.name.toLowerCase() === product.name.toLowerCase() && item.category.toLowerCase() === product.category.toLowerCase() && item.price > 0))
+      if (missingPrice) return json({ error: `Informe o preço de ${missingPrice.name} na prévia antes de confirmar. Sem preço, ele não apareceria no cardápio do cliente.` }, 400)
       const newCount = plan.products.filter((product) => !existing.some((item) => item.name.toLowerCase() === product.name.toLowerCase() && item.category.toLowerCase() === product.category.toLowerCase())).length
       if (snapshot.entitlements.maxProducts !== null && snapshot.usage.products + newCount > snapshot.entitlements.maxProducts) return json({ error: "O plano excede o limite de produtos da sua assinatura." }, 403)
       const result = await runWithTenantRlsScope([org], session.userId, () => applySetupPlan(org, plan), "tenant-session")

@@ -711,6 +711,7 @@ export function Storefront({
     })
     setEditingCartKey(null)
     setCustomizingProduct(null)
+    setCartOpen(true)
   }
 
   function quantityFor(productId: number) { return totalProductQuantity(productId) }

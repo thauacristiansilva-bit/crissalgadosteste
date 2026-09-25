@@ -18,8 +18,10 @@ import {
   getTenantProductPromotions,
 } from "@/lib/promotions-db"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
+import { getPostgresPool } from "@/lib/postgres"
 
 type PublicStoreSnapshot = {
+  catalogRevision: string
   products: Awaited<ReturnType<typeof getTenantProducts>>
   categories: Awaited<ReturnType<typeof getTenantCategories>>
   settings: NonNullable<Awaited<ReturnType<typeof getTenantSettings>>>
@@ -117,6 +119,14 @@ export function invalidatePublicStoreCache(organizationId?: string) {
   else cache.clear()
 }
 
+async function currentCatalogRevision(organizationId: string) {
+  const result = await getPostgresPool().query<{ updated_at: Date | string }>(
+    "SELECT updated_at FROM sf_catalog_state WHERE organization_id=$1", [organizationId],
+  )
+  const value = result.rows[0]?.updated_at
+  return value ? new Date(value).toISOString() : ""
+}
+
 async function loadPublicStoreSnapshot(organization: PublicOrganization) {
   return runWithTenantRlsScope(
     [organization.id],
@@ -154,6 +164,7 @@ async function loadPublicStoreSnapshot(organization: PublicOrganization) {
       }
 
       return {
+        catalogRevision: await currentCatalogRevision(organization.id),
         products,
         categories,
         settings: publicSettings,
@@ -200,9 +211,17 @@ export async function getPublicStoreForOrganization(
   organization: PublicOrganization,
 ) {
   const cached = readCachedSnapshot(organization.id)
+  // Com duas réplicas, invalidar só a memória local não atualiza a outra réplica.
+  // A versão no PostgreSQL permite que a página pública reflita a confirmação já no próximo acesso.
+  const revision = cached ? await runWithTenantRlsScope(
+    [organization.id], undefined,
+    () => currentCatalogRevision(organization.id), "public-store",
+  ).catch(() => cached.snapshot.catalogRevision) : ""
   let snapshot: PublicStoreSnapshot
 
-  if (cached?.fresh) {
+  if (cached && revision !== cached.snapshot.catalogRevision) {
+    snapshot = await refreshPublicStoreSnapshot(organization)
+  } else if (cached?.fresh) {
     snapshot = cached.snapshot
   } else if (cached) {
     // Stale-while-revalidate: mantém a loja rápida durante a renovação.
@@ -232,6 +251,7 @@ export async function getPublicStoreForOrganization(
 
   const {
     promotions: _cachedPromotions,
+    catalogRevision: _catalogRevision,
     ...publicSnapshot
   } = snapshot
 

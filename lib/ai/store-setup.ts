@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
+import { invalidatePublicStoreCache } from "@/lib/public-store-db"
 
 export type SetupPlan = {
   store: { name: string; slogan: string; welcomeTitle: string; welcomeText: string; aboutTitle: string; aboutText: string; primaryColor: string; secondaryColor: string; phone: string; whatsapp: string; openingHours: string; clientAccountsEnabled: boolean | null }
@@ -91,11 +92,27 @@ export async function applySetupPlan(org: string, plan: SetupPlan) {
     }
     const groupIds = new Map<string, number>()
     for (const [index, group] of plan.groups.entries()) {
-      // Reutiliza grupos por nome; nunca altera os grupos já usados em outros produtos.
-      const old = await client.query<{ id: number }>("SELECT id FROM sf_modifier_groups WHERE organization_id=$1 AND lower(name)=lower($2) ORDER BY id LIMIT 1", [org, group.name])
-      const id = old.rows[0]?.id ?? await nextId(client, "sf_modifier_groups", org)
-      if (!old.rows[0]) {
-        await client.query("INSERT INTO sf_modifier_groups (organization_id,id,name,description,required,min_select,max_select,included_quantity,active,sort_order,selection_mode) VALUES ($1,$2,$3,$4,$5,$6,$7,0,true,$8,$9)", [org,id,group.name,group.description,group.required,group.minSelect,group.maxSelect,index,group.selectionMode])
+      // Uma versão antiga com o mesmo nome pode ter limites diferentes. Só reutilizamos a que
+      // realmente corresponde à prévia; os produtos de outras lojas/combos não são alterados.
+      const candidates = await client.query<{ id: number; name: string; required: boolean; min_select: number; max_select: number; selection_mode: string; active: boolean }>(
+        "SELECT id,name,required,min_select,max_select,selection_mode,active FROM sf_modifier_groups WHERE organization_id=$1 AND (lower(name)=lower($2) OR left(lower(name),length(lower($3)))=lower($3)) ORDER BY id",
+        [org,group.name,`${group.name} · IA`],
+      )
+      let matchingId: number | undefined
+      for (const candidate of candidates.rows) {
+        if (!candidate.active || candidate.required !== group.required || candidate.min_select !== group.minSelect || candidate.max_select !== group.maxSelect || candidate.selection_mode !== group.selectionMode) continue
+        const options = await client.query<{ name: string; price_delta: string | number; active: boolean }>(
+          "SELECT name,price_delta,active FROM sf_modifier_options WHERE organization_id=$1 AND group_id=$2 ORDER BY sort_order,id", [org,candidate.id],
+        )
+        if (options.rows.length === group.options.length && options.rows.every((option, position) => option.active && option.name.toLowerCase() === group.options[position].name.toLowerCase() && Number(option.price_delta) === group.options[position].priceDelta)) {
+          matchingId = candidate.id
+          break
+        }
+      }
+      const id = matchingId ?? await nextId(client, "sf_modifier_groups", org)
+      if (!matchingId) {
+        const name = candidates.rows.length ? `${group.name} · IA ${id}` : group.name
+        await client.query("INSERT INTO sf_modifier_groups (organization_id,id,name,description,required,min_select,max_select,included_quantity,active,sort_order,selection_mode) VALUES ($1,$2,$3,$4,$5,$6,$7,0,true,$8,$9)", [org,id,name,group.description,group.required,group.minSelect,group.maxSelect,index,group.selectionMode])
         for (const [sort, option] of group.options.entries()) {
           const optionId = await nextId(client, "sf_modifier_options", org)
           await client.query("INSERT INTO sf_modifier_options (organization_id,id,group_id,name,price_delta,included_eligible,active,sort_order) VALUES ($1,$2,$3,$4,$5,false,true,$6)", [org,optionId,id,option.name,option.priceDelta,sort])
@@ -112,7 +129,36 @@ export async function applySetupPlan(org: string, plan: SetupPlan) {
       if (!old.rows[0]) {
         await client.query("INSERT INTO sf_products (organization_id,id,category_id,name,description,price,active,featured) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [org,id,categoryId,product.name,product.description,product.price,product.price > 0,product.featured])
         created++
-        for (const [sort, name] of product.groups.entries()) await client.query("INSERT INTO sf_product_modifier_groups (organization_id,product_id,group_id,sort_order) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [org,id,groupIds.get(name.toLowerCase()),sort])
+      } else {
+        // A confirmação do administrador aplica a prévia ao produto existente.
+        // Preservamos imagem, estoque e demais dados que não foram informados à IA.
+        await client.query(
+          `UPDATE sf_products SET
+             description=CASE WHEN $3 <> '' THEN $3 ELSE description END,
+             price=CASE WHEN $4 > 0 THEN $4 ELSE price END,
+             featured=$5,
+             active=CASE WHEN $4 > 0 OR price > 0 THEN true ELSE active END,
+             updated_at=now()
+           WHERE organization_id=$1 AND id=$2`,
+          [org,id,product.description,product.price,product.featured],
+        )
+      }
+      for (const [sort, name] of product.groups.entries()) {
+        const selectedGroupId = groupIds.get(name.toLowerCase())!
+        await client.query(
+          `DELETE FROM sf_product_modifier_groups links USING sf_modifier_groups old
+           WHERE links.organization_id=$1 AND links.product_id=$2
+             AND old.organization_id=links.organization_id AND old.id=links.group_id
+             AND links.group_id <> $3
+             AND (lower(old.name)=lower($4) OR left(lower(old.name),length(lower($5)))=lower($5))`,
+          [org,id,selectedGroupId,name,`${name} · IA`],
+        )
+        await client.query(
+          `INSERT INTO sf_product_modifier_groups (organization_id,product_id,group_id,sort_order)
+           VALUES ($1,$2,$3,$4) ON CONFLICT (organization_id,product_id,group_id)
+           DO UPDATE SET sort_order=EXCLUDED.sort_order`,
+          [org,id,selectedGroupId,sort],
+        )
       }
       productIds.set(product.name.toLowerCase(), id)
     }
@@ -122,8 +168,12 @@ export async function applySetupPlan(org: string, plan: SetupPlan) {
     }
     await client.query("INSERT INTO sf_catalog_state (organization_id,ready,source,categories_count,products_count,updated_at) SELECT $1,true,'ai-setup',(SELECT count(*) FROM sf_categories WHERE organization_id=$1),(SELECT count(*) FROM sf_products WHERE organization_id=$1),now() ON CONFLICT (organization_id) DO UPDATE SET ready=true,source='ai-setup',categories_count=EXCLUDED.categories_count,products_count=EXCLUDED.products_count,updated_at=now()", [org])
     await client.query("INSERT INTO sf_food_composition_state (organization_id,ready,source,modifier_groups_count,modifier_options_count,updated_at) SELECT $1,true,'ai-setup',(SELECT count(*) FROM sf_modifier_groups WHERE organization_id=$1),(SELECT count(*) FROM sf_modifier_options WHERE organization_id=$1),now() ON CONFLICT (organization_id) DO UPDATE SET ready=true,source='ai-setup',modifier_groups_count=EXCLUDED.modifier_groups_count,modifier_options_count=EXCLUDED.modifier_options_count,updated_at=now()", [org])
+    const visible = await client.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM sf_products WHERE organization_id=$1 AND id=ANY($2::int[]) AND active=true", [org,[...productIds.values()]],
+    )
     await client.query("COMMIT")
-    return { createdProducts: created, reusedProducts: plan.products.length - created }
+    invalidatePublicStoreCache(org)
+    return { createdProducts: created, updatedProducts: plan.products.length - created, visibleProducts: visible.rows[0]?.count ?? 0 }
   } catch (error) {
     await client.query("ROLLBACK")
     throw error
