@@ -28,6 +28,7 @@ type ProductRow = {
   track_stock: boolean
   stock: number
   min_stock: number
+  recommendation_ids: number[] | null
   created_at: Date | string
   updated_at: Date | string
 }
@@ -60,6 +61,7 @@ function mapProduct(row: ProductRow): Product {
     trackStock: Boolean(row.track_stock),
     stock: Number(row.stock),
     minStock: Number(row.min_stock),
+    recommendationIds: row.recommendation_ids || [],
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   }
@@ -233,6 +235,21 @@ export async function getTenantProducts(
   const products = result.rows.map(mapProduct)
   const productIds = products.map((product) => product.id)
 
+  // Durante o deploy, o cardápio continua disponível até a migration ser aplicada.
+  const recommendations = new Map<number, number[]>()
+  if (productIds.length) {
+    try {
+      const links = await getPostgresPool().query<{ product_id: number; recommended_product_id: number }>(
+        `SELECT product_id, recommended_product_id FROM sf_product_recommendations
+         WHERE organization_id=$1 AND product_id=ANY($2::int[]) ORDER BY product_id,sort_order`,
+        [organizationId, productIds],
+      )
+      for (const row of links.rows) recommendations.set(row.product_id, [...(recommendations.get(row.product_id) || []), row.recommended_product_id])
+    } catch (error) {
+      if ((error as { code?: string })?.code !== "42P01") throw error
+    }
+  }
+
   const [modifierGroups, ingredientAvailability] = await Promise.all([
     getProductModifierGroupsForProducts(organizationId, productIds, {
       includeInactive: Boolean(options?.includeInactive),
@@ -252,6 +269,7 @@ export async function getTenantProducts(
 
     return {
       ...product,
+      recommendationIds: recommendations.get(product.id) || [],
       modifierGroups: groups,
       ingredientStockAvailable:
         ingredientAvailability.get(product.id) !== false && requiredModifiersAvailable,

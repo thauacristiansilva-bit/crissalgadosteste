@@ -177,6 +177,7 @@ export interface Product {
   stock: number
   minStock: number
   modifierGroups?: ProductModifierGroup[]
+  recommendationIds?: number[]
   estimatedFoodCost?: number
   ingredientStockAvailable?: boolean
   createdAt: string

@@ -67,6 +67,7 @@ import { TeamPanel } from "@/components/admin/team-panel"
 import { isStoreOpenNow, zonedDateString } from "@/lib/operations"
 import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
 import { AiQuickQuestion } from "@/components/admin/ai-quick-question"
+import { AiStoreSetupPanel } from "@/components/admin/ai-store-setup-panel"
 import { SecurityPanel } from "@/components/admin/security-panel"
 import { HelpCenterPanel } from "@/components/admin/help-center-panel"
 import { getAllowedAdminSections, type AdminSection } from "@/lib/admin-access"
@@ -125,6 +126,7 @@ const navItems: NavItem[] = [
   { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
   { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
   { key: "chatbot", label: "IA e Automações", icon: Bot, group: "gestao" },
+  { key: "ai_setup", label: "Montar loja com IA", icon: Bot, group: "inicio" },
   { key: "help", label: "Central de Ajuda", icon: CircleHelp, group: "gestao" },
   { key: "security", label: "Segurança da conta", icon: ShieldCheck, group: "gestao" },
   { key: "billing", label: "Plano e cobrança", icon: CreditCard, group: "gestao" },
@@ -631,6 +633,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
+          {section === "ai_setup" && <AiStoreSetupPanel onApplied={() => { window.location.reload() }} />}
           {section === "help" && <HelpCenterPanel />}
           {section === "security" && <SecurityPanel canManageSecurity={permissionListHas(operationalPermissions, "security.manage")} />}
           {section === "billing" && <BillingPanel />}

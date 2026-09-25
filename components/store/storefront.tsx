@@ -533,6 +533,13 @@ export function Storefront({
     ],
   )
   const totalItems = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart])
+  const recommendations = useMemo(() => {
+    const selected = new Set(cart.map((item) => item.product.id))
+    const ids = [...new Set(cart.flatMap((item) => item.product.recommendationIds || []))]
+    return ids.map((id) => products.find((product) => product.id === id))
+      .filter((product): product is Product => Boolean(product && product.active && !selected.has(product.id) && product.ingredientStockAvailable !== false && (!product.trackStock || product.stock > 0)))
+      .slice(0, 4)
+  }, [cart, products])
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
   const total = Math.max(0, subtotal - couponDiscount) + deliveryFee
 
@@ -1266,6 +1273,7 @@ export function Storefront({
                 </div>
               ))}
             </div>
+            {recommendations.length > 0 && <section className="mt-5 rounded-2xl bg-orange-50 p-4"><h3 className="text-sm font-black">Combine com seu pedido</h3><div className="mt-3 space-y-2">{recommendations.map((product) => <div key={product.id} className="flex items-center justify-between gap-2 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{product.name}</p><p className="text-xs text-gray-600">{money(product.price)}</p></div><button type="button" className="shrink-0 rounded-xl bg-orange-600 px-3 py-2 text-xs font-black text-white" onClick={() => { if (productHasModifiers(product)) { setCustomizingProduct(product); setCartOpen(false) } else setSimpleProductQuantity(product, totalProductQuantity(product.id) + 1) }}>Adicionar</button></div>)}</div></section>}
             <div className="my-5 flex items-center justify-between border-t border-gray-100 pt-4"><span className="font-semibold text-gray-500">Subtotal</span><strong className="text-xl">{money(subtotal)}</strong></div>
             <button disabled={!settings.acceptingOrders} onClick={openCheckout} style={{ backgroundColor: settings.primaryColor }} className="h-12 w-full rounded-xl font-black text-white disabled:opacity-50">{!settings.acceptingOrders ? "Pedidos temporariamente pausados" : isOpen ? "Escolher recebimento" : "Agendar pedido"}</button>
           </div>
