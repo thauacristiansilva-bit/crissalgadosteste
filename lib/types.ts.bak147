@@ -111,11 +111,9 @@ export interface ProductModifierGroup {
   required: boolean
   minSelect: number
   maxSelect: number
-  selectionMode?: "unique" | "bundle"
   includedQuantity: number
   active: boolean
   sortOrder: number
-  usedByProducts?: number
   options: ProductModifierOption[]
 }
 
@@ -136,40 +134,12 @@ export interface ProductComposition {
   ingredientStockAvailable: boolean
 }
 
-export interface ProductPromotionPreview {
-  id: string
-  promotionalPrice: number
-  label: string
-  highlight: boolean
-  validUntil: string
-}
-
-export interface ProductPromotion {
-  id: string
-  productId: number
-  productName: string
-  normalPrice: number
-  promotionalPrice: number
-  startDate?: string
-  endDate?: string
-  daysOfWeek: number[]
-  startTime: string
-  endTime: string
-  recurringWeekly: boolean
-  active: boolean
-  highlight: boolean
-  label: string
-  createdAt: string
-  updatedAt: string
-}
-
 export interface Product {
   id: number
   name: string
   description: string
   category: string
   price: number
-  promotion?: ProductPromotionPreview
   active: boolean
   featured: boolean
   image?: string
@@ -401,10 +371,6 @@ export interface StoreSettings {
   secondaryColor: string
   backgroundColor: string
   logoImage: string
-  /** SABORFLOW_BRANDING_CATEGORIES_V1 */
-  storeTitleMode?: "text" | "logo"
-  storeTitleFont?: "modern" | "rounded" | "elegant" | "impact"
-  storeTitleColor?: string
   coverImage: string
   /** Conteúdo opcional da landing page pública da empresa. */
   aboutTitle?: string
@@ -428,25 +394,6 @@ export interface StoreSettings {
   whatsappBulkEnabled: boolean
   chatbotEnabled: boolean
   chatbotGreeting: string
-
-  /** Central de IA e automacoes. */
-  aiStorefrontChatEnabled?: boolean
-  aiStorefrontTextEnabled?: boolean
-  aiStorefrontAudioEnabled?: boolean
-  aiFloatingButtonEnabled?: boolean
-
-  /** IA operacional do caixa / PDV. */
-  aiPdvEnabled?: boolean
-  aiPdvTextEnabled?: boolean
-  aiPdvAudioEnabled?: boolean
-
-  /** Automacao futura do WhatsApp. */
-  whatsappAiEnabled?: boolean
-  whatsappAutoServiceEnabled?: boolean
-  whatsappOrdersEnabled?: boolean
-  whatsappConfirmationsEnabled?: boolean
-  whatsappHumanHandoffEnabled?: boolean
-
   cashRegisterEnabled: boolean
   fiscalEnabled: boolean
   fiscalProviderUrl: string

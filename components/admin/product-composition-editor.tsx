@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Plus, Save, Trash2, X } from "lucide-react"
-import type { Ingredient, Product, ProductComposition } from "@/lib/types"
+import type { Ingredient, Product, ProductComposition, ProductModifierGroup } from "@/lib/types"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
 type RecipeDraft = { ingredientId: string; quantity: string }
@@ -18,11 +18,14 @@ type OptionDraft = {
 }
 type GroupDraft = {
   key: string
+  sourceGroupId?: number
+  existingGroupId?: number
   name: string
   description: string
   required: boolean
   minSelect: string
   maxSelect: string
+  selectionMode: "unique" | "bundle"
   includedQuantity: string
   active: boolean
   options: OptionDraft[]
@@ -56,11 +59,14 @@ function fromComposition(composition: ProductComposition) {
     })),
     groups: composition.modifierGroups.map((group) => ({
       key: key(),
+      sourceGroupId: group.id,
+      existingGroupId: (group.usedByProducts || 0) > 1 ? group.id : undefined,
       name: group.name,
       description: group.description,
       required: group.required,
       minSelect: String(group.minSelect),
       maxSelect: String(group.maxSelect),
+      selectionMode: group.selectionMode || "unique",
       includedQuantity: String(group.includedQuantity),
       active: group.active,
       options: group.options.map((option) => ({
@@ -84,11 +90,15 @@ export function ProductCompositionEditor({
   onClose,
   onSaved,
   embedded = false,
+  reusableGroups = [],
+  catalogProducts = [],
 }: {
   product: Product | null
   onClose: () => void
   onSaved?: () => void | Promise<void>
   embedded?: boolean
+  reusableGroups?: ProductModifierGroup[]
+  catalogProducts?: Product[]
 }) {
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [ingredientsAvailable, setIngredientsAvailable] = useState(true)
@@ -98,6 +108,8 @@ export function ProductCompositionEditor({
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [selectedExistingGroup, setSelectedExistingGroup] = useState("")
+  const [sourceCategory, setSourceCategory] = useState("")
 
   useEffect(() => {
     if (!product) return
@@ -169,11 +181,38 @@ export function ProductCompositionEditor({
         required: false,
         minSelect: "0",
         maxSelect: "1",
+        selectionMode: "unique",
         includedQuantity: "0",
         active: true,
         options: [],
       },
     ])
+  }
+
+  function addExistingGroup() {
+    const source = reusableGroups.find((item) => item.id === Number(selectedExistingGroup))
+    if (!source || groups.some((item) => item.sourceGroupId === source.id)) return
+    const draft = fromComposition({
+      productId: product!.id,
+      modifierGroups: [source],
+      recipe: [],
+      estimatedFoodCost: 0,
+      ingredientStockAvailable: true,
+    }).groups[0]
+    setGroups((current) => [...current, { ...draft, existingGroupId: source.id }])
+    setSelectedExistingGroup("")
+  }
+
+  function addGroupFromCategory() {
+    const available = catalogProducts.filter((item) => item.active && item.id !== product!.id && item.category === sourceCategory).slice(0, 100)
+    if (!available.length) return
+    setGroups((current) => [...current, {
+      key: key(), name: `Sabores de ${sourceCategory}`, description: "Escolha os sabores do combo.",
+      required: true, minSelect: "4", maxSelect: "4", includedQuantity: "4",
+      selectionMode: "bundle", active: true,
+      options: available.map((item) => ({ key: key(), name: item.name, description: "", priceDelta: "0", includedEligible: true, active: true, ingredients: [] })),
+    }])
+    setSourceCategory("")
   }
 
   function addOption(groupKey: string) {
@@ -234,11 +273,13 @@ export function ProductCompositionEditor({
             quantity: Number(row.quantity.replace(",", ".")),
           })),
         modifierGroups: groups.map((group, groupIndex) => ({
+          ...(group.existingGroupId ? { existingGroupId: group.existingGroupId } : {}),
           name: group.name,
           description: group.description,
           required: group.required,
           minSelect: Number(group.minSelect || 0),
           maxSelect: Number(group.maxSelect || 1),
+          selectionMode: group.selectionMode,
           includedQuantity: Number(group.includedQuantity || 0),
           active: group.active,
           sortOrder: groupIndex,
@@ -314,9 +355,12 @@ export function ProductCompositionEditor({
             </details>}
 
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-1.5"><h3 className="font-black text-gray-900">Grupos de complementos</h3><HelpTip helpKey="composition.modifiers" /></div><p className="text-sm text-gray-500">Ex.: tamanho, frutas, adicionais, molhos, borda ou ponto da carne.</p></div><button type="button" onClick={addGroup} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-black text-white"><Plus className="h-4 w-4" /> Grupo</button></div>
+              <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-1.5"><h3 className="font-black text-gray-900">Grupos de complementos</h3><HelpTip helpKey="composition.modifiers" /></div><p className="text-sm text-gray-500">Título do grupo e opções abaixo. Ex.: Sabores → frango, carne, pizza.</p></div><button type="button" onClick={addGroup} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-black text-white"><Plus className="h-4 w-4" /> Criar grupo</button></div>
+              {reusableGroups.length > 0 && <div className="mt-4 flex flex-wrap gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3"><select value={selectedExistingGroup} onChange={(event) => setSelectedExistingGroup(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Usar grupo já cadastrado...</option>{reusableGroups.filter((item) => !groups.some((group) => group.sourceGroupId === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.options.length} opções)</option>)}</select><button type="button" disabled={!selectedExistingGroup} onClick={addExistingGroup} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-40">Adicionar</button></div>}
+              {catalogProducts.some((item) => item.active && item.id !== product.id) && <div className="mt-3 flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3"><select value={sourceCategory} onChange={(event) => setSourceCategory(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="">Criar sabores dos produtos de...</option>{[...new Set(catalogProducts.filter((item) => item.active && item.id !== product.id).map((item) => item.category))].map((name) => <option key={name} value={name}>{name}</option>)}</select><button type="button" disabled={!sourceCategory} onClick={addGroupFromCategory} className="rounded-lg border border-gray-300 bg-white px-3 text-sm font-bold text-gray-800 disabled:opacity-40">Criar grupo</button><p className="w-full text-xs text-gray-500">Copia os nomes atuais dos produtos. Você pode editar antes de salvar.</p></div>}
               <div className="mt-4 space-y-4">
-                {groups.map((group, groupIndex) => <article key={group.key} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                {groups.map((group, groupIndex) => group.existingGroupId ? <article key={group.key} className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><div className="flex items-start justify-between gap-2"><div><p className="font-black text-blue-950">{group.name}</p><p className="text-xs text-blue-700">Grupo reutilizado · {group.options.length} opções vinculadas a este produto.</p><button type="button" onClick={() => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, existingGroupId: undefined, sourceGroupId: undefined } : item))} className="mt-2 text-xs font-bold text-blue-700">Criar cópia para editar só neste produto</button></div><button type="button" onClick={() => setGroups((current) => current.filter((item) => item.key !== group.key))} aria-label={`Remover ${group.name} deste produto`} className="rounded-lg p-2 text-gray-500 hover:text-red-600"><Trash2 className="h-4 w-4" /></button></div><details className="mt-2 text-sm"><summary className="cursor-pointer font-bold text-blue-800">Ver opções</summary><p className="mt-2 text-gray-700">{group.options.map((option) => option.name).join(" · ")}</p></details></article> : <details key={group.key} open className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <summary className="mb-4 cursor-pointer text-sm font-black text-gray-900">{group.name || "Novo grupo"} <span className="font-normal text-gray-500">· {group.options.length} opções</span></summary>
                   <div className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_110px_110px_120px_auto]">
                     <input value={group.name} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, name: event.target.value } : item))} placeholder="Nome do grupo" className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold"/>
                     <input value={group.description} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, description: event.target.value } : item))} placeholder="Descrição (opcional)" className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm"/>
@@ -326,6 +370,7 @@ export function ProductCompositionEditor({
                     <button type="button" onClick={() => setGroups((current) => current.filter((item) => item.key !== group.key))} className="self-end rounded-xl p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-4 text-xs font-bold text-gray-600"><label className="flex items-center gap-2"><input type="checkbox" checked={group.required} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, required: event.target.checked } : item))}/> Obrigatório <HelpTip helpKey="composition.required" /></label><label className="flex items-center gap-2"><input type="checkbox" checked={group.active} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, active: event.target.checked } : item))}/> Ativo</label></div>
+                  <label className="mt-3 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-950"><input type="checkbox" className="mt-1" checked={group.selectionMode === "bundle"} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, selectionMode: event.target.checked ? "bundle" : "unique" } : item))}/><span><strong>Sabores por quantidade do combo</strong><small className="block text-blue-700">Mínimo fixo por pedido; máximo multiplicado pela quantidade. Permite repetir sabores. Ex.: mínimo 4, máximo 4 → 2 combos aceitam de 4 a 8 escolhas. Sabores sem preço extra.</small></span></label>
 
                   <div className="mt-4 space-y-3">
                     {group.options.map((option, optionIndex) => <div key={option.key} className="rounded-xl border border-gray-200 bg-white p-3">
@@ -341,7 +386,7 @@ export function ProductCompositionEditor({
                     <button type="button" onClick={() => addOption(group.key)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-black text-gray-700"><Plus className="h-4 w-4" /> Opção</button>
                   </div>
                   <p className="mt-2 text-[10px] text-gray-400">Grupo {groupIndex + 1} · a ordem visual segue a ordem desta lista.</p>
-                </article>)}
+                </details>)}
                 {!groups.length && <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400">Este produto ainda não exige montagem. Adicione um grupo quando quiser oferecer tamanhos, acompanhamentos ou adicionais.</div>}
               </div>
             </section>

@@ -1,4 +1,3 @@
-import { applyCheckoutPromotionUnitPrice, getCheckoutPromotionPriceMap } from "@/lib/promotions-db"
 import {
   randomBytes,
 } from "node:crypto"
@@ -48,7 +47,6 @@ import {
 import type {
   DeliveryZone,
   Order,
-  ProductModifierGroup,
   StoreSettings,
 } from "@/lib/types"
 
@@ -134,8 +132,8 @@ function normalizedItems(
       throw new Error("Quantidade de produto ou complementos inválidos.")
     }
 
-    const modifierOptionIds = parsedModifierOptionIds
-    if (modifierOptionIds.length > 100) {
+    const modifierOptionIds = [...new Set(parsedModifierOptionIds)]
+    if (modifierOptionIds.length > 50) {
       throw new Error("Há complementos demais em um dos itens do pedido.")
     }
 
@@ -366,20 +364,6 @@ async function createTenantCheckoutOrderInScope(
   try {
     await client.query("BEGIN")
 
-    const checkoutPromotionPrices =
-      await getCheckoutPromotionPriceMap(
-        client,
-        organizationId,
-        settings.timeZone,
-        input.timing,
-        input.requestedFor,
-        input.bypassLeadTime
-          ? 0
-          : input.type === "delivery"
-            ? settings.deliveryMinMinutes
-            : settings.pickupLeadMinutes,
-      )
-
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       [
@@ -560,7 +544,7 @@ async function createTenantCheckoutOrderInScope(
           organizationId,
           productIds,
         )
-      : new Map<number, ProductModifierGroup[]>()
+      : new Map()
 
     const requestedStock = new Map<number, number>()
     for (const requestedItem of requested) {
@@ -596,7 +580,6 @@ async function createTenantCheckoutOrderInScope(
           modifierGroups: groups,
         },
         requestedItem.modifierOptionIds,
-        requestedItem.quantity,
       )
 
       if (!pricing.ok) throw new Error(pricing.error)
@@ -605,16 +588,8 @@ async function createTenantCheckoutOrderInScope(
         productId: Number(product.id),
         name: product.name,
         quantity: requestedItem.quantity,
-        unitPrice: applyCheckoutPromotionUnitPrice(
-          checkoutPromotionPrices,
-          Number(requestedItem.productId),
-          pricing.unitPrice,
-        ),
-        subtotal: money(applyCheckoutPromotionUnitPrice(
-          checkoutPromotionPrices,
-          Number(requestedItem.productId),
-          pricing.unitPrice,
-        ) * requestedItem.quantity),
+        unitPrice: pricing.unitPrice,
+        subtotal: money(pricing.unitPrice * requestedItem.quantity),
         ...(pricing.modifiers.length ? { modifiers: pricing.modifiers } : {}),
       }
     })
@@ -1014,10 +989,7 @@ async function createTenantCheckoutOrderInScope(
         items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
-          optionConsumptions: (item.modifiers || []).map((modifier) => ({
-            optionId: modifier.optionId,
-            quantity: (modifierGroups.get(item.productId) || []).find((group) => group.id === modifier.groupId)?.selectionMode === "bundle" ? 1 : item.quantity,
-          })),
+          optionIds: (item.modifiers || []).map((modifier) => modifier.optionId),
         })),
       )
     }

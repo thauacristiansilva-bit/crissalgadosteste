@@ -117,8 +117,6 @@ export function Storefront({
   const cartLoadedKeyRef = useRef("")
   const [cartOpen, setCartOpen] = useState(false)
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
-  const [editingCartKey, setEditingCartKey] = useState<string | null>(null)
-  const [editingQuantity, setEditingQuantity] = useState(1)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutStep, setCheckoutStep] = useState<1 | 2 | 3>(1)
   const [accountOpen, setAccountOpen] = useState(false)
@@ -154,43 +152,6 @@ export function Storefront({
     const id = window.setInterval(update, 30000)
     return () => window.clearInterval(id)
   }, [settings])
-
-  useEffect(() => {
-    const refreshPromotions = () => {
-      if (
-        document.visibilityState ===
-        "visible"
-      ) {
-        router.refresh()
-      }
-    }
-
-    window.addEventListener(
-      "focus",
-      refreshPromotions,
-    )
-    document.addEventListener(
-      "visibilitychange",
-      refreshPromotions,
-    )
-
-    const id = window.setInterval(
-      refreshPromotions,
-      30000,
-    )
-
-    return () => {
-      window.removeEventListener(
-        "focus",
-        refreshPromotions,
-      )
-      document.removeEventListener(
-        "visibilitychange",
-        refreshPromotions,
-      )
-      window.clearInterval(id)
-    }
-  }, [router])
   useEffect(() => {
     if (isOpen || !settings.acceptingOrders) return
     setCheckout((current) =>
@@ -304,18 +265,18 @@ export function Storefront({
     try {
       const saved = window.localStorage.getItem(cartStorageKey)
       if (saved) {
-        const parsed = JSON.parse(saved) as Array<{ key?: string; productId?: number; quantity?: number; optionIds?: number[] }>
+        const parsed = JSON.parse(saved) as Array<{ productId?: number; quantity?: number; optionIds?: number[] }>
         if (Array.isArray(parsed)) {
           const restored = parsed.flatMap((entry) => {
             const product = products.find((item) => item.id === Number(entry.productId))
             if (!product || !product.active) return []
             const optionIds = Array.isArray(entry.optionIds) ? entry.optionIds.map(Number) : []
+            const pricing = validateCartCustomization(product, optionIds)
+            if (!pricing) return []
             let quantity = Math.max(1, Math.floor(Number(entry.quantity || 1)))
             if (product.trackStock) quantity = Math.min(quantity, product.stock)
-            const pricing = validateCartCustomization(product, optionIds, quantity)
-            if (!pricing) return []
             return quantity > 0 ? [{
-              key: typeof entry.key === "string" && entry.key.startsWith(`${product.id}:`) ? entry.key : modifierSelectionKey(product.id, optionIds),
+              key: modifierSelectionKey(product.id, optionIds),
               product,
               quantity,
               optionIds,
@@ -344,7 +305,6 @@ export function Storefront({
       JSON.stringify(
         cart.map((item) => ({
           productId: item.product.id,
-          key: item.key,
           quantity: item.quantity,
           optionIds: item.optionIds,
         })),
@@ -371,53 +331,7 @@ export function Storefront({
     setCheckout((current) => ({ ...current, name: customer.name || current.name, phone: customer.phone || current.phone, address: customer.defaultAddress || current.address, number: customer.defaultNumber || current.number, district: customer.defaultDistrict || current.district, city: customer.defaultCity || current.city, state: customer.defaultState || current.state, zipCode: customer.defaultZipCode || current.zipCode, complement: customer.defaultComplement || current.complement, latitude: customer.defaultLatitude ?? current.latitude, longitude: customer.defaultLongitude ?? current.longitude }))
   }, [customer])
 
-  const filtered = useMemo(() => {
-    const q =
-      search.trim().toLowerCase()
-
-    return products
-      .filter((p) => p.active)
-      .filter(
-        (p) =>
-          category === "Todos" ||
-          p.category === category,
-      )
-      .filter(
-        (p) =>
-          !q ||
-          p.name
-            .toLowerCase()
-            .includes(q) ||
-          p.description
-            .toLowerCase()
-            .includes(q),
-      )
-      .sort(
-        (a, b) =>
-          Number(
-            Boolean(
-              b.promotion?.highlight,
-            ),
-          ) -
-            Number(
-              Boolean(
-                a.promotion?.highlight,
-              ),
-            ) ||
-          Number(
-            Boolean(b.promotion),
-          ) -
-            Number(
-              Boolean(a.promotion),
-            ) ||
-          Number(b.featured) -
-            Number(a.featured) ||
-          a.name.localeCompare(
-            b.name,
-            "pt-BR",
-          ),
-      )
-  }, [products, search, category])
+  const filtered = useMemo(() => { const q = search.trim().toLowerCase(); return products.filter((p) => p.active).filter((p) => category === "Todos" || p.category === category).filter((p) => !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)).sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name, "pt-BR")) }, [products, search, category])
   const categoryCounts = useMemo(() => {
     const activeProducts = products.filter((product) => product.active)
     const counts = new Map<string, number>()
@@ -455,15 +369,9 @@ export function Storefront({
   }, [checkout.timing, checkout.type, selectedDate, settings.businessHours, settings.deliveryMinMinutes, settings.pickupLeadMinutes, settings.slotIntervalMinutes, organizationTimeZone])
   const selectedTime = checkout.timing === "scheduled" && timeSlots.includes(checkout.scheduleTime) ? checkout.scheduleTime : ""
 
-  function productPromotionDisplayPrice(
-    product: Product,
-  ) {
-    const promotion =
-      product.promotion
-
-    if (!promotion) {
-      return product.price
-    }
+  function productPriceForTiming(product: Product, timing: Checkout["timing"]) {
+    const promotion = product.promotion
+    if (!promotion) return product.price
 
     const validUntil =
       new Date(
@@ -479,27 +387,11 @@ export function Storefront({
       return product.price
     }
 
-    return Math.min(
-      product.price,
-      promotion.promotionalPrice,
-    )
-  }
-
-  function productPriceForTiming(product: Product, timing: Checkout["timing"]) {
-    const promotionalPrice =
-      productPromotionDisplayPrice(
-        product,
-      )
-
-    if (
-      promotionalPrice >=
-      product.price
-    ) {
-      return product.price
-    }
-
     if (timing === "now") {
-      return promotionalPrice
+      return Math.min(
+        product.price,
+        promotion.promotionalPrice,
+      )
     }
 
     if (
@@ -508,7 +400,10 @@ export function Storefront({
       checkout.scheduleDate ===
         scheduleMinDate
     ) {
-      return promotionalPrice
+      return Math.min(
+        product.price,
+        promotion.promotionalPrice,
+      )
     }
 
     return product.price
@@ -536,14 +431,13 @@ export function Storefront({
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
   const total = Math.max(0, subtotal - couponDiscount) + deliveryFee
 
-  function validateCartCustomization(product: Product, optionIds: number[], quantity = 1) {
+  function validateCartCustomization(product: Product, optionIds: number[]) {
     const result = validateAndPriceModifierSelection(
       {
         ...product,
         price: productPriceForTiming(product, checkout.timing),
       },
       optionIds,
-      quantity,
     )
     return result.ok ? result : null
   }
@@ -656,7 +550,6 @@ export function Storefront({
     setCart((current) => {
       const target = current.find((item) => item.key === key)
       if (!target) return current
-      if (target.product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active)) return current
       let next = quantity
       if (target.product.trackStock) {
         const otherQuantity = current
@@ -669,40 +562,26 @@ export function Storefront({
     })
   }
 
-  function editCombo(item: CartItem, nextQuantity = item.quantity) {
-    setEditingCartKey(item.key)
-    setEditingQuantity(nextQuantity)
-    setCustomizingProduct(item.product)
-    setCartOpen(false)
-  }
-
   function addCustomizedProduct(product: Product, customization: ProductCustomization) {
-    const bundle = product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active)
-    const key = bundle ? `${product.id}:${crypto.randomUUID()}` : modifierSelectionKey(product.id, customization.optionIds)
+    const key = modifierSelectionKey(product.id, customization.optionIds)
     setCart((current) => {
-      if (editingCartKey) {
-        const otherQuantity = current.filter((item) => item.product.id === product.id && item.key !== editingCartKey).reduce((sum, item) => sum + item.quantity, 0)
-        if (product.trackStock && otherQuantity + customization.quantity > product.stock) return current
-        return current.map((item) => item.key === editingCartKey ? { ...item, product, quantity: customization.quantity, optionIds: customization.optionIds, unitPrice: customization.unitPrice, modifiers: customization.modifiers } : item)
-      }
       const currentProductQuantity = current
         .filter((item) => item.product.id === product.id)
         .reduce((sum, item) => sum + item.quantity, 0)
-      if (product.trackStock && currentProductQuantity + customization.quantity > product.stock) return current
+      if (product.trackStock && currentProductQuantity >= product.stock) return current
       const existing = current.find((item) => item.key === key)
       if (existing) {
-        return current.map((item) => item.key === key ? { ...item, quantity: item.quantity + customization.quantity } : item)
+        return current.map((item) => item.key === key ? { ...item, quantity: item.quantity + 1 } : item)
       }
       return [...current, {
         key,
         product,
-        quantity: customization.quantity,
+        quantity: 1,
         optionIds: customization.optionIds,
         unitPrice: customization.unitPrice,
         modifiers: customization.modifiers,
       }]
     })
-    setEditingCartKey(null)
     setCustomizingProduct(null)
   }
 
@@ -1016,23 +895,6 @@ export function Storefront({
   }
 
   const themeStyle = { "--primary": settings.primaryColor, "--secondary": settings.secondaryColor, "--store-bg": settings.backgroundColor } as React.CSSProperties
-
-  const brandFontFamily =
-    ({
-      modern: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      rounded: "'Trebuchet MS', 'Arial Rounded MT Bold', Arial, sans-serif",
-      elegant: "Georgia, 'Times New Roman', serif",
-      impact: "Impact, 'Arial Black', sans-serif",
-    } as const)[settings.storeTitleFont || "modern"]
-
-  const brandTextStyle = {
-    color: settings.storeTitleColor || settings.primaryColor || "#111827",
-    fontFamily: brandFontFamily,
-  } as React.CSSProperties
-
-  const showBrandTitleLogo =
-    settings.storeTitleMode === "logo" &&
-    Boolean(settings.logoImage?.trim())
   const activePaymentMethods: Array<[Checkout["paymentMethod"], string]> = []
   if (settings.pixEnabled) activePaymentMethods.push(["pix", "PIX"]); if (settings.cashEnabled) activePaymentMethods.push(["cash", "Dinheiro"]); if (settings.cardEnabled) activePaymentMethods.push(["card", "Cartão na entrega"])
   const publicAddress = [settings.address, settings.storeDistrict, settings.city, settings.state, settings.zipCode].filter(Boolean).join(", ")
@@ -1045,20 +907,7 @@ export function Storefront({
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
           <a href={landingPath} className="inline-flex min-w-0 items-center gap-2 rounded-xl px-1 py-1 text-sm font-black text-gray-800">
             <Home className="h-4 w-4 shrink-0" />
-            {showBrandTitleLogo ? (
-              <img
-                src={settings.logoImage}
-                alt={settings.storeName}
-                className="hidden max-h-8 max-w-[180px] object-contain sm:block"
-              />
-            ) : (
-              <span
-                className="hidden truncate text-base font-black sm:inline"
-                style={brandTextStyle}
-              >
-                {settings.storeName}
-              </span>
-            )}
+            <span className="hidden truncate sm:inline">{settings.storeName}</span>
           </a>
           <div className="flex items-center gap-2">
             <a href={catalogPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "catalog" ? "bg-gray-950 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Ver cardápio</a>
@@ -1084,20 +933,7 @@ export function Storefront({
               </div>
 
               <div className="min-w-0 pb-1 lg:pb-2">
-                <div className="flex min-w-0 flex-col items-start gap-2">{showBrandTitleLogo ? (
-                  <img
-                    src={settings.logoImage}
-                    alt={settings.storeName}
-                    className="max-h-16 max-w-[280px] object-contain sm:max-h-20 sm:max-w-[360px]"
-                  />
-                ) : (
-                  <h1
-                    className="max-w-full break-words text-2xl font-black leading-tight tracking-tight sm:text-3xl"
-                    style={brandTextStyle}
-                  >
-                    {settings.storeName}
-                  </h1>
-                )}<span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-black leading-tight ${isOpen ? "border-emerald-200 bg-emerald-50 text-emerald-800" : settings.acceptingOrders ? "border-amber-200 bg-amber-50 text-amber-800" : "border-gray-200 bg-gray-100 text-gray-600"}`}><span className={`h-2 w-2 shrink-0 rounded-full ${isOpen ? "bg-emerald-500" : settings.acceptingOrders ? "bg-amber-500" : "bg-gray-400"}`}/><span className="break-words">{isOpen ? "Aberto" : settings.acceptingOrders ? "Fechado · aceitando agendamentos" : "Pedidos pausados"}</span></span></div>
+                <div className="flex min-w-0 flex-col items-start gap-2"><h1 className="max-w-full break-words text-2xl font-black leading-tight tracking-tight sm:text-3xl">{settings.storeName}</h1><span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-black leading-tight ${isOpen ? "border-emerald-200 bg-emerald-50 text-emerald-800" : settings.acceptingOrders ? "border-amber-200 bg-amber-50 text-amber-800" : "border-gray-200 bg-gray-100 text-gray-600"}`}><span className={`h-2 w-2 shrink-0 rounded-full ${isOpen ? "bg-emerald-500" : settings.acceptingOrders ? "bg-amber-500" : "bg-gray-400"}`}/><span className="break-words">{isOpen ? "Aberto" : settings.acceptingOrders ? "Fechado · aceitando agendamentos" : "Pedidos pausados"}</span></span></div>
                 {settings.slogan && <p className="mt-1 text-sm text-gray-500">{settings.slogan}</p>}
                 <div className="mt-3 space-y-1 text-sm text-gray-600">
                   <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0"/><span>{settings.address}{settings.storeDistrict ? `, ${settings.storeDistrict}` : ""}{settings.city ? `, ${settings.city}` : ""}{settings.state ? ` - ${settings.state}` : ""}{settings.zipCode ? `, ${settings.zipCode}` : ""}</span></p>
@@ -1198,11 +1034,11 @@ export function Storefront({
                     )}
                   </div>
                   <button type="button" onClick={() => setCustomizingProduct(product)} disabled={unavailable} className="block w-full pt-2 text-left disabled:cursor-default">
-                    {product.promotion && productPromotionDisplayPrice(product) < product.price ? (
+                    {product.promotion && productPriceForTiming(product, checkout.timing) < product.price ? (
                       <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="text-xs font-bold text-gray-400 line-through">{money(product.price)}</span>
-                        <strong className="text-base text-orange-600">{money(productPromotionDisplayPrice(product))}</strong>
-                        {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"} · hoje</span>}
+                        <strong className="text-base text-orange-600">{money(productPriceForTiming(product, checkout.timing))}</strong>
+                        {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"}</span>}
                       </span>
                     ) : (
                       <strong className="text-base">{money(product.price)}</strong>
@@ -1243,20 +1079,20 @@ export function Storefront({
                       {item.product.image ? <img src={item.product.image} alt="" className="h-full w-full object-cover" /> : "🥟"}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-bold">{item.quantity}x {item.product.name}</p>
+                      <p className="font-bold">{item.product.name}</p>
                       <p className="text-xs text-gray-500">{money(cartItemUnitPrice(item))} cada</p>
                     </div>
-                    {item.product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active) ? <div className="flex flex-col items-end gap-1"><button type="button" onClick={() => editCombo(item)} className="rounded-xl bg-orange-50 px-2 py-2 text-xs font-bold text-orange-700">Editar sabores / quantidade</button><button type="button" onClick={() => setCart((current) => current.filter((candidate) => candidate.key !== item.key))} className="text-xs text-red-600">Remover</button></div> : <div className="flex items-center gap-2 rounded-xl bg-gray-100 p-1">
+                    <div className="flex items-center gap-2 rounded-xl bg-gray-100 p-1">
                       <button onClick={() => setCartItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-4 w-4" /></button>
                       <strong className="min-w-5 text-center text-sm">{item.quantity}</strong>
                       <button onClick={() => setCartItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-4 w-4" /></button>
-                    </div>}
+                    </div>
                     <strong className="w-20 text-right text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong>
                   </div>
                   {item.modifiers.length > 0 && (
                     <div className="ml-[60px] mt-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                      {item.modifiers.map((modifier, index) => (
-                        <p key={`${modifier.groupId}-${modifier.optionId}-${index}`}>
+                      {item.modifiers.map((modifier) => (
+                        <p key={`${modifier.groupId}-${modifier.optionId}`}>
                           <span className="font-bold">{modifier.groupName}:</span> {modifier.optionName}
                           {modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : modifier.included ? " (incluído)" : ""}
                         </p>
@@ -1430,9 +1266,7 @@ export function Storefront({
             : null
         }
         primaryColor={settings.primaryColor}
-        initialOptionIds={editingCartKey ? cart.find((item) => item.key === editingCartKey)?.optionIds : undefined}
-        initialQuantity={editingCartKey ? editingQuantity : 1}
-        onClose={() => { setCustomizingProduct(null); setEditingCartKey(null) }}
+        onClose={() => setCustomizingProduct(null)}
         onConfirm={(customization) => {
           if (customizingProduct) addCustomizedProduct(customizingProduct, customization)
         }}

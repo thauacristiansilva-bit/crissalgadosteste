@@ -185,7 +185,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
       </form>
       {showCategoryForm && <form onSubmit={addCategory} className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><label htmlFor="quick-category" className="block text-xs font-bold text-blue-900">Nome da nova categoria</label><div className="mt-2 flex gap-2"><input id="quick-category" required maxLength={100} value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Ex.: Bebidas" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-3 text-sm" /><button type="submit" disabled={busy} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-50">Criar</button></div></form>}
       </div>
-      {compositionProduct && <div className="xl:col-span-2"><ProductCompositionEditor product={compositionProduct} embedded onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} /></div>}
+      {compositionProduct && <div className="xl:col-span-2"><ProductCompositionEditor product={compositionProduct} catalogProducts={products} reusableGroups={[...new Map(products.flatMap((item) => item.modifierGroups || []).filter((group) => group.active && group.options.length).map((group) => [group.id, group])).values()]} embedded onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} /></div>}
     </section>
   )
 }

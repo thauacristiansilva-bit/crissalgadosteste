@@ -59,6 +59,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
   const [search, setSearch] = useState("")
   const [items, setItems] = useState<Item[]>([])
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
+  const [editingItemKey, setEditingItemKey] = useState<string | null>(null)
   const [orderType, setOrderType] = useState<Order["type"]>(settings.pickupEnabled ? "pickup" : settings.deliveryEnabled ? "delivery" : "pickup")
   const [name, setName] = useState(settings.pickupEnabled ? "Balcão" : "")
   const [phone, setPhone] = useState("")
@@ -130,6 +131,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
     setItems((current) => {
       const item = current.find((candidate) => candidate.key === cartKey)
       if (!item) return current
+      if (item.product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active) && value > 0) return current
       let next = value
       if (item.product.trackStock) {
         const otherQuantity = current.filter((candidate) => candidate.product.id === item.product.id && candidate.key !== cartKey).reduce((sum, candidate) => sum + candidate.quantity, 0)
@@ -140,14 +142,21 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
   }
 
   function addCustomizedProduct(product: Product, customization: ProductCustomization) {
-    const cartKey = modifierSelectionKey(product.id, customization.optionIds)
+    const bundle = product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active)
+    const cartKey = bundle ? `${product.id}:${crypto.randomUUID()}` : modifierSelectionKey(product.id, customization.optionIds)
     setItems((current) => {
+      if (editingItemKey) {
+        const otherQuantity = current.filter((item) => item.product.id === product.id && item.key !== editingItemKey).reduce((sum, item) => sum + item.quantity, 0)
+        if (product.trackStock && otherQuantity + customization.quantity > product.stock) return current
+        return current.map((item) => item.key === editingItemKey ? { ...item, quantity: customization.quantity, optionIds: customization.optionIds, unitPrice: customization.unitPrice, modifiers: customization.modifiers } : item)
+      }
       const existing = current.find((item) => item.key === cartKey)
       const totalForProduct = current.filter((item) => item.product.id === product.id).reduce((sum, item) => sum + item.quantity, 0)
-      if (product.trackStock && totalForProduct >= product.stock) return current
-      if (existing) return current.map((item) => item.key === cartKey ? { ...item, quantity: item.quantity + 1 } : item)
-      return [...current, { key: cartKey, product, quantity: 1, optionIds: customization.optionIds, unitPrice: customization.unitPrice, modifiers: customization.modifiers }]
+      if (product.trackStock && totalForProduct + customization.quantity > product.stock) return current
+      if (existing) return current.map((item) => item.key === cartKey ? { ...item, quantity: item.quantity + customization.quantity } : item)
+      return [...current, { key: cartKey, product, quantity: customization.quantity, optionIds: customization.optionIds, unitPrice: customization.unitPrice, modifiers: customization.modifiers }]
     })
+    setEditingItemKey(null)
     setCustomizingProduct(null)
   }
 
@@ -339,7 +348,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
           <button type="button" disabled={!settings.deliveryEnabled} onClick={() => selectOrderType("delivery")} className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-40 ${orderType === "delivery" ? "border-blue-700 bg-blue-50 text-blue-800" : "border-gray-200 bg-white text-gray-600"}`}><Truck className="h-4 w-4"/>Entrega</button>
         </div>
 
-        <div className="mt-4 space-y-2">{items.map((item) => <div key={item.key} className="rounded-xl bg-gray-50 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{item.quantity}x {item.product.name}</p><p className="text-xs text-gray-500">{money(item.unitPrice * item.quantity)}</p>{item.modifiers.length > 0 && <div className="mt-1 space-y-0.5">{item.modifiers.map((modifier) => <p key={`${modifier.groupId}-${modifier.optionId}`} className="text-[11px] text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${money(modifier.priceDelta)}` : ""}</p>)}</div>}</div><button onClick={() => setItemQuantity(item.key, 0)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"><X className="h-4 w-4"/></button></div><div className="mt-2 flex w-28 items-center justify-between rounded-lg bg-white p-1"><button onClick={() => setItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-3.5 w-3.5"/></button><strong className="text-xs">{item.quantity}</strong><button onClick={() => setItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-3.5 w-3.5"/></button></div></div>)}</div>
+        <div className="mt-4 space-y-2">{items.map((item) => <div key={item.key} className="rounded-xl bg-gray-50 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{item.quantity}x {item.product.name}</p><p className="text-xs text-gray-500">{money(item.unitPrice * item.quantity)}</p>{item.modifiers.length > 0 && <div className="mt-1 space-y-0.5">{item.modifiers.map((modifier, index) => <p key={`${modifier.groupId}-${modifier.optionId}-${index}`} className="text-[11px] text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${money(modifier.priceDelta)}` : ""}</p>)}</div>}</div><button onClick={() => setItemQuantity(item.key, 0)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"><X className="h-4 w-4"/></button></div>{item.product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active) ? <button type="button" onClick={() => { setEditingItemKey(item.key); setCustomizingProduct(item.product) }} className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">Editar sabores / quantidade</button> : <div className="mt-2 flex w-28 items-center justify-between rounded-lg bg-white p-1"><button onClick={() => setItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-3.5 w-3.5"/></button><strong className="text-xs">{item.quantity}</strong><button onClick={() => setItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-3.5 w-3.5"/></button></div>}</div>)}</div>
         {!items.length && <div className="mt-4 rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400">Carrinho vazio</div>}
 
         {orderType === "delivery" && (
@@ -408,7 +417,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
         <button onClick={createOrder} disabled={busy || !items.length || (orderType === "delivery" && !deliveryQuote)} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 text-sm font-black text-white disabled:opacity-50"><ReceiptText className="h-4 w-4"/>{busy ? "Salvando..." : orderType === "delivery" ? "Registrar pedido para entrega" : "Registrar pedido"}</button>
       </aside>
 
-      <ProductCustomizer product={customizingProduct} primaryColor="#1d4ed8" onClose={() => setCustomizingProduct(null)} onConfirm={(customization) => customizingProduct && addCustomizedProduct(customizingProduct, customization)} />
+      <ProductCustomizer product={customizingProduct} primaryColor="#1d4ed8" initialOptionIds={editingItemKey ? items.find((item) => item.key === editingItemKey)?.optionIds : undefined} initialQuantity={editingItemKey ? items.find((item) => item.key === editingItemKey)?.quantity : 1} onClose={() => { setCustomizingProduct(null); setEditingItemKey(null) }} onConfirm={(customization) => customizingProduct && addCustomizedProduct(customizingProduct, customization)} />
     </section>
   )
 }

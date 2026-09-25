@@ -13,7 +13,7 @@ export function productHasModifiers(product: Product) {
 }
 
 export function modifierSelectionKey(productId: number, optionIds: number[]) {
-  const normalized = [...new Set(optionIds.map(Number).filter(Number.isFinite))]
+  const normalized = optionIds.map(Number).filter(Number.isFinite)
     .sort((a, b) => a - b)
   return `${productId}:${normalized.join("-")}`
 }
@@ -21,12 +21,19 @@ export function modifierSelectionKey(productId: number, optionIds: number[]) {
 export function validateAndPriceModifierSelection(
   product: Pick<Product, "price" | "modifierGroups">,
   optionIds: number[],
+  quantity = 1,
 ) {
+  if (!Number.isInteger(quantity) || quantity < 1 || optionIds.length > 100) {
+    return { ok: false as const, error: "Quantidade de itens ou sabores inválida." }
+  }
   const groups = (product.modifierGroups || [])
     .filter((group) => group.active)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
 
-  const requested = [...new Set(optionIds.map(Number))]
+  const requested = optionIds.map(Number)
+  if (requested.some((id) => !Number.isInteger(id) || id <= 0)) {
+    return { ok: false as const, error: "Opção de complemento inválida." }
+  }
   const requestedSet = new Set(requested)
   const known = new Set<number>()
   const modifiers: OrderItemModifier[] = []
@@ -37,11 +44,17 @@ export function validateAndPriceModifierSelection(
       .filter((option) => option.active)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
 
-    const selected = options.filter((option) => requestedSet.has(option.id))
+    const selected = group.selectionMode === "bundle"
+      ? requested.filter((id) => options.some((option) => option.id === id))
+        .map((id) => options.find((option) => option.id === id)!)
+      : options.filter((option) => requestedSet.has(option.id))
 
     selected.forEach((option) => known.add(option.id))
 
     const minimum = Math.max(group.required ? 1 : 0, group.minSelect)
+    if (group.selectionMode !== "bundle" && requested.filter((id) => options.some((option) => option.id === id)).length !== selected.length) {
+      return { ok: false as const, error: `${group.name}: não repita a mesma opção neste grupo.` }
+    }
     if (selected.length < minimum) {
       return {
         ok: false as const,
@@ -49,10 +62,11 @@ export function validateAndPriceModifierSelection(
       }
     }
 
-    if (selected.length > group.maxSelect) {
+    const maximum = group.maxSelect * (group.selectionMode === "bundle" ? quantity : 1)
+    if (selected.length > maximum) {
       return {
         ok: false as const,
-        error: `${group.name}: escolha no máximo ${group.maxSelect} opção(ões).`,
+        error: `${group.name}: escolha no máximo ${maximum} opção(ões).`,
       }
     }
 
@@ -67,7 +81,7 @@ export function validateAndPriceModifierSelection(
     let includedRemaining = Math.max(0, group.includedQuantity)
 
     for (const option of selected) {
-      const included = option.includedEligible && includedRemaining > 0
+      const included = group.selectionMode === "bundle" || (option.includedEligible && includedRemaining > 0)
       if (included) includedRemaining -= 1
       const charged = included ? 0 : Math.max(0, Number(option.priceDelta || 0))
       modifierTotal += charged

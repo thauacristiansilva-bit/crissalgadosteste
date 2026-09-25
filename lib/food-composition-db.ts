@@ -39,9 +39,11 @@ type ModifierGroupRow = {
   required: boolean
   min_select: number
   max_select: number
+  selection_mode: "unique" | "bundle"
   included_quantity: number
   active: boolean
   sort_order: number
+  used_by_products: number
 }
 
 type ModifierOptionRow = {
@@ -68,11 +70,13 @@ type IngredientLinkRow = {
 
 export type ProductCompositionInput = {
   modifierGroups?: Array<{
+    existingGroupId?: number
     name?: string
     description?: string
     required?: boolean
     minSelect?: number
     maxSelect?: number
+    selectionMode?: "unique" | "bundle"
     includedQuantity?: number
     active?: boolean
     sortOrder?: number
@@ -104,7 +108,7 @@ export type IngredientMovementInput = {
 export type CheckoutIngredientLine = {
   productId: number
   quantity: number
-  optionIds: number[]
+  optionConsumptions: Array<{ optionId: number; quantity: number }>
 }
 
 function iso(value: Date | string) {
@@ -522,9 +526,12 @@ async function getModifierGroupsForProductsWithClient(
         g.required,
         g.min_select,
         g.max_select,
+        g.selection_mode,
         g.included_quantity,
         g.active,
         pmg.sort_order
+        ,(SELECT COUNT(*)::int FROM sf_product_modifier_groups links
+          WHERE links.organization_id = pmg.organization_id AND links.group_id = g.id) AS used_by_products
       FROM sf_product_modifier_groups pmg
       INNER JOIN sf_modifier_groups g
         ON g.organization_id = pmg.organization_id
@@ -642,9 +649,11 @@ async function getModifierGroupsForProductsWithClient(
       required: Boolean(group.required),
       minSelect: Number(group.min_select),
       maxSelect: Number(group.max_select),
+      selectionMode: group.selection_mode,
       includedQuantity: Number(group.included_quantity),
       active: Boolean(group.active),
       sortOrder: Number(group.sort_order),
+      usedByProducts: Number(group.used_by_products),
       options: optionsByGroup.get(Number(group.id)) || [],
     }
     const list = map.get(Number(group.product_id)) || []
@@ -846,6 +855,19 @@ function normalizeComposition(input: ProductCompositionInput) {
   }
 
   const groups = rawGroups.map((group, groupIndex) => {
+    if (group.existingGroupId !== undefined) {
+      const existingGroupId = Number(group.existingGroupId)
+      if (!Number.isInteger(existingGroupId) || existingGroupId <= 0) {
+        throw new Error("Grupo existente inválido.")
+      }
+      return {
+        existingGroupId,
+        name: "", description: "", required: false, minSelect: 0,
+        maxSelect: 1, includedQuantity: 0, active: true,
+        selectionMode: "unique" as const,
+        sortOrder: groupIndex, options: [],
+      }
+    }
     const name = String(group.name || "").trim()
     const description = String(group.description || "").trim()
     const rawOptions = group.options || []
@@ -933,12 +955,19 @@ function normalizeComposition(input: ProductCompositionInput) {
     const includedQuantity = Math.max(0, Math.floor(rawIncludedQuantity))
     const active = group.active !== false
     const activeOptions = options.filter((option) => option.active).length
+    const selectionMode = group.selectionMode === "bundle" ? "bundle" as const : "unique" as const
 
     if (minimum > maxSelect) {
       throw new Error(`${name}: o mínimo de escolhas não pode superar o máximo.`)
     }
-    if (active && minimum > activeOptions) {
+    if (active && selectionMode === "unique" && minimum > activeOptions) {
       throw new Error(`${name}: o mínimo de escolhas é maior que as opções ativas.`)
+    }
+    if (active && selectionMode === "bundle" && minimum > 0 && activeOptions === 0) {
+      throw new Error(`${name}: adicione ao menos um sabor ativo.`)
+    }
+    if (selectionMode === "bundle" && options.some((option) => option.priceDelta !== 0)) {
+      throw new Error(`${name}: sabores do combo devem ter preço adicional zero. Use outro grupo para adicionais pagos.`)
     }
     if (includedQuantity > maxSelect) {
       throw new Error(`${name}: a quantidade incluída não pode ser maior que o máximo.`)
@@ -952,17 +981,24 @@ function normalizeComposition(input: ProductCompositionInput) {
     }
 
     return {
+      existingGroupId: undefined as number | undefined,
       name,
       description,
       required,
       minSelect,
       maxSelect,
+      selectionMode,
       includedQuantity,
       active,
       sortOrder: Math.max(0, Math.floor(rawSortOrder)),
       options,
     }
   })
+
+  const reused = groups.filter((group) => group.existingGroupId !== undefined).map((group) => group.existingGroupId)
+  if (new Set(reused).size !== reused.length) {
+    throw new Error("O mesmo grupo não pode ser incluído duas vezes no produto.")
+  }
 
   return { groups, recipe }
 }
@@ -1011,21 +1047,6 @@ export async function replaceProductComposition(
       `DELETE FROM sf_product_modifier_groups WHERE organization_id = $1 AND product_id = $2`,
       [organizationId, productId],
     )
-    if (oldGroupIds.length) {
-      await client.query(
-        `
-          DELETE FROM sf_modifier_groups g
-          WHERE g.organization_id = $1
-            AND g.id = ANY($2::int[])
-            AND NOT EXISTS (
-              SELECT 1 FROM sf_product_modifier_groups pmg
-              WHERE pmg.organization_id = g.organization_id AND pmg.group_id = g.id
-            )
-        `,
-        [organizationId, oldGroupIds],
-      )
-    }
-
     await client.query(
       `DELETE FROM sf_product_ingredients WHERE organization_id = $1 AND product_id = $2`,
       [organizationId, productId],
@@ -1042,14 +1063,27 @@ export async function replaceProductComposition(
     }
 
     for (const group of normalized.groups) {
+      if (group.existingGroupId !== undefined) {
+        const existing = await client.query<{ id: number }>(
+          `SELECT id FROM sf_modifier_groups WHERE organization_id = $1 AND id = $2 AND active = true`,
+          [organizationId, group.existingGroupId],
+        )
+        if (!existing.rows[0]) throw new Error("Grupo não encontrado nesta empresa.")
+        await client.query(
+          `INSERT INTO sf_product_modifier_groups (organization_id, product_id, group_id, sort_order)
+           VALUES ($1, $2, $3, $4)`,
+          [organizationId, productId, group.existingGroupId, group.sortOrder],
+        )
+        continue
+      }
       const groupId = await nextScopedId(client, "sf_modifier_groups", organizationId)
       await client.query(
         `
           INSERT INTO sf_modifier_groups (
             organization_id, id, name, description, required, min_select, max_select,
-            included_quantity, active, sort_order
+            included_quantity, active, sort_order, selection_mode
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         `,
         [
           organizationId,
@@ -1062,6 +1096,7 @@ export async function replaceProductComposition(
           group.includedQuantity,
           group.active,
           group.sortOrder,
+          group.selectionMode,
         ],
       )
       await client.query(
@@ -1106,6 +1141,17 @@ export async function replaceProductComposition(
       }
     }
 
+    if (oldGroupIds.length) {
+      await client.query(
+        `DELETE FROM sf_modifier_groups g WHERE g.organization_id = $1
+           AND g.id = ANY($2::int[]) AND NOT EXISTS (
+             SELECT 1 FROM sf_product_modifier_groups pmg
+             WHERE pmg.organization_id = g.organization_id AND pmg.group_id = g.id
+           )`,
+        [organizationId, oldGroupIds],
+      )
+    }
+
     await refreshFoodStateWithClient(client, organizationId, "composition-save")
     await client.query("COMMIT")
   } catch (error) {
@@ -1126,7 +1172,7 @@ export async function consumeIngredientsForOrderWithClient(
 ) {
   if (!lines.length) return [] as number[]
   const productIds = [...new Set(lines.map((line) => line.productId))]
-  const optionIds = [...new Set(lines.flatMap((line) => line.optionIds))]
+  const optionIds = [...new Set(lines.flatMap((line) => line.optionConsumptions.map((option) => option.optionId)))]
 
   const productRecipe = await client.query<{
     product_id: number
@@ -1178,11 +1224,11 @@ export async function consumeIngredientsForOrderWithClient(
         (required.get(recipe.ingredientId) || 0) + recipe.quantity * line.quantity,
       )
     }
-    for (const optionId of line.optionIds) {
-      for (const recipe of optionRecipeMap.get(optionId) || []) {
+    for (const option of line.optionConsumptions) {
+      for (const recipe of optionRecipeMap.get(option.optionId) || []) {
         required.set(
           recipe.ingredientId,
-          (required.get(recipe.ingredientId) || 0) + recipe.quantity * line.quantity,
+          (required.get(recipe.ingredientId) || 0) + recipe.quantity * option.quantity,
         )
       }
     }

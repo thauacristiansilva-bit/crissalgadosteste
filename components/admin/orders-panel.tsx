@@ -264,7 +264,7 @@ export function OrdersPanel({
                     <div className="mt-3 space-y-2 border-t border-gray-200 pt-3">
                       {order.items.map((item, index) => (
                         <div key={`${order.id}-${item.productId}-${index}`} className="flex items-start justify-between gap-3 text-sm">
-                          <div className="text-gray-600"><span><strong className="text-gray-900">{item.quantity}x</strong> {item.name}</span>{item.modifiers?.length ? <div className="mt-1 space-y-0.5 pl-4">{item.modifiers.map((modifier) => <p key={`${modifier.groupId}-${modifier.optionId}`} className="text-xs text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${formatCurrency(modifier.priceDelta)}` : ""}</p>)}</div> : null}</div>
+                          <div className="text-gray-600"><span><strong className="text-gray-900">{item.quantity}x</strong> {item.name}</span>{item.modifiers?.length ? <div className="mt-1 space-y-0.5 pl-4">{item.modifiers.map((modifier, modifierIndex) => <p key={`${modifier.groupId}-${modifier.optionId}-${modifierIndex}`} className="text-xs text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${formatCurrency(modifier.priceDelta)}` : ""}</p>)}</div> : null}</div>
                           <span className="font-semibold text-gray-900">{formatCurrency(item.subtotal)}</span>
                         </div>
                       ))}
