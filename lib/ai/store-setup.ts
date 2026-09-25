@@ -111,7 +111,7 @@ export async function applySetupPlan(org: string, plan: SetupPlan) {
       }
       const id = matchingId ?? await nextId(client, "sf_modifier_groups", org)
       if (!matchingId) {
-        const name = candidates.rows.length ? `${group.name} · IA ${id}` : group.name
+        const name = group.name
         await client.query("INSERT INTO sf_modifier_groups (organization_id,id,name,description,required,min_select,max_select,included_quantity,active,sort_order,selection_mode) VALUES ($1,$2,$3,$4,$5,$6,$7,0,true,$8,$9)", [org,id,name,group.description,group.required,group.minSelect,group.maxSelect,index,group.selectionMode])
         for (const [sort, option] of group.options.entries()) {
           const optionId = await nextId(client, "sf_modifier_options", org)

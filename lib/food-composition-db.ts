@@ -644,7 +644,9 @@ async function getModifierGroupsForProductsWithClient(
   for (const group of groups.rows) {
     const mapped: ProductModifierGroup = {
       id: Number(group.id),
-      name: group.name,
+      // Versões antigas da criação por IA guardavam um sufixo técnico no banco.
+      // Ele não faz parte do nome escolhido pela loja e não deve aparecer ao cliente.
+      name: group.name.replace(/ · IA(?: \d+)?$/u, ""),
       description: group.description || "",
       required: Boolean(group.required),
       minSelect: Number(group.min_select),
