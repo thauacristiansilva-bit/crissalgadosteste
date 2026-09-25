@@ -75,12 +75,12 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
           <p className="text-sm text-gray-500">Organize a navegação do cardápio.</p>
         </div>
         <div className="divide-y divide-gray-100">
-          {categories.map((category) => (
+          {[...categories].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" })).map((category) => (
             <div key={category.id} className="flex items-center gap-3 px-5 py-4">
               <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${category.active ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-400"}`}>#</div>
               <div className="min-w-0 flex-1">
                 <p className="font-bold text-gray-900">{category.name}</p>
-                <p className="text-xs text-gray-500">Ordem {category.sortOrder} · {category.active ? "Visível" : "Oculta"}</p>
+                <p className="text-xs text-gray-500">Ordem no cardápio: {category.sortOrder} · {category.active ? "Visível" : "Oculta"}</p>
               </div>
               <button onClick={() => edit(category)} className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700"><Pencil className="h-4 w-4" /></button>
               <button disabled={busy} onClick={() => toggle(category)} className={`rounded-lg p-2 ${category.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`}><Power className="h-4 w-4" /></button>

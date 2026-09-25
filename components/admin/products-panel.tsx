@@ -31,7 +31,17 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
   const [compositionProduct, setCompositionProduct] = useState<Product | null>(null)
   const [newCategory, setNewCategory] = useState("")
   const [showCategoryForm, setShowCategoryForm] = useState(false)
-  const activeCategories = useMemo(() => categories.filter((category) => category.active), [categories])
+  const activeCategories = useMemo(() => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" })), [categories])
+  const [selectedCategory, setSelectedCategory] = useState("")
+  const categoryNames = useMemo(() => [...new Set([...activeCategories.map((category) => category.name), ...products.map((product) => product.category)])].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" })), [activeCategories, products])
+  const currentCategory = categoryNames.includes(selectedCategory) ? selectedCategory : categoryNames[0] || ""
+  const visibleProducts = useMemo(() => products.filter((product) => product.category === currentCategory).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" }) || a.id - b.id), [products, currentCategory])
+
+  useEffect(() => {
+    if (currentCategory && !selectedCategory && !editingId) {
+      setDraft((current) => current.name ? current : { ...current, category: currentCategory })
+    }
+  }, [currentCategory, selectedCategory, editingId])
 
   useEffect(() => {
     if (!compositionProduct) return
@@ -53,6 +63,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
       if (!response.ok) throw new Error(data.error || "Não foi possível criar a categoria.")
       onCategoriesChanged([...categories, data.category])
       setDraft((current) => ({ ...current, category: data.category.name }))
+      setSelectedCategory(data.category.name)
       setNewCategory("")
       setShowCategoryForm(false)
     } catch (err) {
@@ -68,9 +79,9 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
     setError("")
   }
 
-  function clearForm() {
+  function clearForm(category = currentCategory) {
     setEditingId(null)
-    setDraft({ ...emptyDraft, category: activeCategories[0]?.name || "Salgados" })
+    setDraft({ ...emptyDraft, category: category || activeCategories[0]?.name || "Salgados" })
     setError("")
   }
 
@@ -115,7 +126,9 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível salvar o produto.")
       await refreshProducts()
-      clearForm()
+      const savedCategory = data.product?.category || draft.category
+      setSelectedCategory(savedCategory)
+      clearForm(savedCategory)
       setCompositionProduct(data.product || products.find((product) => product.id === editingId) || null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao salvar produto.")
@@ -146,9 +159,9 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,.6fr)]">
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4"><div><h2 className="text-lg font-bold text-gray-900">Produtos</h2><p className="text-sm text-gray-500">Itens exibidos no cardápio público.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{products.filter((product) => product.active).length} ativos</span></div>
+        <div className="border-b border-gray-100 px-5 py-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-900">Produtos por categoria</h2><p className="text-sm text-gray-500">Escolha uma categoria para ver e editar seus produtos.</p></div><span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{visibleProducts.length} produtos</span></div><label className="mt-4 block text-xs font-bold text-gray-600">Categoria<select aria-label="Filtrar produtos por categoria" value={currentCategory} onChange={(event) => { const name = event.target.value; setSelectedCategory(name); setCompositionProduct(null); clearForm(name) }} className="mt-1 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 sm:max-w-sm">{categoryNames.map((name) => <option key={name} value={name}>{name} ({products.filter((product) => product.category === name).length})</option>)}</select></label></div>
         <div className="divide-y divide-gray-100">
-          {products.map((product) => {
+          {visibleProducts.map((product) => {
             const outOfStock = product.trackStock && product.stock <= 0
             return <div key={product.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <div className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-xl ${product.active ? "bg-amber-50" : "bg-gray-100 grayscale"}`}>{product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" /> : "🥟"}</div>
@@ -156,13 +169,14 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
               <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end"><strong className="min-w-24 text-right text-base text-gray-950">{formatCurrency(product.price)}</strong><button onClick={() => setCompositionProduct(product)} type="button" className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100" aria-label={`Sabores e extras de ${product.name}`}><PackagePlus className="h-4 w-4" /> Sabores e extras</button><button onClick={() => beginEdit(product)} type="button" className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700" aria-label={`Editar ${product.name}`}><Pencil className="h-4 w-4" /></button><button onClick={() => product.active ? remove(product) : changeActive(product, true)} disabled={busy} type="button" className={`rounded-lg p-2 ${product.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`} aria-label={product.active ? `Desativar ${product.name}` : `Ativar ${product.name}`}>{product.active ? <Trash2 className="h-4 w-4" /> : <Power className="h-4 w-4" />}</button></div>
             </div>
           })}
+          {!visibleProducts.length && <p className="px-5 py-10 text-center text-sm text-gray-500">Ainda não há produtos nesta categoria.</p>}
         </div>
       </div>
 
       <div className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-5 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Salve o produto. Em seguida, escolha os sabores ou extras que o cliente poderá pedir.</div>
       <form onSubmit={submit}>
-        <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Preencha nome, categoria e preço.</p></div>{editingId && <button type="button" onClick={clearForm} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
+        <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Preencha nome, categoria e preço.</p></div>{editingId && <button type="button" onClick={() => clearForm()} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</div>}
 
         <div className="space-y-4">
