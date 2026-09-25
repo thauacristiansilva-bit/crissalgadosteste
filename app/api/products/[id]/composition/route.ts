@@ -11,6 +11,7 @@ import {
   getVerifiedTenantSession,
 } from "@/lib/tenant-access"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -37,14 +38,27 @@ export async function GET(
     return NextResponse.json({ error: "Produto inválido." }, { status: 400 })
   }
 
-  if (!(await isTenantFoodCompositionReady(session.organizationId))) {
+  const result = await runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    async () => {
+      const ready = await isTenantFoodCompositionReady(session.organizationId)
+      return {
+        ready,
+        composition: ready ? await getProductComposition(session.organizationId, productId) : null,
+      }
+    },
+    "tenant-session",
+  )
+
+  if (!result.ready) {
     return NextResponse.json(
       { error: "A estrutura de complementos e ingredientes ainda não foi preparada para esta empresa." },
       { status: 503 },
     )
   }
 
-  const composition = await getProductComposition(session.organizationId, productId)
+  const composition = result.composition
   if (!composition) {
     return NextResponse.json({ error: "Produto não encontrado." }, { status: 404 })
   }
@@ -82,32 +96,40 @@ export async function PUT(
     return NextResponse.json({ error: "Dados inválidos." }, { status: 400 })
   }
 
-  if (!(await isTenantFoodCompositionReady(session.organizationId))) {
-    return NextResponse.json(
-      { error: "Execute a migration da Fase 11/12 antes de salvar complementos." },
-      { status: 503 },
-    )
-  }
-
   try {
-    if (Array.isArray(body.modifierGroups) && body.modifierGroups.length > 0) {
-      await assertOrganizationEntitlement(session.organizationId, "modifiers")
-    }
-    const usesInventory =
-      (Array.isArray(body.recipe) && body.recipe.length > 0) ||
-      (Array.isArray(body.modifierGroups) && body.modifierGroups.some((group) =>
-        Array.isArray(group.options) && group.options.some((option) => Array.isArray(option.ingredients) && option.ingredients.length > 0)
-      ))
-    if (usesInventory) {
-      await assertOrganizationEntitlement(session.organizationId, "inventory")
-    }
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        if (!(await isTenantFoodCompositionReady(session.organizationId))) {
+          return NextResponse.json(
+            { error: "A estrutura de complementos não está disponível para esta empresa." },
+            { status: 503 },
+          )
+        }
+        if (Array.isArray(body.modifierGroups) && body.modifierGroups.length > 0) {
+          await assertOrganizationEntitlement(session.organizationId, "modifiers")
+        }
+        const usesInventory =
+          (Array.isArray(body.recipe) && body.recipe.length > 0) ||
+          (Array.isArray(body.modifierGroups) && body.modifierGroups.some((group) =>
+            Array.isArray(group.options) && group.options.some((option) =>
+              Array.isArray(option.ingredients) && option.ingredients.length > 0
+            ),
+          ))
+        if (usesInventory) {
+          await assertOrganizationEntitlement(session.organizationId, "inventory")
+        }
 
-    const composition = await replaceProductComposition(
-      session.organizationId,
-      productId,
-      body,
+        const composition = await replaceProductComposition(
+          session.organizationId,
+          productId,
+          body,
+        )
+        return NextResponse.json({ composition })
+      },
+      "tenant-session",
     )
-    return NextResponse.json({ composition })
   } catch (error) {
     return NextResponse.json(
       {

@@ -91,6 +91,7 @@ export function ProductCompositionEditor({
   embedded?: boolean
 }) {
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
+  const [ingredientsAvailable, setIngredientsAvailable] = useState(true)
   const [recipe, setRecipe] = useState<RecipeDraft[]>([])
   const [groups, setGroups] = useState<GroupDraft[]>([])
   const [loading, setLoading] = useState(false)
@@ -102,24 +103,28 @@ export function ProductCompositionEditor({
     if (!product) return
     let cancelled = false
     setLoading(true)
+    setIngredientsAvailable(true)
     setError("")
     setMessage("")
     Promise.all([
-      fetch("/api/admin/ingredients", { cache: "no-store" }).then(async (response) => {
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.error || "Não foi possível carregar ingredientes.")
-        return data.ingredients as Ingredient[]
-      }),
+      fetch("/api/admin/ingredients", { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) return { available: false, ingredients: [] as Ingredient[] }
+          const data = await response.json()
+          return { available: true, ingredients: data.ingredients as Ingredient[] }
+        })
+        .catch(() => ({ available: false, ingredients: [] as Ingredient[] })),
       fetch(`/api/products/${product.id}/composition`, { cache: "no-store" }).then(async (response) => {
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || "Não foi possível carregar a composição.")
         return data.composition as ProductComposition
       }),
     ])
-      .then(([loadedIngredients, composition]) => {
+      .then(([inventory, composition]) => {
         if (cancelled) return
         const drafts = fromComposition(composition)
-        setIngredients(loadedIngredients)
+        setIngredients(inventory.ingredients)
+        setIngredientsAvailable(inventory.available)
         setRecipe(drafts.recipe)
         setGroups(drafts.groups)
       })
@@ -276,7 +281,7 @@ export function ProductCompositionEditor({
     <div className={embedded ? "w-full scroll-mt-20" : "fixed inset-0 z-[96] flex items-end justify-center bg-slate-950/60 sm:items-center sm:p-4"} id={embedded ? "complementos-do-produto" : undefined}>
       {!embedded && <button aria-label="Fechar" onClick={onClose} className="absolute inset-0" />}
       <div className={embedded ? "w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 shadow-sm" : "relative max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-t-3xl bg-gray-50 shadow-2xl sm:rounded-3xl"}>
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
+        <div className={`${embedded ? "" : "sticky top-0 z-10"} flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6`}>
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-blue-700">Complementos do produto</p>
             <h2 className="text-xl font-black text-gray-950">{product.name}</h2>
@@ -289,7 +294,7 @@ export function ProductCompositionEditor({
           {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
           {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{message}</div>}
           {loading ? <div className="rounded-2xl bg-white p-10 text-center text-sm text-gray-500">Carregando composição...</div> : <>
-            <details className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            {ingredientsAvailable && <details className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <summary className="cursor-pointer text-sm font-black text-gray-900">Ficha técnica e estoque de ingredientes (opcional)</summary>
               <div className="mt-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -306,7 +311,7 @@ export function ProductCompositionEditor({
               </div>
               <button type="button" onClick={addRecipeRow} className="mt-3 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-black text-gray-700"><Plus className="h-4 w-4" /> Ingrediente</button>
               </div>
-            </details>
+            </details>}
 
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-1.5"><h3 className="font-black text-gray-900">Grupos de complementos</h3><HelpTip helpKey="composition.modifiers" /></div><p className="text-sm text-gray-500">Ex.: tamanho, frutas, adicionais, molhos, borda ou ponto da carne.</p></div><button type="button" onClick={addGroup} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-black text-white"><Plus className="h-4 w-4" /> Grupo</button></div>
@@ -331,7 +336,7 @@ export function ProductCompositionEditor({
                         <button type="button" onClick={() => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.filter((candidate) => candidate.key !== option.key) }))} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-4 text-xs font-bold text-gray-600"><label className="flex items-center gap-2"><input type="checkbox" checked={option.includedEligible} onChange={(event) => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key === option.key ? { ...candidate, includedEligible: event.target.checked } : candidate) }))}/> Pode usar vaga grátis <HelpTip helpKey="composition.freeEligible" /></label><label className="flex items-center gap-2"><input type="checkbox" checked={option.active} onChange={(event) => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key === option.key ? { ...candidate, active: event.target.checked } : candidate) }))}/> Ativa</label></div>
-                      <div className="mt-3 rounded-xl bg-gray-50 p-3"><div className="flex items-center justify-between"><p className="text-xs font-black text-gray-600"><HelpLabel helpKey="composition.optionIngredients">Ingredientes consumidos por esta opção</HelpLabel></p><button type="button" onClick={() => addOptionIngredient(group.key, option.key)} className="text-xs font-black text-blue-700">+ Ingrediente</button></div><div className="mt-2 space-y-2">{option.ingredients.map((row, rowIndex) => <div key={`${rowIndex}-${row.ingredientId}`} className="grid gap-2 sm:grid-cols-[1fr_150px_36px]"><select value={row.ingredientId} onChange={(event) => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key !== option.key ? candidate : { ...candidate, ingredients: candidate.ingredients.map((ingredientRow, ingredientIndex) => ingredientIndex === rowIndex ? { ...ingredientRow, ingredientId: event.target.value } : ingredientRow) }) }))} className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-xs"><option value="">Ingrediente</option>{ingredients.filter((item) => item.active).map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.name}</option>)}</select><input value={row.quantity} onChange={(event) => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key !== option.key ? candidate : { ...candidate, ingredients: candidate.ingredients.map((ingredientRow, ingredientIndex) => ingredientIndex === rowIndex ? { ...ingredientRow, quantity: event.target.value } : ingredientRow) }) }))} inputMode="decimal" placeholder="Qtd." className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-xs"/><button type="button" onClick={() => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key !== option.key ? candidate : { ...candidate, ingredients: candidate.ingredients.filter((_, ingredientIndex) => ingredientIndex !== rowIndex) }) }))} className="rounded-lg text-gray-400 hover:text-red-600"><X className="h-4 w-4" /></button></div>)}</div></div>
+                      {ingredientsAvailable && <div className="mt-3 rounded-xl bg-gray-50 p-3"><div className="flex items-center justify-between"><p className="text-xs font-black text-gray-600"><HelpLabel helpKey="composition.optionIngredients">Ingredientes consumidos por esta opção</HelpLabel></p><button type="button" onClick={() => addOptionIngredient(group.key, option.key)} className="text-xs font-black text-blue-700">+ Ingrediente</button></div><div className="mt-2 space-y-2">{option.ingredients.map((row, rowIndex) => <div key={`${rowIndex}-${row.ingredientId}`} className="grid gap-2 sm:grid-cols-[1fr_150px_36px]"><select value={row.ingredientId} onChange={(event) => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key !== option.key ? candidate : { ...candidate, ingredients: candidate.ingredients.map((ingredientRow, ingredientIndex) => ingredientIndex === rowIndex ? { ...ingredientRow, ingredientId: event.target.value } : ingredientRow) }) }))} className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-xs"><option value="">Ingrediente</option>{ingredients.filter((item) => item.active).map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.name}</option>)}</select><input value={row.quantity} onChange={(event) => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key !== option.key ? candidate : { ...candidate, ingredients: candidate.ingredients.map((ingredientRow, ingredientIndex) => ingredientIndex === rowIndex ? { ...ingredientRow, quantity: event.target.value } : ingredientRow) }) }))} inputMode="decimal" placeholder="Qtd." className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-xs"/><button type="button" onClick={() => setGroups((current) => current.map((item) => item.key !== group.key ? item : { ...item, options: item.options.map((candidate) => candidate.key !== option.key ? candidate : { ...candidate, ingredients: candidate.ingredients.filter((_, ingredientIndex) => ingredientIndex !== rowIndex) }) }))} className="rounded-lg text-gray-400 hover:text-red-600"><X className="h-4 w-4" /></button></div>)}</div></div>}
                     </div>)}
                     <button type="button" onClick={() => addOption(group.key)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-black text-gray-700"><Plus className="h-4 w-4" /> Opção</button>
                   </div>
@@ -343,7 +348,7 @@ export function ProductCompositionEditor({
           </>}
         </div>
 
-        <div className="sticky bottom-0 flex justify-end gap-3 border-t border-gray-200 bg-white px-5 py-4 sm:px-6"><button type="button" onClick={onClose} className="h-11 rounded-xl border border-gray-200 px-4 text-sm font-black text-gray-700">Fechar</button><button type="button" onClick={save} disabled={loading || saving} className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-700 px-5 text-sm font-black text-white disabled:opacity-50"><Save className="h-4 w-4" />{saving ? "Salvando..." : "Salvar composição"}</button></div>
+        <div className={`${embedded ? "" : "sticky bottom-0"} flex justify-end gap-3 border-t border-gray-200 bg-white px-5 py-4 sm:px-6`}><button type="button" onClick={onClose} className="h-11 rounded-xl border border-gray-200 px-4 text-sm font-black text-gray-700">Fechar</button><button type="button" onClick={save} disabled={loading || saving} className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-700 px-5 text-sm font-black text-white disabled:opacity-50"><Save className="h-4 w-4" />{saving ? "Salvando..." : "Salvar complementos"}</button></div>
       </div>
     </div>
   )

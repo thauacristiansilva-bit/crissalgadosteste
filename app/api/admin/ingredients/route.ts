@@ -8,6 +8,7 @@ import {
 import { canManageCatalog, getVerifiedTenantSession } from "@/lib/tenant-access"
 import type { IngredientUnit } from "@/lib/types"
 import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -25,24 +26,26 @@ export async function GET() {
     )
   }
 
-  try {
-    await assertOrganizationEntitlement(session.organizationId, "inventory")
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Recurso não disponível no plano." }, { status: billingErrorStatus(error) })
-  }
+  return runWithTenantRlsScope([session.organizationId], session.userId, async () => {
+    try {
+      await assertOrganizationEntitlement(session.organizationId, "inventory")
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Recurso não disponível no plano." }, { status: billingErrorStatus(error) })
+    }
 
-  if (!(await isTenantFoodCompositionReady(session.organizationId))) {
-    return NextResponse.json(
-      { error: "Execute a migration da Fase 11/12 antes de usar ingredientes." },
-      { status: 503 },
-    )
-  }
+    if (!(await isTenantFoodCompositionReady(session.organizationId))) {
+      return NextResponse.json(
+        { error: "A estrutura de ingredientes não está disponível para esta empresa." },
+        { status: 503 },
+      )
+    }
 
-  return NextResponse.json({
-    ingredients: await getTenantIngredients(session.organizationId, {
-      includeInactive: true,
-    }),
-  })
+    return NextResponse.json({
+      ingredients: await getTenantIngredients(session.organizationId, {
+        includeInactive: true,
+      }),
+    })
+  }, "tenant-session")
 }
 
 export async function POST(request: Request) {
@@ -69,24 +72,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Dados inválidos." }, { status: 400 })
   }
 
-  if (!(await isTenantFoodCompositionReady(session.organizationId))) {
-    return NextResponse.json(
-      { error: "Execute a migration da Fase 11/12 antes de usar ingredientes." },
-      { status: 503 },
-    )
-  }
-
   try {
-    await assertOrganizationEntitlement(session.organizationId, "inventory")
+    return await runWithTenantRlsScope([session.organizationId], session.userId, async () => {
+      if (!(await isTenantFoodCompositionReady(session.organizationId))) {
+        return NextResponse.json({ error: "A estrutura de ingredientes não está disponível para esta empresa." }, { status: 503 })
+      }
+      await assertOrganizationEntitlement(session.organizationId, "inventory")
 
-    const ingredient = await createTenantIngredient(session.organizationId, {
+      const ingredient = await createTenantIngredient(session.organizationId, {
       name: String(body.name || ""),
       unit: String(body.unit || "g") as IngredientUnit,
       stockQuantity: Number(body.stockQuantity || 0),
       minStockQuantity: Number(body.minStockQuantity || 0),
       unitCost: Number(body.unitCost || 0),
     })
-    return NextResponse.json({ ingredient }, { status: 201 })
+      return NextResponse.json({ ingredient }, { status: 201 })
+    }, "tenant-session")
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Não foi possível cadastrar o ingrediente." },

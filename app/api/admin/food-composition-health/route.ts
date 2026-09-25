@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getFoodCompositionStats } from "@/lib/food-composition-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -15,7 +16,12 @@ export async function GET() {
   }
 
   try {
-    const stats = await getFoodCompositionStats(session.organizationId)
+    const stats = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () => getFoodCompositionStats(session.organizationId),
+      "tenant-session",
+    )
     return NextResponse.json({
       ok: stats.ready,
       phase: "11-12",

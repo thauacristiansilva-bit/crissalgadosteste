@@ -159,7 +159,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
         </div>
       </div>
 
-      <div className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm xl:sticky xl:top-20">
+      <div className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-5 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">1. Escolha ou crie uma categoria &nbsp;→&nbsp; 2. Salve o produto &nbsp;→&nbsp; 3. Adicione os complementos.</div>
       <form onSubmit={submit}>
         <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Escolha a categoria, salve o produto e cadastre os complementos em seguida.</p></div>{editingId && <button type="button" onClick={clearForm} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
