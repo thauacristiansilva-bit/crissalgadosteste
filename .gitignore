@@ -47,3 +47,5 @@ yarn-error.log*
 pnpm-debug.log*
 backups/
 *.dump
+
+*.bak*
