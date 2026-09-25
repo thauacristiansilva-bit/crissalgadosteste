@@ -617,7 +617,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "orders" && <OrdersPanel orders={orders} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} />}
           {section === "kitchen" && <KitchenPanel orders={orders} settings={settings} onOrderUpdated={onOrderUpdated} />}
           {section === "inventory" && <InventoryPanel products={products} onProductsChanged={setProducts} />}
-          {section === "products" && <ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} />}
+          {section === "products" && <ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} onCategoriesChanged={setCategories} />}
           {section === "categories" && (
             <div className="space-y-6">
               <CategoriesPanel categories={categories} onCategoriesChanged={setCategories} />

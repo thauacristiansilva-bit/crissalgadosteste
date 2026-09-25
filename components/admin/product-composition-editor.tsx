@@ -83,10 +83,12 @@ export function ProductCompositionEditor({
   product,
   onClose,
   onSaved,
+  embedded = false,
 }: {
   product: Product | null
   onClose: () => void
   onSaved?: () => void | Promise<void>
+  embedded?: boolean
 }) {
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [recipe, setRecipe] = useState<RecipeDraft[]>([])
@@ -271,14 +273,14 @@ export function ProductCompositionEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-[96] flex items-end justify-center bg-slate-950/60 sm:items-center sm:p-4">
-      <button aria-label="Fechar" onClick={onClose} className="absolute inset-0" />
-      <div className="relative max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-t-3xl bg-gray-50 shadow-2xl sm:rounded-3xl">
+    <div className={embedded ? "w-full scroll-mt-20" : "fixed inset-0 z-[96] flex items-end justify-center bg-slate-950/60 sm:items-center sm:p-4"} id={embedded ? "complementos-do-produto" : undefined}>
+      {!embedded && <button aria-label="Fechar" onClick={onClose} className="absolute inset-0" />}
+      <div className={embedded ? "w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 shadow-sm" : "relative max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-t-3xl bg-gray-50 shadow-2xl sm:rounded-3xl"}>
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-blue-700">Montagem e ficha técnica</p>
+            <p className="text-xs font-black uppercase tracking-wide text-blue-700">Complementos do produto</p>
             <h2 className="text-xl font-black text-gray-950">{product.name}</h2>
-            <p className="mt-1 text-sm text-gray-500">Cadastre ingredientes consumidos e as escolhas que o cliente pode fazer.</p>
+            <p className="mt-1 text-sm text-gray-500">Crie os grupos e opções que o cliente pode escolher.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-gray-100 p-2 text-gray-600"><X className="h-5 w-5" /></button>
         </div>
@@ -287,7 +289,9 @@ export function ProductCompositionEditor({
           {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
           {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{message}</div>}
           {loading ? <div className="rounded-2xl bg-white p-10 text-center text-sm text-gray-500">Carregando composição...</div> : <>
-            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <details className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <summary className="cursor-pointer text-sm font-black text-gray-900">Ficha técnica e estoque de ingredientes (opcional)</summary>
+              <div className="mt-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div><div className="flex items-center gap-1.5"><h3 className="font-black text-gray-900">Ficha técnica base</h3><HelpTip helpKey="composition.base" /></div><p className="text-sm text-gray-500">Ingredientes consumidos em cada unidade vendida deste produto.</p></div>
                 <div className="text-right"><p className="text-xs font-bold uppercase text-gray-400">Custo estimado base</p><strong className="text-lg text-gray-900">{money(baseCost)}</strong>{product.price > 0 && <p className="text-xs text-gray-400">Margem bruta estimada: {Math.max(0, ((product.price - baseCost) / product.price) * 100).toFixed(1)}%</p>}</div>
@@ -301,7 +305,8 @@ export function ProductCompositionEditor({
                 {!recipe.length && <p className="rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-400">Sem ficha técnica. Nesse caso, o estoque de ingredientes não é baixado para o produto base.</p>}
               </div>
               <button type="button" onClick={addRecipeRow} className="mt-3 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-black text-gray-700"><Plus className="h-4 w-4" /> Ingrediente</button>
-            </section>
+              </div>
+            </details>
 
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-1.5"><h3 className="font-black text-gray-900">Grupos de complementos</h3><HelpTip helpKey="composition.modifiers" /></div><p className="text-sm text-gray-500">Ex.: tamanho, frutas, adicionais, molhos, borda ou ponto da carne.</p></div><button type="button" onClick={addGroup} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-black text-white"><Plus className="h-4 w-4" /> Grupo</button></div>
