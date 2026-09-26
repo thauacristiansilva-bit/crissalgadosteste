@@ -2,6 +2,7 @@ import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { getCurrentDeploymentOrganizationId } from "@/lib/catalog-db"
 import { reverseIngredientsForOrderWithClient } from "@/lib/food-composition-db"
+import { applyCashbackForOrderStatusTransitionWithClient } from "@/lib/cashback-db"
 import { applyLoyaltyForOrderStatusTransitionWithClient } from "@/lib/loyalty-db"
 import type {
   DashboardSummary,
@@ -21,6 +22,7 @@ type OrderRow = {
   discount: string | number
   coupon_code: string | null
   delivery_fee: string | number
+  cashback_used_cents: number
   total: string | number
   payment_status: Order["paymentStatus"]
   payment_method: Order["paymentMethod"]
@@ -79,6 +81,7 @@ function mapOrder(row: OrderRow, itemRows: OrderItemRow[]): Order {
     discount: Number(row.discount),
     ...(row.coupon_code ? { couponCode: row.coupon_code } : {}),
     deliveryFee: Number(row.delivery_fee),
+    cashbackUsed: Number(row.cashback_used_cents || 0) / 100,
     total: Number(row.total),
     paymentStatus: row.payment_status,
     paymentMethod: row.payment_method,
@@ -123,6 +126,7 @@ const orderSelect = `
     discount,
     coupon_code,
     delivery_fee,
+    COALESCE((to_jsonb(sf_orders)->>'cashback_used_cents')::int, 0) AS cashback_used_cents,
     total,
     payment_status,
     payment_method,
@@ -564,6 +568,8 @@ export async function upsertTenantOrder(
         }
       }
     }
+
+    await applyCashbackForOrderStatusTransitionWithClient(client, organizationId, previous.rows[0]?.status || null, order)
 
     await applyLoyaltyForOrderStatusTransitionWithClient(
       client,

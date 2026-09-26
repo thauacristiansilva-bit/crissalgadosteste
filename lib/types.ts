@@ -35,6 +35,8 @@ export interface BusinessHour {
   enabled: boolean
   open: string
   close: string
+  pauseStart?: string
+  pauseEnd?: string
 }
 
 export interface Category {
@@ -247,6 +249,7 @@ export interface Order {
   discount: number
   couponCode?: string
   deliveryFee: number
+  cashbackUsed?: number
   total: number
   paymentStatus: PaymentStatus
   paymentMethod: PaymentMethod
@@ -283,6 +286,7 @@ export interface CustomerAccount {
   defaultLatitude: number | null
   defaultLongitude: number | null
   loyaltyPoints: number
+  cashbackCents?: number
   active: boolean
   createdAt: string
   updatedAt: string
@@ -419,6 +423,8 @@ export interface StoreSettings {
   rememberClientDays: number
   loyaltyEnabled: boolean
   loyaltyPointsPerReal: number
+  cashbackEnabled?: boolean
+  cashbackPercent?: number
   loyaltyRewardText: string
   loyaltyRewardPoints: number
   autoPrintNewOrders: boolean

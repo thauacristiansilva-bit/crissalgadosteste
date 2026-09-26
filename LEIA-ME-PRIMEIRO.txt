@@ -1,0 +1,32 @@
+SABORFLOW — ATUALIZACAO DE HORARIOS, CASHBACK E COMBOS
+
+1) No computador, abra no VS Code a pasta ORIGINAL do projeto (a que tem package.json).
+   Extraia este ZIP DENTRO dessa pasta. Aceite substituir os arquivos quando o Windows pedir.
+   Nao crie uma pasta extra para o conteudo do ZIP.
+
+2) No VS Code: Terminal > Novo Terminal. Cole UM COMANDO POR VEZ:
+
+git add .
+git commit -m "Horarios com pausa, cashback e combos"
+git push origin main
+
+3) Aguarde o Railway mostrar o servico "sabor flow" online. Abra o Shell desse servico
+   (o servico do site, NAO o servico Postgres) e cole:
+
+node scripts/migrate-multiempresa.mjs
+
+   Esse comando cria as colunas e o registro do cashback no banco. Execute uma unica vez;
+   se repetir, as migracoes ja executadas serao ignoradas.
+
+4) Atualize a pagina do administrador. Em Fidelidade, ative o cashback e escolha a %.
+   O cashback e creditado quando o pedido e marcado como concluido. Clientes com conta
+   podem usar o saldo na proxima compra pelo site ou no PDV.
+
+   Horarios: Configuracoes > Funcionamento > ativar Pausa entre turnos.
+   Combo: produto > Composicao > copiar categoria de salgados sem preco extra,
+   depois copiar categoria de bebidas com preco. Salve o produto.
+   Impressora: Configuracoes > Impressora > Conectar impressora no Windows.
+   Excluir categoria: remova primeiro os produtos e subcategorias dela.
+
+Verificacao feita: npm run typecheck e npm run build executados com sucesso.
+A integracao real com sua base de dados e impressora depende dos passos 3 e 4.

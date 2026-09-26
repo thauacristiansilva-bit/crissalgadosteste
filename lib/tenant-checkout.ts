@@ -69,6 +69,7 @@ export type TenantCheckoutInput = {
   channel?: Order["channel"]
   bypassLeadTime?: boolean
   accountId?: number
+  redeemCashback?: boolean
 }
 
 export type TenantCheckoutResult = {
@@ -689,7 +690,7 @@ async function createTenantCheckoutOrderInScope(
         quote.zone
     }
 
-    const total = money(
+    const amountBeforeCashback = money(
       Math.max(
         0,
         subtotal -
@@ -752,15 +753,17 @@ async function createTenantCheckoutOrderInScope(
     let accountId:
       | number
       | undefined
+    let cashbackUsedCents = 0
 
     if (input.accountId) {
       const account =
         await client.query<{
           id: number
           active: boolean
+          cashback_cents: number
         }>(
           `
-            SELECT id, active
+            SELECT id, active, COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents
             FROM sf_customer_accounts
             WHERE organization_id = $1
               AND id = $2
@@ -782,10 +785,18 @@ async function createTenantCheckoutOrderInScope(
       }
 
       accountId = Number(row.id)
+      if (input.redeemCashback) {
+        if (!settings.cashbackEnabled) throw new Error("Cashback não está ativo nesta loja.")
+        cashbackUsedCents = Math.min(Math.max(0, Number(row.cashback_cents)), Math.round(amountBeforeCashback * 100))
+        if (!cashbackUsedCents) throw new Error("Não há saldo de cashback disponível.")
+      }
 
       // FASE 21: o crédito de fidelidade deixou de acontecer no checkout.
       // Ele é aplicado de forma idempotente quando o pedido passa para concluído.
     }
+
+    if (input.redeemCashback && !accountId) throw new Error("Entre na sua conta para usar cashback.")
+    const total = money(amountBeforeCashback - cashbackUsedCents / 100)
 
     const order: Order = {
       id,
@@ -807,6 +818,7 @@ async function createTenantCheckoutOrderInScope(
           }
         : {}),
       deliveryFee,
+      cashbackUsed: cashbackUsedCents / 100,
       total,
       paymentStatus: "unpaid",
       paymentMethod:
@@ -910,6 +922,23 @@ async function createTenantCheckoutOrderInScope(
         order.updatedAt,
       ],
     )
+
+    if (cashbackUsedCents && accountId) {
+      const updated = await client.query<{ cashback_cents: number }>(
+        `UPDATE sf_customer_accounts SET cashback_cents = cashback_cents - $3, updated_at = now()
+         WHERE organization_id = $1 AND id = $2 RETURNING cashback_cents`,
+        [organizationId, accountId, cashbackUsedCents],
+      )
+      await client.query(
+        `UPDATE sf_orders SET cashback_used_cents = $3 WHERE organization_id = $1 AND id = $2`,
+        [organizationId, id, cashbackUsedCents],
+      )
+      await client.query(
+        `INSERT INTO sf_cashback_ledger (organization_id, customer_id, order_id, kind, amount_cents, balance_after_cents)
+         VALUES ($1, $2, $3, 'redeem', $4, $5)`,
+        [organizationId, accountId, id, -cashbackUsedCents, updated.rows[0].cashback_cents],
+      )
+    }
 
     for (
       let index = 0;

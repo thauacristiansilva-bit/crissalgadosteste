@@ -126,7 +126,7 @@ export async function PATCH(request: Request) {
           await assertOrganizationEntitlement(session.organizationId, "delivery")
         }
 
-        if (body.loyaltyEnabled === true) {
+        if (body.loyaltyEnabled === true || body.cashbackEnabled === true) {
           await assertOrganizationEntitlement(session.organizationId, "loyalty")
         }
 

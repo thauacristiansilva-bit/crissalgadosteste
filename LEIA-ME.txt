@@ -1,0 +1,19 @@
+SABORFLOW — SUBCATEGORIAS E PREÇO POR SABOR
+
+No VS Code:
+1. Abra a pasta original do projeto (onde está package.json) e rode: git pull origin main
+2. Extraia este ZIP dentro dessa pasta, mantendo as subpastas. Aceite substituir os arquivos.
+3. Rode: powershell -ExecutionPolicy Bypass -File .\APLICAR-NO-VSCODE.ps1
+
+Esse último comando adiciona somente os arquivos do ZIP, faz o commit e envia para o GitHub.
+O Railway já está ligado à branch main e deve fazer o deploy automaticamente.
+Não é preciso executar comandos no PostgreSQL.
+
+COMO CADASTRAR
+1. Painel > Categorias > Nova categoria: nome "Refri 2L", Dentro de "Bebidas" > Salvar.
+2. Painel > Produtos e sabores > escolha "Refri 2L" na lista > Novo produto: nome "Refri 2L".
+3. Marque "Cada sabor tem seu preço", preencha sabor e preço (ex.: Coca-Cola 12,00, Guaraná 10,00) > Adicionar produto.
+4. Na loja, cliente abre Bebidas > Refri 2L > produto Refri 2L > escolhe o sabor > carrinho.
+O valor cobrado é o do sabor escolhido e multiplica pela quantidade. Os preços são conferidos pelo servidor.
+
+Este ZIP também inclui as simplificações anteriores de produtos, categorias e complementos.

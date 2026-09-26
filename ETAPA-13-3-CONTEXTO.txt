@@ -1,0 +1,2232 @@
+===== lib/security/two-factor.ts =====
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto"
+import { getPostgresPool } from "@/lib/postgres"
+
+const BASE32_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+const TOTP_PERIOD_SECONDS = 30
+const TOTP_DIGITS = 6
+const TOTP_WINDOW = 1
+const RECOVERY_CODE_COUNT = 10
+
+type MfaRow = {
+  user_id: string
+  secret_encrypted: string
+  enabled: boolean
+  last_totp_step: string | null
+  recovery_code_hashes: unknown
+}
+
+function getEncryptionKey() {
+  const configured =
+    process.env
+      .TWO_FACTOR_ENCRYPTION_KEY
+      ?.trim()
+
+  if (!configured) {
+    throw new Error(
+      "TWO_FACTOR_ENCRYPTION_KEY é obrigatório para o 2FA.",
+    )
+  }
+
+  const key = Buffer.from(
+    configured,
+    "base64url",
+  )
+
+  if (key.length !== 32) {
+    throw new Error(
+      "TWO_FACTOR_ENCRYPTION_KEY deve conter exatamente 32 bytes em base64url.",
+    )
+  }
+
+  return key
+}
+
+function base32Encode(input: Buffer) {
+  let bits = ""
+  let output = ""
+
+  for (const byte of input) {
+    bits += byte
+      .toString(2)
+      .padStart(8, "0")
+  }
+
+  for (
+    let index = 0;
+    index < bits.length;
+    index += 5
+  ) {
+    const chunk = bits
+      .slice(index, index + 5)
+      .padEnd(5, "0")
+
+    output +=
+      BASE32_ALPHABET[
+        Number.parseInt(chunk, 2)
+      ]
+  }
+
+  return output
+}
+
+function base32Decode(value: string) {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/=+$/g, "")
+    .replace(/\s+/g, "")
+
+  let bits = ""
+
+  for (const character of normalized) {
+    const index =
+      BASE32_ALPHABET.indexOf(
+        character,
+      )
+
+    if (index < 0) {
+      throw new Error(
+        "Segredo TOTP inválido.",
+      )
+    }
+
+    bits += index
+      .toString(2)
+      .padStart(5, "0")
+  }
+
+  const bytes: number[] = []
+
+  for (
+    let index = 0;
+    index + 8 <= bits.length;
+    index += 8
+  ) {
+    bytes.push(
+      Number.parseInt(
+        bits.slice(index, index + 8),
+        2,
+      ),
+    )
+  }
+
+  return Buffer.from(bytes)
+}
+
+function aadForUser(userId: string) {
+  return Buffer.from(
+    `saborflow:mfa:totp:v1:${userId}`,
+    "utf8",
+  )
+}
+
+function encryptSecret(
+  userId: string,
+  secret: string,
+) {
+  const key = getEncryptionKey()
+  const iv = randomBytes(12)
+
+  const cipher = createCipheriv(
+    "aes-256-gcm",
+    key,
+    iv,
+  )
+
+  cipher.setAAD(
+    aadForUser(userId),
+  )
+
+  const ciphertext = Buffer.concat([
+    cipher.update(
+      secret,
+      "utf8",
+    ),
+    cipher.final(),
+  ])
+
+  const tag = cipher.getAuthTag()
+
+  return [
+    "mfaenc1",
+    iv.toString("base64url"),
+    tag.toString("base64url"),
+    ciphertext.toString("base64url"),
+  ].join(".")
+}
+
+function decryptSecret(
+  userId: string,
+  encrypted: string,
+) {
+  const [
+    version,
+    ivEncoded,
+    tagEncoded,
+    ciphertextEncoded,
+  ] = encrypted.split(".")
+
+  if (
+    version !== "mfaenc1" ||
+    !ivEncoded ||
+    !tagEncoded ||
+    !ciphertextEncoded
+  ) {
+    throw new Error(
+      "Segredo 2FA armazenado em formato inválido.",
+    )
+  }
+
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    getEncryptionKey(),
+    Buffer.from(
+      ivEncoded,
+      "base64url",
+    ),
+  )
+
+  decipher.setAAD(
+    aadForUser(userId),
+  )
+
+  decipher.setAuthTag(
+    Buffer.from(
+      tagEncoded,
+      "base64url",
+    ),
+  )
+
+  const plain = Buffer.concat([
+    decipher.update(
+      Buffer.from(
+        ciphertextEncoded,
+        "base64url",
+      ),
+    ),
+    decipher.final(),
+  ])
+
+  return plain.toString("utf8")
+}
+
+function createTotpSecret() {
+  return base32Encode(
+    randomBytes(20),
+  )
+}
+
+function totpCodeForStep(
+  secret: string,
+  step: number,
+) {
+  const key =
+    base32Decode(secret)
+
+  const counter =
+    Buffer.alloc(8)
+
+  counter.writeBigUInt64BE(
+    BigInt(step),
+  )
+
+  const digest = createHmac(
+    "sha1",
+    key,
+  )
+    .update(counter)
+    .digest()
+
+  const offset =
+    digest[digest.length - 1] & 0x0f
+
+  const binary =
+    (digest[offset] & 0x7f) *
+      0x1000000 +
+    digest[offset + 1] *
+      0x10000 +
+    digest[offset + 2] *
+      0x100 +
+    digest[offset + 3]
+
+  return String(
+    binary %
+      10 ** TOTP_DIGITS,
+  ).padStart(
+    TOTP_DIGITS,
+    "0",
+  )
+}
+
+function codeMatches(
+  actual: string,
+  expected: string,
+) {
+  const left =
+    Buffer.from(actual)
+  const right =
+    Buffer.from(expected)
+
+  return (
+    left.length === right.length &&
+    timingSafeEqual(left, right)
+  )
+}
+
+function matchingTotpStep(
+  secret: string,
+  rawCode: string,
+) {
+  const code =
+    rawCode.replace(/\D/g, "")
+
+  if (
+    code.length !==
+    TOTP_DIGITS
+  ) {
+    return null
+  }
+
+  const currentStep =
+    Math.floor(
+      Date.now() / 1000 /
+        TOTP_PERIOD_SECONDS,
+    )
+
+  for (
+    let offset = -TOTP_WINDOW;
+    offset <= TOTP_WINDOW;
+    offset += 1
+  ) {
+    const step =
+      currentStep + offset
+
+    if (
+      codeMatches(
+        code,
+        totpCodeForStep(
+          secret,
+          step,
+        ),
+      )
+    ) {
+      return step
+    }
+  }
+
+  return null
+}
+
+function normalizeRecoveryCode(
+  value: string,
+) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+}
+
+function hashRecoveryCode(
+  value: string,
+) {
+  const normalized =
+    normalizeRecoveryCode(value)
+
+  return createHmac(
+    "sha256",
+    getEncryptionKey(),
+  )
+    .update(
+      `saborflow:recovery:v1:${normalized}`,
+    )
+    .digest("hex")
+}
+
+function createRecoveryCode() {
+  const raw = randomBytes(10)
+    .toString("hex")
+    .toUpperCase()
+
+  return raw
+    .match(/.{1,4}/g)
+    ?.join("-") || raw
+}
+
+function createRecoveryCodes() {
+  return Array.from(
+    {
+      length:
+        RECOVERY_CODE_COUNT,
+    },
+    () => createRecoveryCode(),
+  )
+}
+
+function otpAuthUrl(
+  email: string,
+  secret: string,
+) {
+  const issuer = "SaborFlow"
+  const label =
+    `${issuer}:${email.trim().toLowerCase()}`
+
+  const query =
+    new URLSearchParams({
+      secret,
+      issuer,
+      algorithm: "SHA1",
+      digits:
+        String(TOTP_DIGITS),
+      period:
+        String(
+          TOTP_PERIOD_SECONDS,
+        ),
+    })
+
+  return (
+    `otpauth://totp/` +
+    `${encodeURIComponent(label)}?` +
+    query.toString()
+  )
+}
+
+async function getMfaRow(
+  userId: string,
+) {
+  const result =
+    await getPostgresPool()
+      .query<MfaRow>(
+        `
+          SELECT
+            user_id,
+            secret_encrypted,
+            enabled,
+            last_totp_step::text,
+            recovery_code_hashes
+          FROM sf_user_mfa
+          WHERE user_id = $1
+          LIMIT 1
+        `,
+        [userId],
+      )
+
+  return result.rows[0] || null
+}
+
+export async function getTwoFactorState(
+  userId: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  return {
+    configured: Boolean(row),
+    enabled:
+      Boolean(row?.enabled),
+  }
+}
+
+export async function ensureTwoFactorEnrollment(
+  userId: string,
+  email: string,
+) {
+  let row =
+    await getMfaRow(userId)
+
+  if (!row) {
+    const secret =
+      createTotpSecret()
+
+    const encrypted =
+      encryptSecret(
+        userId,
+        secret,
+      )
+
+    await getPostgresPool()
+      .query(
+        `
+          INSERT INTO sf_user_mfa (
+            user_id,
+            method,
+            secret_encrypted,
+            enabled,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            'totp',
+            $2,
+            false,
+            now(),
+            now()
+          )
+          ON CONFLICT (user_id)
+          DO NOTHING
+        `,
+        [
+          userId,
+          encrypted,
+        ],
+      )
+
+    row =
+      await getMfaRow(userId)
+  }
+
+  if (!row) {
+    throw new Error(
+      "Não foi possível preparar o 2FA.",
+    )
+  }
+
+  if (row.enabled) {
+    throw new Error(
+      "O 2FA já está ativado nesta conta.",
+    )
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  return {
+    secret,
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+  }
+}
+
+export async function activateTwoFactor(
+  userId: string,
+  rawCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  if (
+    !row ||
+    row.enabled
+  ) {
+    return null
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      rawCode,
+    )
+
+  if (step === null) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            enabled = true,
+            verified_at = now(),
+            last_totp_step = $2,
+            recovery_code_hashes =
+              $3::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = false
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+          JSON.stringify(
+            hashes,
+          ),
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+async function verifyAndConsumeTotp(
+  userId: string,
+  rawCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  if (
+    !row ||
+    !row.enabled
+  ) {
+    return false
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      rawCode,
+    )
+
+  if (step === null) {
+    return false
+  }
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            last_totp_step = $2,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND (
+              last_totp_step IS NULL
+              OR last_totp_step < $2
+            )
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+        ],
+      )
+
+  return Boolean(
+    updated.rowCount,
+  )
+}
+
+async function verifyAndConsumeRecoveryCode(
+  userId: string,
+  rawCode: string,
+) {
+  const normalized =
+    normalizeRecoveryCode(
+      rawCode,
+    )
+
+  if (
+    normalized.length < 16
+  ) {
+    return false
+  }
+
+  const hash =
+    hashRecoveryCode(
+      normalized,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            recovery_code_hashes =
+              COALESCE(
+                (
+                  SELECT jsonb_agg(value)
+                  FROM jsonb_array_elements_text(
+                    recovery_code_hashes
+                  ) AS codes(value)
+                  WHERE value <> $2
+                ),
+                '[]'::jsonb
+              ),
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND recovery_code_hashes ? $2
+          RETURNING user_id
+        `,
+        [
+          userId,
+          hash,
+        ],
+      )
+
+  return Boolean(
+    updated.rowCount,
+  )
+}
+
+export async function verifySecondFactor(
+  userId: string,
+  rawCode: string,
+) {
+  const trimmed =
+    rawCode.trim()
+
+  if (
+    /^\d{6}$/.test(trimmed)
+  ) {
+    return verifyAndConsumeTotp(
+      userId,
+      trimmed,
+    )
+  }
+
+  return verifyAndConsumeRecoveryCode(
+    userId,
+    trimmed,
+  )
+}
+
+export async function markAdminUserLoginCompleted(
+  userId: string,
+) {
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        last_login_at = now(),
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [userId],
+  )
+}
+
+
+===== components/admin/security-panel.tsx =====
+"use client"
+
+import Script from "next/script"
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import type {
+  OrganizationRole,
+} from "@/lib/tenant-context"
+import { HelpLabel } from "@/components/admin/help-tip"
+
+
+type DomainStatus = {
+  domain: string
+  verified: boolean
+  primary: boolean
+  verificationRecordName: string
+  verifiedAt: string | null
+  lastCheckedAt: string | null
+}
+
+type RoutingInstruction = {
+  provider: "cloudflare_saas"
+  hostnameId: string
+  hostnameStatus: string | null
+  sslStatus: string | null
+  ready: boolean
+  cnameTarget: string
+  dnsRecords: Array<{
+    type: "CNAME" | "TXT"
+    name: string
+    value: string
+    purpose: "traffic" | "hostname_verification" | "ssl_validation"
+    status: string | null
+  }>
+  errors: string[]
+}
+
+type PrintAgent = {
+  id: string
+  name: string
+  active: boolean
+  lastSeenAt: string | null
+  createdAt: string
+}
+
+type StorageStatus = {
+  mode: "local" | "r2"
+  r2Configured: boolean
+  publicHost: string | null
+  localFileCount: number
+  uploadDirConfigured: boolean
+  replicaReady: boolean
+}
+
+type SecurityData = {
+  organization: {
+    id: string
+    name: string
+    slug: string
+  }
+  role: OrganizationRole
+  timeZone: string
+  domains: DomainStatus[]
+  printAgents: PrintAgent[]
+  canManageSecurity: boolean
+}
+
+const commonTimeZones = [
+  "America/Sao_Paulo",
+  "America/Fortaleza",
+  "America/Recife",
+  "America/Bahia",
+  "America/Manaus",
+  "America/Belem",
+  "America/Cuiaba",
+  "America/Campo_Grande",
+  "America/Rio_Branco",
+]
+
+function CopyButton({
+  value,
+}: {
+  value: string
+}) {
+  const [copied, setCopied] =
+    useState(false)
+
+  async function copy() {
+    await navigator.clipboard
+      .writeText(value)
+      .catch(() => null)
+
+    setCopied(true)
+    window.setTimeout(
+      () => setCopied(false),
+      1600,
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-black text-gray-700 hover:bg-gray-50"
+    >
+      {copied
+        ? "Copiado"
+        : "Copiar"}
+    </button>
+  )
+}
+
+function DnsCopyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs font-bold uppercase text-amber-700">{label}</span>
+      <div className="mt-1 flex items-center gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">{value}</code>
+        <CopyButton value={value} />
+      </div>
+    </div>
+  )
+}
+
+export function SecurityPanel({
+  canManageSecurity,
+}: {
+  canManageSecurity: boolean
+}) {
+  const [
+    data,
+    setData,
+  ] = useState<SecurityData | null>(
+    null,
+  )
+  const [
+    currentPassword,
+    setCurrentPassword,
+  ] = useState("")
+  const [
+    newPassword,
+    setNewPassword,
+  ] = useState("")
+  const [
+    confirmPassword,
+    setConfirmPassword,
+  ] = useState("")
+  const [
+    passwordMessage,
+    setPasswordMessage,
+  ] = useState("")
+  const [
+    passwordBusy,
+    setPasswordBusy,
+  ] = useState(false)
+
+  const [googleLink, setGoogleLink] = useState<{ configured: boolean; linked: boolean; email: string } | null>(null)
+  const [googleMessage, setGoogleMessage] = useState("")
+  const [googleReady, setGoogleReady] = useState(false)
+  const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null)
+  const [storageMessage, setStorageMessage] = useState("")
+  const [storageBusy, setStorageBusy] = useState(false)
+  const googleButtonRef = useRef<HTMLDivElement | null>(null)
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
+
+  const [
+    timeZone,
+    setTimeZone,
+  ] = useState(
+    "America/Sao_Paulo",
+  )
+  const [
+    domain,
+    setDomain,
+  ] = useState("")
+  const [
+    verification,
+    setVerification,
+  ] = useState<{
+    domain: string
+    recordName?: string
+    recordValue?: string
+    routing?: RoutingInstruction | null
+  } | null>(null)
+
+  const storefrontRootDomain =
+    process.env.NEXT_PUBLIC_STOREFRONT_ROOT_DOMAIN || ""
+
+  const [
+    agentName,
+    setAgentName,
+  ] = useState("")
+  const [
+    newAgent,
+    setNewAgent,
+  ] = useState<{
+    id: string
+    name: string
+    token: string
+  } | null>(null)
+
+  const [
+    organizationMessage,
+    setOrganizationMessage,
+  ] = useState("")
+  const [busy, setBusy] =
+    useState(false)
+
+  const canManage = canManageSecurity
+
+  async function reload() {
+    const response = await fetch(
+      "/api/admin/organization-security",
+      { cache: "no-store" },
+    )
+
+    const next =
+      await response.json()
+
+    if (!response.ok) {
+      setOrganizationMessage(
+        next.error ||
+          "Não foi possível carregar.",
+      )
+      return
+    }
+
+    setData(next)
+    setTimeZone(next.timeZone)
+  }
+
+  async function reloadGoogle() {
+    const response = await fetch("/api/admin/google-link", { cache: "no-store" })
+    const result = await response.json().catch(() => null)
+    if (response.ok && result) setGoogleLink(result)
+  }
+
+  async function reloadStorage() {
+    const response = await fetch("/api/admin/storage", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return
+    const result = await response.json().catch(() => null)
+    if (result) setStorageStatus(result)
+  }
+
+  async function migrateStorageBatch() {
+    setStorageBusy(true)
+    setStorageMessage("")
+    const response = await fetch("/api/admin/storage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    }).catch(() => null)
+    const result = await response?.json().catch(() => null)
+    setStorageBusy(false)
+
+    if (!response?.ok) {
+      setStorageMessage(result?.error || "Não foi possível migrar as imagens.")
+      return
+    }
+
+    setStorageMessage(
+      result?.complete
+        ? `Migração concluída. ${result.uploaded || 0} arquivo(s) enviados neste lote e as cópias locais já podem deixar de ser usadas.`
+        : `Lote concluído: ${result.uploaded || 0} enviado(s), ${result.alreadyStored || 0} já estavam no R2. Restam ${result.remainingLocal || 0} arquivo(s) locais. Clique novamente para continuar.`,
+    )
+    await reloadStorage()
+  }
+
+  async function linkGoogle(credential: string) {
+    setGoogleMessage("")
+    const response = await fetch("/api/admin/google-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok) {
+      setGoogleMessage(result?.error || "Não foi possível vincular o Google.")
+      return
+    }
+    setGoogleMessage("Conta Google vinculada. No próximo login você já poderá usar o Google.")
+    await reloadGoogle()
+  }
+
+  useEffect(() => {
+    void reload()
+    void reloadGoogle()
+    void reloadStorage()
+  }, [])
+
+  useEffect(() => {
+    if (!googleReady || !googleClientId || !googleButtonRef.current || !window.google || googleLink?.linked) return
+    googleButtonRef.current.innerHTML = ""
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: (response: { credential: string }) => void linkGoogle(response.credential),
+    })
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      width: 360,
+      shape: "rectangular",
+      text: "continue_with",
+      locale: "pt-BR",
+    })
+  }, [googleReady, googleClientId, googleLink?.linked])
+
+  const printCommand =
+    useMemo(() => {
+      if (!newAgent) return ""
+
+      if (
+        typeof window ===
+        "undefined"
+      ) {
+        return ""
+      }
+
+      return `powershell -ExecutionPolicy Bypass -File .\\INICIAR-IMPRESSAO-AUTOMATICA.ps1 -ServerUrl "${window.location.origin}" -Token "${newAgent.token}"`
+    }, [newAgent])
+
+  async function changePassword(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setPasswordMessage("")
+
+    if (newPassword.length < 12) {
+      return setPasswordMessage(
+        "A nova senha precisa ter pelo menos 12 caracteres.",
+      )
+    }
+
+    if (
+      newPassword !==
+      confirmPassword
+    ) {
+      return setPasswordMessage(
+        "As novas senhas não conferem.",
+      )
+    }
+
+    setPasswordBusy(true)
+
+    const response = await fetch(
+      "/api/admin/password/change",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    if (!response.ok) {
+      setPasswordBusy(false)
+      return setPasswordMessage(
+        result.error ||
+          "Não foi possível alterar.",
+      )
+    }
+
+    setPasswordMessage(
+      "Senha alterada. Entre novamente.",
+    )
+
+    window.setTimeout(() => {
+      window.location.href =
+        "/login"
+    }, 700)
+  }
+
+  async function saveTimeZone() {
+    setBusy(true)
+    setOrganizationMessage("")
+
+    const response = await fetch(
+      "/api/admin/organization-security",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          timeZone,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível salvar.",
+      )
+    }
+
+    setOrganizationMessage(
+      "Timezone atualizado.",
+    )
+    await reload()
+  }
+
+  async function createDomain(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setBusy(true)
+    setOrganizationMessage("")
+    setVerification(null)
+
+    const response = await fetch(
+      "/api/admin/domains",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível cadastrar.",
+      )
+    }
+
+    setVerification(
+      result.verification,
+    )
+    setDomain("")
+    setOrganizationMessage(
+      "Domínio cadastrado no SaborFlow e no Cloudflare for SaaS. Configure os registros DNS exibidos abaixo e depois clique em Verificar.",
+    )
+    await reload()
+  }
+
+  async function verifyDomain(
+    value: string,
+  ) {
+    setBusy(true)
+    setOrganizationMessage("")
+
+    const response = await fetch(
+      "/api/admin/domains/verify",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain: value,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "DNS ainda não validado.",
+      )
+    }
+
+    setVerification({
+      domain: value,
+      routing: result.routing || null,
+    })
+    setOrganizationMessage(
+      result.routing?.ready
+        ? "Domínio verificado e Cloudflare/SSL prontos."
+        : "Domínio verificado no SaborFlow. O Cloudflare ainda está validando DNS/SSL.",
+    )
+    await reload()
+  }
+
+  async function removeDomain(
+    value: string,
+  ) {
+    if (
+      !window.confirm(
+        `Remover ${value} desta empresa?`,
+      )
+    ) {
+      return
+    }
+
+    const response = await fetch(
+      "/api/admin/domains",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain: value,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível remover.",
+      )
+    }
+
+    await reload()
+  }
+
+  async function createAgent(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setBusy(true)
+    setOrganizationMessage("")
+    setNewAgent(null)
+
+    const response = await fetch(
+      "/api/admin/print-agents",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          name: agentName,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível criar.",
+      )
+    }
+
+    setNewAgent(
+      result.agent,
+    )
+    setAgentName("")
+    setOrganizationMessage(
+      "Agente criado. O token abaixo é exibido somente nesta tela agora.",
+    )
+    await reload()
+  }
+
+  async function revokeAgent(
+    id: string,
+  ) {
+    const response = await fetch(
+      "/api/admin/print-agents",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          id,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível revogar.",
+      )
+    }
+
+    await reload()
+  }
+
+  return (
+    <div className="space-y-5">
+      {googleClientId && <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={() => setGoogleReady(true)} />}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-black">
+          Minha conta
+        </h2>
+        <p className="mt-1 text-sm text-gray-500">
+          A nova senha invalida as
+          sessões administrativas antigas.
+        </p>
+
+        <form
+          onSubmit={changePassword}
+          className="mt-5 grid gap-3 md:grid-cols-3"
+        >
+          <input
+            type="password"
+            autoComplete="current-password"
+            required
+            placeholder="Senha atual"
+            value={currentPassword}
+            onChange={(event) =>
+              setCurrentPassword(
+                event.target.value,
+              )
+            }
+            className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            required
+            placeholder="Nova senha"
+            value={newPassword}
+            onChange={(event) =>
+              setNewPassword(
+                event.target.value,
+              )
+            }
+            className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            required
+            placeholder="Confirmar nova senha"
+            value={confirmPassword}
+            onChange={(event) =>
+              setConfirmPassword(
+                event.target.value,
+              )
+            }
+            className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
+          />
+
+          <button
+            disabled={passwordBusy}
+            className="h-11 rounded-xl bg-[#2f1c13] px-4 text-sm font-black text-white md:col-span-3 md:w-fit"
+          >
+            {passwordBusy
+              ? "Alterando..."
+              : "Alterar minha senha"}
+          </button>
+        </form>
+
+        {passwordMessage && (
+          <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {passwordMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-black">Login com Google</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Vincule a mesma Conta Google do seu e-mail SaborFlow para entrar no painel sem digitar a senha.
+        </p>
+
+        {!googleClientId || googleLink?.configured === false ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Login com Google ainda não foi habilitado nas variáveis do Railway.
+          </div>
+        ) : googleLink?.linked ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            Conta Google vinculada a <strong>{googleLink.email}</strong>.
+          </div>
+        ) : (
+          <div className="mt-4">
+            <div ref={googleButtonRef} className="min-h-11 max-w-sm" />
+            <p className="mt-2 text-xs leading-5 text-gray-500">Use exatamente a Conta Google com o e-mail <strong>{googleLink?.email || "da sua conta SaborFlow"}</strong>.</p>
+          </div>
+        )}
+
+        {googleMessage && (
+          <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{googleMessage}</p>
+        )}
+      </section>
+
+      {!canManage && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-black">
+            Segurança da empresa
+          </h2>
+          <p className="mt-2 text-sm text-gray-500">
+            Domínios, timezone e agentes
+            de impressão são gerenciados
+            por proprietário ou
+            administrador.
+          </p>
+        </section>
+      )}
+
+      {canManage && (
+        <>
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">Storage e CDN</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Imagens no Cloudflare R2 deixam a aplicação independente do disco do Railway e preparam o serviço para múltiplas réplicas.
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">Modo atual</p>
+                <p className="mt-1 font-black">{storageStatus?.mode === "r2" ? "Cloudflare R2" : "Disco / Volume"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">CDN pública</p>
+                <p className="mt-1 break-all font-black">{storageStatus?.publicHost || "Não configurada"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">Arquivos legados locais</p>
+                <p className="mt-1 font-black">{storageStatus?.localFileCount ?? "—"}</p>
+              </div>
+            </div>
+
+            {storageStatus?.mode === "r2" && storageStatus.r2Configured ? (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">R2 configurado e ativo.</p>
+                <p className="mt-1 text-xs leading-5 text-emerald-800">
+                  Novos uploads já vão para o R2. Enquanto ainda existirem arquivos locais, mantenha o Volume do Railway conectado e migre os arquivos antigos.
+                </p>
+                {(storageStatus.localFileCount || 0) > 0 && (
+                  <button
+                    type="button"
+                    disabled={storageBusy}
+                    onClick={migrateStorageBatch}
+                    className="mt-3 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-60"
+                  >
+                    {storageBusy ? "Migrando..." : "Migrar próximo lote de imagens"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Configure as variáveis R2 no Railway e defina <code className="font-black">MEDIA_STORAGE_MODE=r2</code>. Até lá, o sistema continua usando o armazenamento local atual.
+              </div>
+            )}
+
+            {storageMessage && (
+              <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{storageMessage}</p>
+            )}
+
+            {storageStatus?.replicaReady && (
+              <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                O serviço está sem arquivos locais detectados e com R2 ativo. Depois de confirmar que todas as imagens abrem corretamente, você pode remover o Volume para liberar o uso de réplicas.
+              </p>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">
+              <HelpLabel helpKey="security.timezone">Timezone da empresa</HelpLabel>
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Usado para datas operacionais,
+              relatórios e impressão.
+            </p>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <input
+                list="saborflow-timezones"
+                value={timeZone}
+                onChange={(event) =>
+                  setTimeZone(
+                    event.target.value,
+                  )
+                }
+                className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+              />
+              <datalist id="saborflow-timezones">
+                {commonTimeZones.map(
+                  (item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    />
+                  ),
+                )}
+              </datalist>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveTimeZone}
+                className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white"
+              >
+                Salvar timezone
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">
+              <HelpLabel helpKey="security.domain">Domínio customizado</HelpLabel>
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              O SaborFlow cadastra o domínio automaticamente no Cloudflare for SaaS,
+              prepara o SSL e informa exatamente quais registros DNS o cliente deve criar.
+            </p>
+
+            {storefrontRootDomain && data?.organization?.slug && (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-xs font-bold uppercase text-blue-700">Subdomínio automático SaborFlow</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
+                    {`https://${data.organization.slug}.${storefrontRootDomain}`}
+                  </code>
+                  <CopyButton value={`https://${data.organization.slug}.${storefrontRootDomain}`} />
+                </div>
+                <p className="mt-2 text-xs text-blue-800">
+                  Esse endereço usa o slug da empresa e funciona pelo wildcard da plataforma, sem cadastrar cada loja individualmente.
+                </p>
+              </div>
+            )}
+
+            <form
+              onSubmit={createDomain}
+              className="mt-4 flex flex-col gap-3 sm:flex-row"
+            >
+              <input
+                required
+                placeholder="pedidos.suaempresa.com.br"
+                value={domain}
+                onChange={(event) =>
+                  setDomain(
+                    event.target.value,
+                  )
+                }
+                className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+              />
+              <button
+                disabled={busy}
+                className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white"
+              >
+                Gerar verificação
+              </button>
+            </form>
+
+            {verification && (
+              <div className="mt-4 space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                {verification.recordName && verification.recordValue && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-black text-amber-900">1. Verificação de propriedade do SaborFlow</p>
+                    <DnsCopyRow label="TXT — Nome" value={verification.recordName} />
+                    <DnsCopyRow label="TXT — Valor" value={verification.recordValue} />
+                  </div>
+                )}
+
+                {verification.routing && (
+                  <div className="space-y-3 border-t border-amber-200 pt-4">
+                    <p className="text-sm font-black text-amber-900">2. Roteamento e SSL automáticos — Cloudflare for SaaS</p>
+                    {verification.routing.dnsRecords.map((record, index) => (
+                      <div key={`${record.name}-${record.value}-${index}`} className="rounded-xl border border-amber-200 bg-white/70 p-3">
+                        <p className="mb-2 text-xs font-black text-amber-800">
+                          {record.purpose === "traffic"
+                            ? "Tráfego da loja"
+                            : record.purpose === "hostname_verification"
+                              ? "Validação do hostname"
+                              : "Validação do certificado SSL"}
+                        </p>
+                        <DnsCopyRow label={`${record.type} — Nome`} value={record.name} />
+                        <div className="mt-2"><DnsCopyRow label={`${record.type} — Valor`} value={record.value} /></div>
+                        {record.status && <p className="mt-2 text-xs text-amber-800">Status Cloudflare: {record.status}</p>}
+                      </div>
+                    ))}
+                    <div className="rounded-xl border border-amber-200 bg-white/70 p-3 text-xs text-amber-900">
+                      <p><strong>Hostname:</strong> {verification.routing.hostnameStatus || "aguardando"}</p>
+                      <p className="mt-1"><strong>SSL:</strong> {verification.routing.sslStatus || "aguardando"}</p>
+                    </div>
+                    {verification.routing.errors.length > 0 && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+                        {verification.routing.errors.join(" • ")}
+                      </div>
+                    )}
+                    <p className={verification.routing.ready ? "text-xs font-bold text-emerald-700" : "text-xs font-bold text-amber-800"}>
+                      {verification.routing.ready
+                        ? "Cloudflare: hostname e certificado SSL ativos."
+                        : "Cloudflare: aguardando propagação/validação. Clique em Verificar novamente após o DNS propagar."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-5 space-y-2">
+              {data?.domains.map(
+                (item) => (
+                  <div
+                    key={item.domain}
+                    className="flex flex-col gap-3 rounded-xl border border-gray-200 p-3 sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <strong className="break-all text-sm">
+                        {item.domain}
+                      </strong>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                        <span
+                          className={
+                            item.verified
+                              ? "font-bold text-emerald-700"
+                              : "font-bold text-amber-700"
+                          }
+                        >
+                          {item.verified
+                            ? "Verificado"
+                            : "Pendente"}
+                        </span>
+                        {item.primary && (
+                          <span className="font-bold text-blue-700">
+                            Principal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => verifyDomain(item.domain)}
+                      className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white"
+                    >
+                      {item.verified ? "Atualizar Cloudflare/SSL" : "Verificar"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        removeDomain(
+                          item.domain,
+                        )
+                      }
+                      className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ),
+              )}
+
+              {!data?.domains.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
+                  Nenhum domínio customizado
+                  cadastrado.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">
+              <HelpLabel helpKey="security.printAgent">Agentes de impressão</HelpLabel>
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Cada empresa recebe seu próprio
+              token. Um token de uma empresa não
+              acessa a fila de outra.
+            </p>
+
+            <form
+              onSubmit={createAgent}
+              className="mt-4 flex flex-col gap-3 sm:flex-row"
+            >
+              <input
+                required
+                placeholder="Caixa principal"
+                value={agentName}
+                onChange={(event) =>
+                  setAgentName(
+                    event.target.value,
+                  )
+                }
+                className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+              />
+              <button
+                disabled={busy}
+                className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white"
+              >
+                Criar agente
+              </button>
+            </form>
+
+            {newAgent && (
+              <div className="mt-4 space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">
+                  Token exibido uma única vez
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
+                    {newAgent.token}
+                  </code>
+                  <CopyButton
+                    value={
+                      newAgent.token
+                    }
+                  />
+                </div>
+
+                {printCommand && (
+                  <>
+                    <p className="text-xs font-bold text-emerald-800">
+                      Comando no computador
+                      Windows:
+                    </p>
+                    <div className="flex items-start gap-2">
+                      <code className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded-lg bg-white px-3 py-2 text-xs">
+                        {printCommand}
+                      </code>
+                      <CopyButton
+                        value={
+                          printCommand
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="mt-5 space-y-2">
+              {data?.printAgents.map(
+                (agent) => (
+                  <div
+                    key={agent.id}
+                    className="flex items-center gap-3 rounded-xl border border-gray-200 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <strong className="text-sm">
+                        {agent.name}
+                      </strong>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {agent.active
+                          ? "Ativo"
+                          : "Revogado"}
+                        {agent.lastSeenAt
+                          ? ` · último contato ${new Date(
+                              agent.lastSeenAt,
+                            ).toLocaleString(
+                              "pt-BR",
+                            )}`
+                          : " · ainda não conectado"}
+                      </p>
+                    </div>
+
+                    {agent.active && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          revokeAgent(
+                            agent.id,
+                          )
+                        }
+                        className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700"
+                      >
+                        Revogar
+                      </button>
+                    )}
+                  </div>
+                ),
+              )}
+
+              {!data?.printAgents.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
+                  Nenhum agente específico da
+                  empresa ainda.
+                </p>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+
+      {organizationMessage && (
+        <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+          {organizationMessage}
+        </p>
+      )}
+    </div>
+  )
+}
+
+
+===== app/api/admin/password/change/route.ts =====
+import { NextResponse } from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+} from "@/lib/auth"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import {
+  changeAdminUserPassword,
+} from "@/lib/admin-user-db"
+
+export async function POST(
+  request: Request,
+) {
+  const session =
+    await getVerifiedTenantSession()
+
+  if (!session) {
+    return NextResponse.json(
+      {
+        error:
+          "Sessão multiempresa inválida.",
+      },
+      { status: 401 },
+    )
+  }
+
+  const body = (await request
+    .json()
+    .catch(() => null)) as
+    | {
+        currentPassword?: string
+        newPassword?: string
+      }
+    | null
+
+  try {
+    await changeAdminUserPassword(
+      session.userId,
+      body?.currentPassword || "",
+      body?.newPassword || "",
+    )
+
+    const response =
+      NextResponse.json({
+        ok: true,
+        relogin: true,
+      })
+
+    response.cookies.delete(
+      ADMIN_SESSION_COOKIE,
+    )
+    response.cookies.delete(
+      LEGACY_ADMIN_SESSION_COOKIE,
+    )
+
+    return response
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível alterar a senha.",
+      },
+      { status: 400 },
+    )
+  }
+}
+
+
+===== lib/auth.ts =====
+import { createHmac, timingSafeEqual } from "node:crypto"
+import { cookies } from "next/headers"
+import type { AdminTenantContext, OrganizationRole } from "@/lib/tenant-context"
+import { demoOrganizationIsUsable } from "@/lib/demo-policy"
+import { enterTenantRlsContext } from "@/lib/rls-context"
+
+export const ADMIN_SESSION_COOKIE = "saborflow_admin_session"
+export const SUPERADMIN_SESSION_COOKIE = "saborflow_superadmin_session"
+// Mantido apenas para que logout/login removam cookies antigos do navegador.
+export const LEGACY_ADMIN_SESSION_COOKIE = "cris_admin_session"
+
+export const ADMIN_SESSION_IDLE_SECONDS = 60 * 60 * 24 * 10
+const ADMIN_SESSION_IDLE_MS = ADMIN_SESSION_IDLE_SECONDS * 1000
+
+/** @deprecated Mantido apenas para compatibilidade de componentes antigos. */
+export const getAdminEmail = () => ""
+
+export const getAdminLoginMode = () => "postgres" as const
+export const legacyAdminLoginAllowed = () => false
+
+export const isSessionSecretConfigured = () =>
+  Boolean(process.env.SESSION_SECRET?.trim())
+
+const getSessionSecret = () => {
+  const configured = process.env.SESSION_SECRET?.trim()
+  if (!configured) {
+    throw new Error("SESSION_SECRET é obrigatório na Fase 25.")
+  }
+  return configured
+}
+
+export type AdminSession =
+  | {
+      mode: "tenant"
+      userId: string
+      email: string
+      organizationId: string
+      organizationName: string
+      organizationSlug: string
+      role: OrganizationRole
+      sessionVersion: number
+      expiresAt: number
+    }
+  | {
+      // Tipo mantido temporariamente para compatibilidade de componentes antigos.
+      // getAdminSession() nunca produz esta variante após a Fase 25.
+      mode: "legacy"
+      email: string
+    }
+
+type SuperadminSessionPayload = {
+  v: 1
+  purpose: "superadmin-cpf"
+  userId: string
+  expiresAt: number
+}
+
+/** @deprecated Login legado foi desativado na Fase 25. */
+export function credentialsAreValid(_email: string, _password: string) {
+  return false
+}
+
+function sign(value: string) {
+  return createHmac("sha256", getSessionSecret())
+    .update(value)
+    .digest("base64url")
+}
+
+function signaturesMatch(actual: string, expected: string) {
+  const actualBuffer = Buffer.from(actual)
+  const expectedBuffer = Buffer.from(expected)
+  if (actualBuffer.length !== expectedBuffer.length) return false
+  return timingSafeEqual(actualBuffer, expectedBuffer)
+}
+
+function tenantTokenFromSession(
+  session: Pick<
+    Extract<AdminSession, { mode: "tenant" }>,
+    | "userId"
+    | "email"
+    | "organizationId"
+    | "organizationName"
+    | "organizationSlug"
+    | "role"
+    | "sessionVersion"
+  >,
+) {
+  const payload = {
+    v: 3,
+    userId: session.userId,
+    email: session.email,
+    organizationId: session.organizationId,
+    organizationName: session.organizationName,
+    organizationSlug: session.organizationSlug,
+    role: session.role,
+    sessionVersion: session.sessionVersion,
+    expiresAt: Date.now() + ADMIN_SESSION_IDLE_MS,
+  }
+
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  return `v3.${encoded}.${sign(encoded)}`
+}
+
+export function createSessionToken(context: AdminTenantContext) {
+  if (!context) {
+    throw new Error("Sessão administrativa exige contexto tenant PostgreSQL.")
+  }
+
+  return tenantTokenFromSession({
+    userId: context.userId,
+    email: context.email,
+    organizationId: context.organizationId,
+    organizationName: context.organizationName,
+    organizationSlug: context.organizationSlug,
+    role: context.role,
+    sessionVersion: context.sessionVersion,
+  })
+}
+
+export function createSuperadminSessionToken(userId: string) {
+  const normalizedUserId = userId.trim()
+  if (!normalizedUserId) {
+    throw new Error("Sessão Superadmin exige usuário válido.")
+  }
+
+  const payload: SuperadminSessionPayload = {
+    v: 1,
+    purpose: "superadmin-cpf",
+    userId: normalizedUserId,
+    expiresAt: Date.now() + ADMIN_SESSION_IDLE_MS,
+  }
+
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  const signature = sign(`superadmin:${encoded}`)
+  return `sa1.${encoded}.${signature}`
+}
+
+function parseTenantSessionToken(token?: string | null): AdminSession | null {
+  if (!token || (!token.startsWith("v2.") && !token.startsWith("v3."))) {
+    return null
+  }
+
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+
+  const [, encoded, signature] = parts
+  if (!encoded || !signature) return null
+  if (!signaturesMatch(signature, sign(encoded))) return null
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    ) as {
+      v?: number
+      userId?: string
+      email?: string
+      organizationId?: string
+      organizationName?: string
+      organizationSlug?: string
+      role?: OrganizationRole
+      sessionVersion?: number
+      expiresAt?: number
+    }
+
+    if (
+      ![2, 3].includes(Number(payload.v)) ||
+      !payload.userId ||
+      !payload.email ||
+      !payload.organizationId ||
+      !payload.organizationName ||
+      !payload.organizationSlug ||
+      !payload.role ||
+      !payload.expiresAt ||
+      payload.expiresAt <= Date.now()
+    ) {
+      return null
+    }
+
+    return {
+      mode: "tenant",
+      userId: payload.userId,
+      email: payload.email,
+      organizationId: payload.organizationId,
+      organizationName: payload.organizationName,
+      organizationSlug: payload.organizationSlug,
+      role: payload.role,
+      sessionVersion: Number(payload.sessionVersion || 1),
+      expiresAt: payload.expiresAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+function parseSuperadminSessionToken(
+  token?: string | null,
+): SuperadminSessionPayload | null {
+  if (!token || !token.startsWith("sa1.")) return null
+
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+
+  const [, encoded, signature] = parts
+  if (!encoded || !signature) return null
+
+  const expectedSignature = sign(`superadmin:${encoded}`)
+  if (!signaturesMatch(signature, expectedSignature)) return null
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    ) as Partial<SuperadminSessionPayload>
+
+    if (
+      payload.v !== 1 ||
+      payload.purpose !== "superadmin-cpf" ||
+      !payload.userId ||
+      !payload.expiresAt ||
+      payload.expiresAt <= Date.now()
+    ) {
+      return null
+    }
+
+    return {
+      v: 1,
+      purpose: "superadmin-cpf",
+      userId: payload.userId,
+      expiresAt: payload.expiresAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function refreshAdminSessionToken(token?: string | null) {
+  const session = parseTenantSessionToken(token)
+  if (!session || session.mode !== "tenant") return null
+
+  return tenantTokenFromSession({
+    userId: session.userId,
+    email: session.email,
+    organizationId: session.organizationId,
+    organizationName: session.organizationName,
+    organizationSlug: session.organizationSlug,
+    role: session.role,
+    sessionVersion: session.sessionVersion,
+  })
+}
+
+export function refreshSuperadminSessionToken(token?: string | null) {
+  const session = parseSuperadminSessionToken(token)
+  if (!session) return null
+
+  return createSuperadminSessionToken(session.userId)
+}
+
+export function sessionTokenIsValid(token?: string | null) {
+  return Boolean(parseTenantSessionToken(token))
+}
+
+export async function hasSuperadminCpfSession(userId: string) {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(SUPERADMIN_SESSION_COOKIE)?.value
+  const session = parseSuperadminSessionToken(token)
+
+  return Boolean(
+    session &&
+      session.userId === userId.trim(),
+  )
+}
+
+export async function getAdminSession(): Promise<AdminSession | null> {
+  const cookieStore = await cookies()
+  const tenantToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value
+  const tenantSession = parseTenantSessionToken(tenantToken)
+
+  if (tenantSession?.mode !== "tenant") return null
+
+  enterTenantRlsContext(
+    tenantSession.organizationId,
+    tenantSession.userId,
+    "tenant-session",
+  )
+
+  if (await demoOrganizationIsUsable(tenantSession.organizationId)) {
+    return tenantSession
+  }
+
+  return null
+}
+
+export async function isAdminAuthenticated() {
+  return Boolean(await getAdminSession())
+}
+

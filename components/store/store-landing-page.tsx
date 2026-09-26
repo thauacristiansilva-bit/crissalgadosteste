@@ -357,7 +357,7 @@ export function StoreLandingPage({
                 {(settings.businessHours || []).map((item) => (
                   <div key={item.day} className="flex items-center justify-between gap-4 border-b border-white/10 py-2 text-sm">
                     <span className="font-bold text-white/80">{item.label}</span>
-                    <span className="text-white/60">{item.enabled ? `${item.open} – ${item.close}` : "Fechado"}</span>
+                    <span className="text-white/60">{item.enabled ? item.pauseStart && item.pauseEnd ? `${item.open}–${item.pauseStart} · ${item.pauseEnd}–${item.close}` : `${item.open}–${item.close}` : "Fechado"}</span>
                   </div>
                 ))}
               </div>

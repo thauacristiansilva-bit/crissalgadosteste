@@ -1,0 +1,2092 @@
+SABORFLOW - ETAPA 14.8 - CONTEXTO COMPLEMENTAR
+
+============================================================
+===== app\api\orders\route.ts =====
+============================================================
+import { NextResponse } from "next/server"
+import {
+  isAdminAuthenticated,
+} from "@/lib/auth"
+import {
+  getCurrentCustomerAccount,
+} from "@/lib/client-auth"
+import {
+  getTenantOrders,
+  isTenantOrdersReady,
+} from "@/lib/order-db"
+import {
+  createTenantCheckoutOrder,
+} from "@/lib/tenant-checkout"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import type {
+  Order,
+} from "@/lib/types"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
+import { canReadOrders } from "@/lib/admin-access"
+import { getCourierWorkspaceSnapshot } from "@/lib/delivery-dispatch-db"
+import { assertActiveSubscriptionForOrganization, assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+
+export async function GET() {
+  if (
+    !(await isAdminAuthenticated())
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Não autorizado.",
+      },
+      { status: 401 },
+    )
+  }
+
+  const session =
+    await getVerifiedTenantSession()
+
+  if (session) {
+    if (!canReadOrders(session.role, session.operationalPermissions)) {
+      return NextResponse.json(
+        {
+          error:
+            "Seu perfil não pode visualizar pedidos.",
+        },
+        { status: 403 },
+      )
+    }
+
+    const ready =
+      await isTenantOrdersReady(
+        session.organizationId,
+      ).catch(() => false)
+
+    if (ready) {
+      if (session.role === "courier") {
+        const dispatch = await getCourierWorkspaceSnapshot({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          role: session.role,
+          permissions: session.operationalPermissions,
+        })
+        return NextResponse.json({ orders: dispatch.orders })
+      }
+
+      return NextResponse.json({
+        orders:
+          await getTenantOrders(
+            session.organizationId,
+          ),
+      })
+    }
+
+    return NextResponse.json(
+      {
+        error:
+          "Pedidos PostgreSQL desta empresa não estão disponíveis.",
+      },
+      { status: 503 },
+    )
+  }
+
+  return NextResponse.json(
+    { error: "Sessão tenant obrigatória." },
+    { status: 401 },
+  )
+}
+
+export async function POST(
+  request: Request,
+) {
+  const publicOrganization =
+    await resolvePublicOrganizationForRequest(
+      request,
+    )
+
+  if (!publicOrganization) {
+    return NextResponse.json(
+      {
+        error:
+          "Empresa não identificada. Abra a loja pelo link /loja/{slug}.",
+      },
+      { status: 404 },
+    )
+  }
+
+  if (!publicOrganization.publicOrderingEnabled) {
+    return NextResponse.json(
+      {
+        error:
+          "Pedidos online ainda não foram habilitados para esta empresa.",
+      },
+      { status: 503 },
+    )
+  }
+
+  const body = (await request
+    .json()
+    .catch(() => null)) as
+    | {
+        type?: Order["type"]
+        paymentMethod?:
+          Order["paymentMethod"]
+        changeFor?: string
+        notes?: string
+        customer?: Order["customer"]
+        items?: Array<{
+          productId: number
+          quantity: number
+          modifierOptionIds?: number[]
+        }>
+        requestedFor?: string
+        timing?:
+          | "now"
+          | "scheduled"
+        couponCode?: string
+      }
+    | null
+
+  if (
+    !body ||
+    !body.customer ||
+    !Array.isArray(body.items) ||
+    !body.items.length
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Pedido incompleto.",
+      },
+      { status: 400 },
+    )
+  }
+
+  const timing =
+    body.timing === "now"
+      ? "now"
+      : "scheduled"
+
+  if (
+    timing === "scheduled" &&
+    !body.requestedFor
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Escolha o dia e o horário do agendamento.",
+      },
+      { status: 400 },
+    )
+  }
+
+  if (
+    !body.customer.name?.trim() ||
+    !body.customer.phone?.trim()
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Nome e telefone são obrigatórios.",
+      },
+      { status: 400 },
+    )
+  }
+
+  const type =
+    body.type === "delivery"
+      ? "delivery"
+      : "pickup"
+
+  if (
+    type === "delivery" &&
+    (!body.customer.address?.trim() ||
+      !body.customer.number?.trim())
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Endereço e número são obrigatórios para delivery.",
+      },
+      { status: 400 },
+    )
+  }
+
+  const paymentMethod = [
+    "card",
+    "cash",
+    "pix",
+  ].includes(
+    String(body.paymentMethod),
+  )
+    ? (body.paymentMethod as Order["paymentMethod"])
+    : "pix"
+
+  const account =
+    await getCurrentCustomerAccount()
+
+  try {
+    await assertActiveSubscriptionForOrganization(publicOrganization.id)
+    if (type === "delivery") {
+      await assertOrganizationEntitlement(publicOrganization.id, "delivery")
+    }
+    if (body.items.some((item) => Array.isArray(item.modifierOptionIds) && item.modifierOptionIds.length > 0)) {
+      await assertOrganizationEntitlement(publicOrganization.id, "modifiers")
+    }
+
+    const result =
+      await createTenantCheckoutOrder(
+        publicOrganization.id,
+        {
+          type,
+          paymentMethod,
+          changeFor:
+            body.changeFor,
+          notes: body.notes,
+          customer: {
+            ...body.customer,
+          },
+          items: body.items,
+          requestedFor:
+            body.requestedFor,
+          timing,
+          couponCode:
+            body.couponCode,
+          ...(account &&
+          account.id
+            ? {
+                accountId:
+                  account.id,
+              }
+            : {}),
+        },
+      )
+
+
+    return NextResponse.json(
+      {
+        order: result.order,
+      },
+      { status: 201 },
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível criar o pedido.",
+      },
+      { status: billingErrorStatus(error) },
+    )
+  }
+}
+
+============================================================
+===== lib\order-db.ts =====
+============================================================
+import type { PoolClient } from "pg"
+import { getPostgresPool } from "@/lib/postgres"
+import { getCurrentDeploymentOrganizationId } from "@/lib/catalog-db"
+import { reverseIngredientsForOrderWithClient } from "@/lib/food-composition-db"
+import { applyLoyaltyForOrderStatusTransitionWithClient } from "@/lib/loyalty-db"
+import type {
+  DashboardSummary,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from "@/lib/types"
+
+type OrderRow = {
+  id: number
+  code: string
+  reference: string
+  type: Order["type"]
+  status: Order["status"]
+  channel: Order["channel"]
+  subtotal: string | number
+  discount: string | number
+  coupon_code: string | null
+  delivery_fee: string | number
+  total: string | number
+  payment_status: Order["paymentStatus"]
+  payment_method: Order["paymentMethod"]
+  change_for: string | null
+  notes: string | null
+  customer: Order["customer"]
+  courier_id: number | null
+  courier_name: string | null
+  delivery_zone_id: number | null
+  delivery_zone_name: string | null
+  requested_for: Date | string
+  scheduled: boolean
+  printed_at: Date | string | null
+  created_at: Date | string
+  updated_at: Date | string
+}
+
+type OrderItemRow = {
+  order_id: number
+  line_no: number
+  product_id: number
+  name: string
+  quantity: number
+  unit_price: string | number
+  subtotal: string | number
+  modifiers?: Order["items"][number]["modifiers"]
+}
+
+type OrderItemModifierRow = {
+  order_id: number
+  line_no: number
+  modifier_no: number
+  group_id: number
+  group_name: string
+  option_id: number
+  option_name: string
+  price_delta: string | number
+  included: boolean
+}
+
+function iso(value: Date | string) {
+  return value instanceof Date
+    ? value.toISOString()
+    : new Date(value).toISOString()
+}
+
+function mapOrder(row: OrderRow, itemRows: OrderItemRow[]): Order {
+  return {
+    id: Number(row.id),
+    code: row.code,
+    reference: row.reference,
+    type: row.type,
+    status: row.status,
+    channel: row.channel,
+    subtotal: Number(row.subtotal),
+    discount: Number(row.discount),
+    ...(row.coupon_code ? { couponCode: row.coupon_code } : {}),
+    deliveryFee: Number(row.delivery_fee),
+    total: Number(row.total),
+    paymentStatus: row.payment_status,
+    paymentMethod: row.payment_method,
+    ...(row.change_for ? { changeFor: row.change_for } : {}),
+    ...(row.notes ? { notes: row.notes } : {}),
+    customer: row.customer,
+    ...(row.courier_id !== null ? { courierId: Number(row.courier_id) } : {}),
+    ...(row.courier_name ? { courierName: row.courier_name } : {}),
+    ...(row.delivery_zone_id !== null
+      ? { deliveryZoneId: Number(row.delivery_zone_id) }
+      : {}),
+    ...(row.delivery_zone_name
+      ? { deliveryZoneName: row.delivery_zone_name }
+      : {}),
+    requestedFor: iso(row.requested_for),
+    scheduled: Boolean(row.scheduled),
+    ...(row.printed_at ? { printedAt: iso(row.printed_at) } : {}),
+    items: itemRows
+      .sort((a, b) => a.line_no - b.line_no)
+      .map((item) => ({
+        productId: Number(item.product_id),
+        name: item.name,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unit_price),
+        subtotal: Number(item.subtotal),
+        ...(item.modifiers?.length ? { modifiers: item.modifiers } : {}),
+      })),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  }
+}
+
+const orderSelect = `
+  SELECT
+    id,
+    code,
+    reference,
+    type,
+    status,
+    channel,
+    subtotal,
+    discount,
+    coupon_code,
+    delivery_fee,
+    total,
+    payment_status,
+    payment_method,
+    change_for,
+    notes,
+    customer,
+    courier_id,
+    courier_name,
+    delivery_zone_id,
+    delivery_zone_name,
+    requested_for,
+    scheduled,
+    printed_at,
+    created_at,
+    updated_at
+  FROM sf_orders
+`
+
+async function getItemsForOrderIds(
+  organizationId: string,
+  ids: number[],
+) {
+  if (!ids.length) return new Map<number, OrderItemRow[]>()
+
+  const result = await getPostgresPool().query<OrderItemRow>(
+    `
+      SELECT
+        order_id,
+        line_no,
+        product_id,
+        name,
+        quantity,
+        unit_price,
+        subtotal
+      FROM sf_order_items
+      WHERE organization_id = $1
+        AND order_id = ANY($2::int[])
+      ORDER BY order_id ASC, line_no ASC
+    `,
+    [organizationId, ids],
+  )
+
+  const modifierMap = new Map<string, OrderItemRow["modifiers"]>()
+
+  try {
+    const modifiers = await getPostgresPool().query<OrderItemModifierRow>(
+      `
+        SELECT
+          order_id,
+          line_no,
+          modifier_no,
+          group_id,
+          group_name,
+          option_id,
+          option_name,
+          price_delta,
+          included
+        FROM sf_order_item_modifiers
+        WHERE organization_id = $1
+          AND order_id = ANY($2::int[])
+        ORDER BY order_id ASC, line_no ASC, modifier_no ASC
+      `,
+      [organizationId, ids],
+    )
+
+    for (const modifier of modifiers.rows) {
+      const key = `${Number(modifier.order_id)}:${Number(modifier.line_no)}`
+      const list = modifierMap.get(key) || []
+      list.push({
+        groupId: Number(modifier.group_id),
+        groupName: modifier.group_name,
+        optionId: Number(modifier.option_id),
+        optionName: modifier.option_name,
+        priceDelta: Number(modifier.price_delta),
+        included: Boolean(modifier.included),
+      })
+      modifierMap.set(key, list)
+    }
+  } catch (error) {
+    if ((error as { code?: string })?.code !== "42P01") throw error
+  }
+
+  const map = new Map<number, OrderItemRow[]>()
+
+  for (const item of result.rows) {
+    const list = map.get(Number(item.order_id)) || []
+    const key = `${Number(item.order_id)}:${Number(item.line_no)}`
+    list.push({ ...item, modifiers: modifierMap.get(key) || [] })
+    map.set(Number(item.order_id), list)
+  }
+
+  return map
+}
+
+export async function isTenantOrdersReady(organizationId: string) {
+  try {
+    const result = await getPostgresPool().query<{ ready: boolean }>(
+      `
+        SELECT ready
+        FROM sf_orders_state
+        WHERE organization_id = $1
+        LIMIT 1
+      `,
+      [organizationId],
+    )
+
+    return Boolean(result.rows[0]?.ready)
+  } catch (error) {
+    const pgError = error as { code?: string }
+    if (pgError?.code === "42P01") return false
+    throw error
+  }
+}
+
+export async function getTenantOrders(
+  organizationId: string,
+): Promise<Order[]> {
+  const result = await getPostgresPool().query<OrderRow>(
+    `
+      ${orderSelect}
+      WHERE organization_id = $1
+      ORDER BY created_at DESC, id DESC
+    `,
+    [organizationId],
+  )
+
+  const items = await getItemsForOrderIds(
+    organizationId,
+    result.rows.map((row) => Number(row.id)),
+  )
+
+  return result.rows.map((row) =>
+    mapOrder(row, items.get(Number(row.id)) || []),
+  )
+}
+
+export async function getTenantRecentOrders(
+  organizationId: string,
+  limit = 120,
+): Promise<Order[]> {
+  const safeLimit = Math.max(10, Math.min(300, Math.floor(Number(limit) || 120)))
+  const result = await getPostgresPool().query<OrderRow>(
+    `
+      ${orderSelect}
+      WHERE organization_id = $1
+      ORDER BY created_at DESC, id DESC
+      LIMIT $2
+    `,
+    [organizationId, safeLimit],
+  )
+
+  const items = await getItemsForOrderIds(
+    organizationId,
+    result.rows.map((row) => Number(row.id)),
+  )
+
+  return result.rows.map((row) =>
+    mapOrder(row, items.get(Number(row.id)) || []),
+  )
+}
+
+export async function getTenantOrdersForCustomerAccount(
+  organizationId: string,
+  accountId: number,
+  limit = 10,
+): Promise<Order[]> {
+  const safeLimit = Math.max(1, Math.min(30, Math.floor(Number(limit) || 10)))
+  const result = await getPostgresPool().query<OrderRow>(
+    `
+      ${orderSelect}
+      WHERE organization_id = $1
+        AND customer->>'accountId' = $2
+      ORDER BY created_at DESC, id DESC
+      LIMIT $3
+    `,
+    [organizationId, String(accountId), safeLimit],
+  )
+
+  const items = await getItemsForOrderIds(
+    organizationId,
+    result.rows.map((row) => Number(row.id)),
+  )
+
+  return result.rows.map((row) =>
+    mapOrder(row, items.get(Number(row.id)) || []),
+  )
+}
+
+export async function getTenantOrderById(
+  organizationId: string,
+  id: number,
+): Promise<Order | null> {
+  const result = await getPostgresPool().query<OrderRow>(
+    `
+      ${orderSelect}
+      WHERE organization_id = $1
+        AND id = $2
+      LIMIT 1
+    `,
+    [organizationId, id],
+  )
+
+  const row = result.rows[0]
+  if (!row) return null
+
+  const items = await getItemsForOrderIds(organizationId, [id])
+  return mapOrder(row, items.get(id) || [])
+}
+
+export async function getTenantOrderByReference(
+  organizationId: string,
+  reference: string,
+): Promise<Order | null> {
+  const result = await getPostgresPool().query<OrderRow>(
+    `
+      ${orderSelect}
+      WHERE organization_id = $1
+        AND lower(reference) = lower($2)
+      LIMIT 1
+    `,
+    [organizationId, reference.trim()],
+  )
+
+  const row = result.rows[0]
+  if (!row) return null
+
+  const id = Number(row.id)
+  const items = await getItemsForOrderIds(organizationId, [id])
+  return mapOrder(row, items.get(id) || [])
+}
+
+async function writeOrder(
+  client: PoolClient,
+  organizationId: string,
+  order: Order,
+  source: string,
+) {
+  await client.query(
+    `
+      INSERT INTO sf_orders (
+        organization_id,
+        id,
+        code,
+        reference,
+        type,
+        status,
+        channel,
+        subtotal,
+        discount,
+        coupon_code,
+        delivery_fee,
+        total,
+        payment_status,
+        payment_method,
+        change_for,
+        notes,
+        customer,
+        courier_id,
+        courier_name,
+        delivery_zone_id,
+        delivery_zone_name,
+        requested_for,
+        scheduled,
+        printed_at,
+        source,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, $14,
+        $15, $16, $17::jsonb, $18, $19, $20,
+        $21, $22, $23, $24, $25, $26, $27
+      )
+      ON CONFLICT (organization_id, id)
+      DO UPDATE SET
+        code = EXCLUDED.code,
+        reference = EXCLUDED.reference,
+        type = EXCLUDED.type,
+        status = EXCLUDED.status,
+        channel = EXCLUDED.channel,
+        subtotal = EXCLUDED.subtotal,
+        discount = EXCLUDED.discount,
+        coupon_code = EXCLUDED.coupon_code,
+        delivery_fee = EXCLUDED.delivery_fee,
+        total = EXCLUDED.total,
+        payment_status = EXCLUDED.payment_status,
+        payment_method = EXCLUDED.payment_method,
+        change_for = EXCLUDED.change_for,
+        notes = EXCLUDED.notes,
+        customer = EXCLUDED.customer,
+        courier_id = EXCLUDED.courier_id,
+        courier_name = EXCLUDED.courier_name,
+        delivery_zone_id = EXCLUDED.delivery_zone_id,
+        delivery_zone_name = EXCLUDED.delivery_zone_name,
+        requested_for = EXCLUDED.requested_for,
+        scheduled = EXCLUDED.scheduled,
+        printed_at = EXCLUDED.printed_at,
+        source = EXCLUDED.source,
+        updated_at = EXCLUDED.updated_at
+    `,
+    [
+      organizationId,
+      order.id,
+      order.code,
+      order.reference,
+      order.type,
+      order.status,
+      order.channel,
+      order.subtotal,
+      order.discount,
+      order.couponCode || null,
+      order.deliveryFee,
+      order.total,
+      order.paymentStatus,
+      order.paymentMethod,
+      order.changeFor || null,
+      order.notes || null,
+      JSON.stringify(order.customer || {}),
+      order.courierId ?? null,
+      order.courierName || null,
+      order.deliveryZoneId ?? null,
+      order.deliveryZoneName || null,
+      order.requestedFor,
+      order.scheduled,
+      order.printedAt || null,
+      source,
+      order.createdAt,
+      order.updatedAt,
+    ],
+  )
+
+  await client.query(
+    `
+      DELETE FROM sf_order_items
+      WHERE organization_id = $1
+        AND order_id = $2
+    `,
+    [organizationId, order.id],
+  )
+
+  for (let index = 0; index < order.items.length; index += 1) {
+    const item = order.items[index]
+
+    await client.query(
+      `
+        INSERT INTO sf_order_items (
+          organization_id,
+          order_id,
+          line_no,
+          product_id,
+          name,
+          quantity,
+          unit_price,
+          subtotal
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `,
+      [
+        organizationId,
+        order.id,
+        index + 1,
+        item.productId,
+        item.name,
+        item.quantity,
+        item.unitPrice,
+        item.subtotal,
+      ],
+    )
+
+
+    if (item.modifiers?.length) {
+      for (let modifierIndex = 0; modifierIndex < item.modifiers.length; modifierIndex += 1) {
+        const modifier = item.modifiers[modifierIndex]
+        await client.query(
+          `
+            INSERT INTO sf_order_item_modifiers (
+              organization_id, order_id, line_no, modifier_no,
+              group_id, group_name, option_id, option_name, price_delta, included
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `,
+          [
+            organizationId, order.id, index + 1, modifierIndex + 1,
+            modifier.groupId, modifier.groupName, modifier.optionId, modifier.optionName,
+            modifier.priceDelta, modifier.included,
+          ],
+        )
+      }
+    }
+  }
+}
+
+export async function upsertTenantOrder(
+  organizationId: string,
+  order: Order,
+  source = "app",
+) {
+  const client = await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`saborflow-orders:${organizationId}`],
+    )
+
+    const previous = await client.query<{ status: Order["status"]; source: string }>(
+      `SELECT status, source FROM sf_orders WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
+      [organizationId, order.id],
+    )
+
+    if (
+      previous.rows[0] &&
+      previous.rows[0].status !== "cancelled" &&
+      order.status === "cancelled"
+    ) {
+      await reverseIngredientsForOrderWithClient(client, organizationId, order.id)
+
+      if (["tenant-checkout", "tenant-pdv", "postgres-admin"].includes(previous.rows[0].source)) {
+        const stockItems = await client.query<{ product_id: number; quantity: number }>(
+          `
+            SELECT product_id, SUM(quantity)::int AS quantity
+            FROM sf_order_items
+            WHERE organization_id = $1 AND order_id = $2
+            GROUP BY product_id
+          `,
+          [organizationId, order.id],
+        )
+        for (const stockItem of stockItems.rows) {
+          await client.query(
+            `
+              UPDATE sf_products
+              SET stock = stock + $3, updated_at = now()
+              WHERE organization_id = $1 AND id = $2 AND track_stock = true
+            `,
+            [organizationId, Number(stockItem.product_id), Number(stockItem.quantity)],
+          )
+        }
+      }
+    }
+
+    await applyLoyaltyForOrderStatusTransitionWithClient(
+      client,
+      organizationId,
+      previous.rows[0]?.status || null,
+      order,
+    )
+
+    await writeOrder(client, organizationId, order, source)
+
+    await client.query(
+      `
+        UPDATE sf_orders_state
+        SET
+          orders_count = (
+            SELECT COUNT(*)::int
+            FROM sf_orders
+            WHERE organization_id = $1
+          ),
+          items_count = (
+            SELECT COUNT(*)::int
+            FROM sf_order_items
+            WHERE organization_id = $1
+          ),
+          total_amount = (
+            SELECT COALESCE(SUM(total), 0)
+            FROM sf_orders
+            WHERE organization_id = $1
+          ),
+          updated_at = now()
+        WHERE organization_id = $1
+          AND ready = true
+      `,
+      [organizationId],
+    )
+
+    await client.query("COMMIT")
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw error
+  } finally {
+    client.release()
+  }
+
+  return order
+}
+
+export async function syncCurrentDeploymentOrderFromLegacy(
+  order: Order,
+  source = "legacy-bridge",
+) {
+  const organizationId = await getCurrentDeploymentOrganizationId()
+  if (!organizationId) return false
+  if (!(await isTenantOrdersReady(organizationId))) return false
+
+  await upsertTenantOrder(organizationId, order, source)
+  return true
+}
+
+export async function updateTenantOrder(
+  organizationId: string,
+  id: number,
+  patch: Partial<
+    Pick<
+      Order,
+      | "status"
+      | "paymentStatus"
+      | "courierId"
+      | "courierName"
+      | "printedAt"
+    >
+  >,
+) {
+  const current = await getTenantOrderById(organizationId, id)
+  if (!current) return null
+
+  if (current.status === "cancelled" && patch.status && patch.status !== "cancelled") {
+    throw new Error("Pedido cancelado não pode ser reaberto automaticamente.")
+  }
+
+  const next: Order = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  }
+
+  return upsertTenantOrder(organizationId, next, "postgres-admin")
+}
+
+export async function getCurrentDeploymentOrderByReference(
+  reference: string,
+) {
+  const organizationId = await getCurrentDeploymentOrganizationId()
+  if (!organizationId) return null
+  if (!(await isTenantOrdersReady(organizationId))) return null
+
+  return getTenantOrderByReference(organizationId, reference)
+}
+
+export async function getCurrentDeploymentOrderById(id: number) {
+  const organizationId = await getCurrentDeploymentOrganizationId()
+  if (!organizationId) return null
+  if (!(await isTenantOrdersReady(organizationId))) return null
+
+  return getTenantOrderById(organizationId, id)
+}
+
+export async function getTenantUnprintedOrders(
+  organizationId: string,
+) {
+  if (!(await isTenantOrdersReady(organizationId))) {
+    return null
+  }
+
+  const cutoff = new Date(
+    Date.now() - 48 * 60 * 60 * 1000,
+  )
+
+  const result =
+    await getPostgresPool().query<OrderRow>(
+      `
+        ${orderSelect}
+        WHERE organization_id = $1
+          AND status NOT IN ('completed', 'cancelled')
+          AND printed_at IS NULL
+          AND created_at >= $2
+        ORDER BY created_at ASC, id ASC
+      `,
+      [organizationId, cutoff],
+    )
+
+  const items =
+    await getItemsForOrderIds(
+      organizationId,
+      result.rows.map(
+        (row) => Number(row.id),
+      ),
+    )
+
+  return result.rows.map((row) =>
+    mapOrder(
+      row,
+      items.get(
+        Number(row.id),
+      ) || [],
+    ),
+  )
+}
+
+export async function markTenantOrderPrinted(
+  organizationId: string,
+  id: number,
+) {
+  if (!(await isTenantOrdersReady(organizationId))) {
+    return null
+  }
+
+  return updateTenantOrder(
+    organizationId,
+    id,
+    {
+      printedAt:
+        new Date().toISOString(),
+    },
+  )
+}
+
+export async function getCurrentDeploymentUnprintedOrders() {
+  const organizationId =
+    await getCurrentDeploymentOrganizationId()
+
+  if (!organizationId) return null
+
+  return getTenantUnprintedOrders(
+    organizationId,
+  )
+}
+
+export async function markCurrentDeploymentOrderPrinted(id: number) {
+  const organizationId =
+    await getCurrentDeploymentOrganizationId()
+
+  if (!organizationId) return null
+
+  return markTenantOrderPrinted(
+    organizationId,
+    id,
+  )
+}
+
+export function summarizeOrders(
+  orders: Order[],
+  timeZone = "America/Sao_Paulo",
+): DashboardSummary {
+  const today =
+    new Date().toLocaleDateString(
+      "en-CA",
+      { timeZone },
+    )
+
+  const valid = orders.filter(
+    (order) =>
+      order.status !== "cancelled",
+  )
+  const todayOrders = valid.filter(
+    (order) =>
+      new Date(
+        order.createdAt,
+      ).toLocaleDateString(
+        "en-CA",
+        { timeZone },
+      ) === today,
+  )
+
+  return {
+    totalOrders: orders.length,
+    openOrders: orders.filter((order) =>
+      ["pending", "accepted", "preparing", "in-route"].includes(
+        order.status,
+      ),
+    ).length,
+    readyOrders: orders.filter((order) => order.status === "ready").length,
+    completedOrders: orders.filter(
+      (order) => order.status === "completed",
+    ).length,
+    revenue: Number(
+      valid.reduce((sum, order) => sum + order.total, 0).toFixed(2),
+    ),
+    unpaid: valid.filter((order) => order.paymentStatus === "unpaid").length,
+    todayOrders: todayOrders.length,
+    todayRevenue: Number(
+      todayOrders
+        .reduce((sum, order) => sum + order.total, 0)
+        .toFixed(2),
+    ),
+  }
+}
+
+export async function getTenantOrdersStats(organizationId: string) {
+  const [state, orders, items] = await Promise.all([
+    getPostgresPool().query<{
+      ready: boolean
+      source: string | null
+      orders_count: number
+      items_count: number
+      total_amount: string | number
+      imported_at: Date | string | null
+    }>(
+      `
+        SELECT
+          ready,
+          source,
+          orders_count,
+          items_count,
+          total_amount,
+          imported_at
+        FROM sf_orders_state
+        WHERE organization_id = $1
+        LIMIT 1
+      `,
+      [organizationId],
+    ),
+    getPostgresPool().query<{
+      count: string
+      total: string | number
+    }>(
+      `
+        SELECT
+          COUNT(*)::text AS count,
+          COALESCE(SUM(total), 0) AS total
+        FROM sf_orders
+        WHERE organization_id = $1
+      `,
+      [organizationId],
+    ),
+    getPostgresPool().query<{ count: string }>(
+      `
+        SELECT COUNT(*)::text AS count
+        FROM sf_order_items
+        WHERE organization_id = $1
+      `,
+      [organizationId],
+    ),
+  ])
+
+  const row = state.rows[0]
+
+  return {
+    ready: Boolean(row?.ready),
+    source: row?.source ?? null,
+    importedAt: row?.imported_at ? iso(row.imported_at) : null,
+    orders: Number(orders.rows[0]?.count || 0),
+    items: Number(items.rows[0]?.count || 0),
+    totalAmount: Number(orders.rows[0]?.total || 0),
+    importedOrders: Number(row?.orders_count || 0),
+    importedItems: Number(row?.items_count || 0),
+    importedTotalAmount: Number(row?.total_amount || 0),
+  }
+}
+
+============================================================
+===== components\catalog\product-customizer.tsx =====
+============================================================
+"use client"
+
+import { useEffect, useMemo, useState } from "react"
+import { Check, Plus, X } from "lucide-react"
+import {
+  validateAndPriceModifierSelection,
+} from "@/lib/product-composition"
+import type { OrderItemModifier, Product } from "@/lib/types"
+
+const money = (value: number) =>
+  new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value)
+
+const EMPTY_OPTION_IDS: number[] = []
+
+export type ProductCustomization = {
+  optionIds: number[]
+  unitPrice: number
+  modifiers: OrderItemModifier[]
+}
+
+export function ProductCustomizer({
+  product,
+  primaryColor,
+  initialOptionIds = EMPTY_OPTION_IDS,
+  onClose,
+  onConfirm,
+}: {
+  product: Product | null
+  primaryColor?: string
+  initialOptionIds?: number[]
+  onClose: () => void
+  onConfirm: (customization: ProductCustomization) => void
+}) {
+  const [selected, setSelected] = useState<number[]>(initialOptionIds)
+  const [error, setError] = useState("")
+
+  const initialOptionKey = initialOptionIds.join(",")
+
+  useEffect(() => {
+    setSelected([...initialOptionIds])
+    setError("")
+  }, [product?.id, initialOptionKey])
+
+  const groups = useMemo(
+    () =>
+      (product?.modifierGroups || [])
+        .filter((group) => group.active)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id),
+    [product],
+  )
+
+  const pricing = useMemo(
+    () =>
+      product
+        ? validateAndPriceModifierSelection(product, selected)
+        : null,
+    [product, selected],
+  )
+
+  if (!product) return null
+
+  function toggle(groupId: number, optionId: number, maxSelect: number) {
+    setError("")
+    const group = groups.find((item) => item.id === groupId)
+    if (!group) return
+
+    setSelected((current) => {
+      const groupOptionIds = new Set(group.options.map((option) => option.id))
+      const currentlySelected = current.filter((id) => groupOptionIds.has(id))
+      const has = current.includes(optionId)
+
+      if (has) return current.filter((id) => id !== optionId)
+
+      if (maxSelect === 1) {
+        return [
+          ...current.filter((id) => !groupOptionIds.has(id)),
+          optionId,
+        ]
+      }
+
+      if (currentlySelected.length >= maxSelect) {
+        setError(`${group.name}: escolha no máximo ${maxSelect} opção(ões).`)
+        return current
+      }
+
+      return [...current, optionId]
+    })
+  }
+
+  function confirm() {
+    if (!product) return
+    const result = validateAndPriceModifierSelection(product, selected)
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    onConfirm({
+      optionIds: [...selected].sort((a, b) => a - b),
+      unitPrice: result.unitPrice,
+      modifiers: result.modifiers,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-[94] flex items-end justify-center bg-slate-950/60 sm:items-center sm:p-4">
+      <button aria-label="Fechar montagem" onClick={onClose} className="absolute inset-0" />
+      <div className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-gray-400">{groups.length ? "Monte do seu jeito" : "Detalhes do produto"}</p>
+            <h2 className="mt-1 text-2xl font-black text-gray-950">{product.name}</h2>
+            <p className="mt-1 text-sm font-bold text-gray-700">{groups.length ? `A partir de ${money(product.price)}` : money(product.price)}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl bg-gray-100 p-2" aria-label="Fechar">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {(product.image || product.description) && <div className="mt-5 overflow-hidden rounded-2xl border border-gray-100 bg-gray-50">
+          {product.image && <div className="aspect-[16/9] overflow-hidden bg-gray-100"><img src={product.image} alt={product.name} className="h-full w-full object-cover" /></div>}
+          {product.description && <p className="p-4 text-sm leading-relaxed text-gray-600">{product.description}</p>}
+        </div>}
+
+        {!groups.length && <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4"><p className="text-xs font-black uppercase text-emerald-700">Pronto para adicionar</p><p className="mt-1 text-sm text-emerald-900">Este produto não exige escolhas extras. Você pode adicioná-lo ao carrinho agora.</p></div>}
+
+        <div className="mt-5 space-y-5">
+          {groups.map((group) => {
+            const selectedInGroup = selected.filter((id) =>
+              group.options.some((option) => option.id === id),
+            ).length
+            const minimum = Math.max(group.required ? 1 : 0, group.minSelect)
+            return (
+              <section key={group.id} className="rounded-2xl border border-gray-200 p-4">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-black text-gray-900">{group.name}</h3>
+                    {group.description && <p className="mt-0.5 text-xs text-gray-500">{group.description}</p>}
+                    <p className="mt-1 text-[11px] font-bold text-gray-400">
+                      {minimum > 0 ? `Mínimo ${minimum}` : "Opcional"} · máximo {group.maxSelect}
+                      {group.includedQuantity > 0 ? ` · ${group.includedQuantity} incluído(s)` : ""}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-black text-gray-600">
+                    {selectedInGroup}/{group.maxSelect}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {group.options
+                    .filter((option) => option.active)
+                    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+                    .map((option) => {
+                      const checked = selected.includes(option.id)
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          disabled={!option.available}
+                          onClick={() => toggle(group.id, option.id, group.maxSelect)}
+                          className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${checked ? "border-orange-300 bg-orange-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                        >
+                          <span
+                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${checked ? "border-transparent text-white" : "border-gray-300 bg-white"}`}
+                            style={checked ? { backgroundColor: primaryColor || "#ea580c" } : undefined}
+                          >
+                            {checked && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <strong className="block text-sm text-gray-900">{option.name}</strong>
+                            {option.description && <small className="block text-xs text-gray-500">{option.description}</small>}
+                            {!option.available && <small className="block text-xs font-bold text-red-600">Indisponível por estoque</small>}
+                          </span>
+                          <strong className="whitespace-nowrap text-sm text-gray-800">
+                            {option.includedEligible && group.includedQuantity > 0
+                              ? option.priceDelta > 0
+                                ? `até ${money(option.priceDelta)}`
+                                : "Incluído"
+                              : option.priceDelta > 0
+                                ? `+ ${money(option.priceDelta)}`
+                                : "Grátis"}
+                          </strong>
+                        </button>
+                      )
+                    })}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+
+        {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</div>}
+
+        <button
+          type="button"
+          onClick={confirm}
+          style={{ backgroundColor: primaryColor || "#ea580c" }}
+          className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-black text-white"
+        >
+          <Plus className="h-4 w-4" />
+          Adicionar · {money(pricing && pricing.ok ? pricing.unitPrice : product.price)}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+============================================================
+===== lib\product-composition.ts =====
+============================================================
+import type {
+  OrderItemModifier,
+  Product,
+  ProductModifierGroup,
+} from "@/lib/types"
+
+export function productHasModifiers(product: Product) {
+  return Boolean(
+    product.modifierGroups?.some(
+      (group) => group.active && group.options.some((option) => option.active),
+    ),
+  )
+}
+
+export function modifierSelectionKey(productId: number, optionIds: number[]) {
+  const normalized = [...new Set(optionIds.map(Number).filter(Number.isFinite))]
+    .sort((a, b) => a - b)
+  return `${productId}:${normalized.join("-")}`
+}
+
+export function validateAndPriceModifierSelection(
+  product: Pick<Product, "price" | "modifierGroups">,
+  optionIds: number[],
+) {
+  const groups = (product.modifierGroups || [])
+    .filter((group) => group.active)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+
+  const requested = [...new Set(optionIds.map(Number))]
+  const requestedSet = new Set(requested)
+  const known = new Set<number>()
+  const modifiers: OrderItemModifier[] = []
+  let modifierTotal = 0
+
+  for (const group of groups) {
+    const options = group.options
+      .filter((option) => option.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+
+    const selected = options.filter((option) => requestedSet.has(option.id))
+
+    selected.forEach((option) => known.add(option.id))
+
+    const minimum = Math.max(group.required ? 1 : 0, group.minSelect)
+    if (selected.length < minimum) {
+      return {
+        ok: false as const,
+        error: `${group.name}: escolha pelo menos ${minimum} opção(ões).`,
+      }
+    }
+
+    if (selected.length > group.maxSelect) {
+      return {
+        ok: false as const,
+        error: `${group.name}: escolha no máximo ${group.maxSelect} opção(ões).`,
+      }
+    }
+
+    const unavailable = selected.find((option) => !option.available)
+    if (unavailable) {
+      return {
+        ok: false as const,
+        error: `${unavailable.name} está indisponível no momento.`,
+      }
+    }
+
+    let includedRemaining = Math.max(0, group.includedQuantity)
+
+    for (const option of selected) {
+      const included = option.includedEligible && includedRemaining > 0
+      if (included) includedRemaining -= 1
+      const charged = included ? 0 : Math.max(0, Number(option.priceDelta || 0))
+      modifierTotal += charged
+      modifiers.push({
+        groupId: group.id,
+        groupName: group.name,
+        optionId: option.id,
+        optionName: option.name,
+        priceDelta: Number(charged.toFixed(2)),
+        included,
+      })
+    }
+  }
+
+  const unknown = requested.find((optionId) => !known.has(optionId))
+  if (unknown !== undefined) {
+    return {
+      ok: false as const,
+      error: "Uma das opções selecionadas não pertence a este produto.",
+    }
+  }
+
+  const modifierPrice = Number(modifierTotal.toFixed(2))
+  return {
+    ok: true as const,
+    modifierPrice,
+    unitPrice: Number((Number(product.price) + modifierPrice).toFixed(2)),
+    modifiers,
+  }
+}
+
+export function selectedOptionsForGroup(
+  group: ProductModifierGroup,
+  optionIds: number[],
+) {
+  const selected = new Set(optionIds)
+  return group.options.filter((option) => selected.has(option.id))
+}
+
+============================================================
+===== app\api\admin\pdv-order\route.ts =====
+============================================================
+import { NextResponse } from "next/server"
+import {
+  isAdminAuthenticated,
+} from "@/lib/auth"
+import {
+  createPdvOrder,
+  syncLegacyOrderFromTenant,
+  syncLegacyProductFromTenant,
+} from "@/lib/db"
+import {
+  getTenantProducts,
+  isCurrentDeploymentOrganization,
+} from "@/lib/catalog-db"
+import {
+  createTenantCheckoutOrder,
+} from "@/lib/tenant-checkout"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import type {
+  Order,
+} from "@/lib/types"
+import { canUsePdv } from "@/lib/admin-access"
+import { assertActiveSubscriptionForOrganization, assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+
+export async function POST(
+  request: Request,
+) {
+  if (
+    !(await isAdminAuthenticated())
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Não autorizado.",
+      },
+      { status: 401 },
+    )
+  }
+
+  const body = (await request
+    .json()
+    .catch(() => null)) as
+    | {
+        type?: string
+        paymentMethod?: string
+        customer?: Order["customer"]
+        items?: Array<{
+          productId: number
+          quantity: number
+          modifierOptionIds?: number[]
+        }>
+        requestedFor?: string
+        timing?:
+          | "now"
+          | "scheduled"
+        notes?: string
+        changeFor?: string
+        couponCode?: string
+        accountId?: number
+      }
+    | null
+
+  if (
+    !body?.items?.length
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Adicione produtos.",
+      },
+      { status: 400 },
+    )
+  }
+
+  const input = {
+    type:
+      body.type === "delivery"
+        ? ("delivery" as const)
+        : ("pickup" as const),
+    paymentMethod: ([
+      "pix",
+      "cash",
+      "card",
+    ].includes(
+      String(
+        body.paymentMethod,
+      ),
+    )
+      ? body.paymentMethod
+      : "cash") as Order["paymentMethod"],
+    customer:
+      body.customer || {
+        name: "Balcão",
+        phone: "",
+        address: "",
+      },
+    items: body.items,
+    requestedFor:
+      body.requestedFor ||
+      new Date().toISOString(),
+    timing:
+      body.timing === "scheduled"
+        ? ("scheduled" as const)
+        : ("now" as const),
+    notes: body.notes,
+    changeFor:
+      body.changeFor,
+    couponCode:
+      body.couponCode,
+    accountId:
+      Number.isFinite(Number(body.accountId)) && Number(body.accountId) > 0
+        ? Math.floor(Number(body.accountId))
+        : undefined,
+  }
+
+  if (
+    input.type === "delivery" &&
+    (!input.customer.name?.trim() || !input.customer.phone?.trim())
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Nome e telefone são obrigatórios para entrega.",
+      },
+      { status: 400 },
+    )
+  }
+
+  try {
+    const session =
+      await getVerifiedTenantSession()
+
+    if (session) {
+      if (!canUsePdv(session.role, session.operationalPermissions)) {
+        return NextResponse.json(
+          {
+            error:
+              "Seu perfil não pode usar o PDV.",
+          },
+          { status: 403 },
+        )
+      }
+
+      await assertActiveSubscriptionForOrganization(session.organizationId)
+
+      if (input.type === "delivery") {
+        await assertOrganizationEntitlement(session.organizationId, "delivery")
+      }
+      if (input.items.some((item) => Array.isArray(item.modifierOptionIds) && item.modifierOptionIds.length > 0)) {
+        await assertOrganizationEntitlement(session.organizationId, "modifiers")
+      }
+
+      const result =
+        await createTenantCheckoutOrder(
+          session.organizationId,
+          {
+            ...input,
+            channel: "PDV",
+            bypassLeadTime: true,
+          },
+        )
+
+      if (
+        await isCurrentDeploymentOrganization(
+          session.organizationId,
+        )
+      ) {
+        try {
+          await syncLegacyOrderFromTenant(
+            result.order,
+          )
+
+          const changed =
+            new Set(
+              result.changedProductIds,
+            )
+
+          const products =
+            await getTenantProducts(
+              session.organizationId,
+              {
+                includeInactive:
+                  true,
+              },
+            )
+
+          for (const product of products) {
+            if (
+              changed.has(
+                product.id,
+              )
+            ) {
+              await syncLegacyProductFromTenant(
+                product,
+              )
+            }
+          }
+        } catch (error) {
+          console.error(
+            "[SaborFlow] PDV PostgreSQL concluído, mas o espelho legado falhou:",
+            error instanceof Error
+              ? error.message
+              : error,
+          )
+        }
+      }
+
+      return NextResponse.json(
+        {
+          order: result.order,
+        },
+        { status: 201 },
+      )
+    }
+
+    const order =
+      await createPdvOrder(
+        input,
+      )
+
+    return NextResponse.json(
+      { order },
+      { status: 201 },
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao criar pedido.",
+      },
+      { status: billingErrorStatus(error) },
+    )
+  }
+}
+
+============================================================
+===== database\migrations\020_crm_loyalty_marketing.sql =====
+============================================================
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS sf_crm_customer_profiles (
+  organization_id uuid NOT NULL
+    REFERENCES sf_organizations(id) ON DELETE CASCADE,
+  customer_key text NOT NULL,
+  customer_id integer,
+  tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+  notes text NOT NULL DEFAULT '',
+  marketing_opt_in boolean NOT NULL DEFAULT false,
+  consent_source text,
+  consent_at timestamptz,
+  last_contact_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (organization_id, customer_key),
+  CONSTRAINT sf_crm_profile_customer_fk
+    FOREIGN KEY (organization_id, customer_id)
+    REFERENCES sf_customer_accounts (organization_id, id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS sf_crm_customer_profiles_org_optin_idx
+  ON sf_crm_customer_profiles (organization_id, marketing_opt_in, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS sf_crm_customer_profiles_org_customer_idx
+  ON sf_crm_customer_profiles (organization_id, customer_id)
+  WHERE customer_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS sf_loyalty_ledger (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL
+    REFERENCES sf_organizations(id) ON DELETE CASCADE,
+  customer_id integer NOT NULL,
+  order_id integer,
+  kind text NOT NULL
+    CHECK (kind IN ('opening', 'earn', 'redeem', 'adjust', 'reversal')),
+  points integer NOT NULL CHECK (points <> 0),
+  balance_after integer NOT NULL CHECK (balance_after >= 0),
+  reason text NOT NULL DEFAULT '',
+  created_by_user_id uuid
+    REFERENCES sf_users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT sf_loyalty_ledger_customer_fk
+    FOREIGN KEY (organization_id, customer_id)
+    REFERENCES sf_customer_accounts (organization_id, id)
+    ON DELETE CASCADE,
+  CONSTRAINT sf_loyalty_ledger_order_fk
+    FOREIGN KEY (organization_id, order_id)
+    REFERENCES sf_orders (organization_id, id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS sf_loyalty_ledger_org_customer_idx
+  ON sf_loyalty_ledger (organization_id, customer_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sf_loyalty_ledger_order_earn_unique
+  ON sf_loyalty_ledger (organization_id, order_id, kind)
+  WHERE order_id IS NOT NULL AND kind = 'earn';
+
+CREATE UNIQUE INDEX IF NOT EXISTS sf_loyalty_ledger_order_reversal_unique
+  ON sf_loyalty_ledger (organization_id, order_id, kind)
+  WHERE order_id IS NOT NULL AND kind = 'reversal';
+
+CREATE TABLE IF NOT EXISTS sf_crm_campaigns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL
+    REFERENCES sf_organizations(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  channel text NOT NULL
+    CHECK (channel IN ('manual', 'whatsapp', 'email', 'sms')),
+  status text NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'ready', 'archived')),
+  audience_segment text NOT NULL DEFAULT 'all'
+    CHECK (audience_segment IN (
+      'all', 'new', 'repeat', 'frequent', 'elite',
+      'active', 'sleeping', 'inactive', 'never'
+    )),
+  message text NOT NULL,
+  coupon_code text,
+  scheduled_for timestamptz,
+  created_by_user_id uuid
+    REFERENCES sf_users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS sf_crm_campaigns_org_status_idx
+  ON sf_crm_campaigns (organization_id, status, updated_at DESC);
+
+INSERT INTO sf_loyalty_ledger (
+  organization_id,
+  customer_id,
+  kind,
+  points,
+  balance_after,
+  reason,
+  created_at
+)
+SELECT
+  a.organization_id,
+  a.id,
+  'opening',
+  a.loyalty_points,
+  a.loyalty_points,
+  'Saldo existente antes da FASE 21',
+  now()
+FROM sf_customer_accounts a
+WHERE a.loyalty_points > 0
+  AND NOT EXISTS (
+    SELECT 1
+    FROM sf_loyalty_ledger l
+    WHERE l.organization_id = a.organization_id
+      AND l.customer_id = a.id
+  );
+
+-- A ativação definitiva das policies PostgreSQL continua reservada para a FASE 24.
+ALTER TABLE sf_crm_customer_profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE sf_loyalty_ledger DISABLE ROW LEVEL SECURITY;
+ALTER TABLE sf_crm_campaigns DISABLE ROW LEVEL SECURITY;
+
+COMMIT;
+
+============================================================
+===== database\migrations\023_definitive_postgres_rls.sql =====
+============================================================
+BEGIN;
+
+-- FASE 24: o runtime passa a usar um papel NOLOGIN/NOBYPASSRLS dedicado.
+-- Mesmo que DATABASE_URL use o proprietário do banco, as consultas normais
+-- executam SET ROLE saborflow_rls_app e ficam sujeitas ao RLS/FORCE RLS.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = 'saborflow_rls_app'
+  ) THEN
+    CREATE ROLE saborflow_rls_app
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+ALTER ROLE saborflow_rls_app
+  NOLOGIN
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT
+  NOBYPASSRLS;
+
+GRANT saborflow_rls_app TO CURRENT_USER;
+GRANT USAGE ON SCHEMA public TO saborflow_rls_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO saborflow_rls_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO saborflow_rls_app;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO saborflow_rls_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO saborflow_rls_app;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+
+
+CREATE OR REPLACE FUNCTION sf_current_organization_ids()
+RETURNS uuid[]
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT CASE
+    WHEN NULLIF(current_setting('app.organization_ids', true), '') IS NOT NULL THEN
+      string_to_array(current_setting('app.organization_ids', true), ',')::uuid[]
+    WHEN NULLIF(current_setting('app.organization_id', true), '') IS NOT NULL THEN
+      ARRAY[current_setting('app.organization_id', true)::uuid]
+    ELSE
+      ARRAY[]::uuid[]
+  END
+$$;
+
+CREATE OR REPLACE FUNCTION sf_current_organization_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT (sf_current_organization_ids())[1]
+$$;
+
+CREATE OR REPLACE FUNCTION sf_current_user_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(current_setting('app.user_id', true), '')::uuid
+$$;
+
+CREATE OR REPLACE FUNCTION sf_rls_bypass_enabled()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(current_setting('app.rls_bypass', true), 'false') = 'true'
+$$;
+
+CREATE OR REPLACE FUNCTION sf_rls_tenant_allowed(candidate uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    sf_rls_bypass_enabled()
+    OR candidate = ANY(sf_current_organization_ids())
+$$;
+
+GRANT EXECUTE ON FUNCTION sf_current_organization_ids() TO saborflow_rls_app;
+GRANT EXECUTE ON FUNCTION sf_current_organization_id() TO saborflow_rls_app;
+GRANT EXECUTE ON FUNCTION sf_current_user_id() TO saborflow_rls_app;
+GRANT EXECUTE ON FUNCTION sf_rls_bypass_enabled() TO saborflow_rls_app;
+GRANT EXECUTE ON FUNCTION sf_rls_tenant_allowed(uuid) TO saborflow_rls_app;
+
+
+CREATE TABLE IF NOT EXISTS sf_rls_exemptions (
+  table_name text PRIMARY KEY,
+  reason text NOT NULL,
+  scope text NOT NULL DEFAULT 'control-plane',
+  reviewed_phase integer NOT NULL DEFAULT 24,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO sf_rls_exemptions (table_name, reason, scope, reviewed_phase, updated_at)
+VALUES
+  (
+    'sf_usage_counters',
+    'Contador pertence à conta de cobrança e pode agregar várias organizações.',
+    'billing-control-plane',
+    24,
+    now()
+  ),
+  (
+    'sf_support_cases',
+    'Caso de suporte pertence ao control plane e organization_id é apenas referência opcional.',
+    'platform-control-plane',
+    24,
+    now()
+  ),
+  (
+    'sf_corporate_group_organizations',
+    'Tabela de vínculo corporativo precisa representar matriz e filiais em um único grupo.',
+    'corporate-control-plane',
+    24,
+    now()
+  )
+ON CONFLICT (table_name)
+DO UPDATE SET
+  reason = EXCLUDED.reason,
+  scope = EXCLUDED.scope,
+  reviewed_phase = 24,
+  updated_at = now();
+
+
+DO $$
+DECLARE
+  target_table text;
+BEGIN
+  IF to_regclass('public.sf_rls_rollout') IS NULL THEN
+    RAISE EXCEPTION 'sf_rls_rollout não existe. A preparação da Fase 10 é obrigatória antes da Fase 24.';
+  END IF;
+
+  FOR target_table IN
+    SELECT c.relname
+    FROM pg_class c
+    INNER JOIN pg_namespace n
+      ON n.oid = c.relnamespace
+    INNER JOIN pg_attribute a
+      ON a.attrelid = c.oid
+     AND a.attname = 'organization_id'
+     AND a.attnum > 0
+     AND NOT a.attisdropped
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('r', 'p')
+      AND c.relname LIKE 'sf_%'
+      AND c.relname NOT IN (
+        'sf_usage_counters',
+        'sf_support_cases',
+        'sf_corporate_group_organizations'
+      )
+    ORDER BY c.relname
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS sf_tenant_guard ON %I', target_table);
+
+    IF target_table = 'sf_memberships' THEN
+      EXECUTE format(
+        'CREATE POLICY sf_tenant_guard ON %I USING (sf_rls_tenant_allowed(organization_id) OR user_id = sf_current_user_id()) WITH CHECK (sf_rls_tenant_allowed(organization_id) OR user_id = sf_current_user_id())',
+        target_table
+      );
+    ELSIF target_table = 'sf_auth_tokens' THEN
+      EXECUTE format(
+        'CREATE POLICY sf_tenant_guard ON %I USING (sf_rls_tenant_allowed(organization_id) OR user_id = sf_current_user_id()) WITH CHECK (sf_rls_tenant_allowed(organization_id) OR user_id = sf_current_user_id())',
+        target_table
+      );
+    ELSE
+      EXECUTE format(
+        'CREATE POLICY sf_tenant_guard ON %I USING (sf_rls_tenant_allowed(organization_id)) WITH CHECK (sf_rls_tenant_allowed(organization_id))',
+        target_table
+      );
+    END IF;
+
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', target_table);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', target_table);
+
+    INSERT INTO sf_rls_rollout (
+      table_name,
+      policy_name,
+      prepared,
+      enforcement,
+      updated_at
+    )
+    VALUES (
+      target_table,
+      'sf_tenant_guard',
+      true,
+      'enabled',
+      now()
+    )
+    ON CONFLICT (table_name)
+    DO UPDATE SET
+      policy_name = EXCLUDED.policy_name,
+      prepared = true,
+      enforcement = 'enabled',
+      updated_at = now();
+  END LOOP;
+END
+$$;
+
+-- As exceções são control-plane, não dados operacionais de um tenant.
+-- Garantimos explicitamente que elas não sejam confundidas com rollout tenant.
+DELETE FROM sf_rls_rollout
+WHERE table_name IN (
+  'sf_usage_counters',
+  'sf_support_cases',
+  'sf_corporate_group_organizations'
+);
+
+COMMIT;
+
+============================================================
+===== database\migrations\038_help_center_admin_permissions.sql =====
+============================================================
+-- Etapa 14.5
+-- Permissoes do backend autenticado do Superadmin para gerenciar tutoriais.
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = 'saborflow_rls_app'
+  ) THEN
+    GRANT SELECT
+      ON TABLE sf_help_categories
+      TO saborflow_rls_app;
+
+    GRANT SELECT, INSERT, UPDATE, DELETE
+      ON TABLE sf_help_articles
+      TO saborflow_rls_app;
+  END IF;
+END
+$$;

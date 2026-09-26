@@ -1,0 +1,372 @@
+
+===== app\api\admin\organizations\route.ts =====
+
+import { NextResponse } from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  createSessionToken,
+} from "@/lib/auth"
+import {
+  BILLING_SESSION_COOKIE,
+  clearCommercialBillingCookieOptions,
+  getCommercialBillingSession,
+} from "@/lib/billing-commercial-session"
+import { getBillingSnapshotForUser } from "@/lib/billing-db"
+import { createOrganizationForUser } from "@/lib/organization-onboarding"
+import { listOrganizationMembershipsForUserId } from "@/lib/tenant-context"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { billingErrorStatus } from "@/lib/billing-db"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+export async function GET() {
+  const session = await getVerifiedTenantSession()
+  if (!session) {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  }
+
+  const organizations = await listOrganizationMembershipsForUserId(session.userId)
+  return NextResponse.json({
+    activeOrganizationId: session.organizationId,
+    organizations,
+  })
+}
+
+export async function POST(request: Request) {
+  const tenantSession = await getVerifiedTenantSession().catch(() => null)
+  const commercialSession = tenantSession ? null : await getCommercialBillingSession()
+
+  let userId = ""
+  let email = ""
+  let shouldClearCommercialSession = false
+
+  if (tenantSession) {
+    if (tenantSession.role !== "owner") {
+      return NextResponse.json({
+        error: "Somente o proprietário da conta contratante pode adicionar outra loja.",
+      }, { status: 403 })
+    }
+    userId = tenantSession.userId
+    email = tenantSession.email
+  } else if (commercialSession) {
+    const billing = await getBillingSnapshotForUser(commercialSession.userId)
+    if (
+      billing.account?.id !== commercialSession.billingAccountId ||
+      billing.subscription?.status !== "active" ||
+      !billing.capacity.canCreateOrganization
+    ) {
+      return NextResponse.json({
+        error: "O pagamento precisa estar confirmado e o plano deve possuir vaga para uma loja.",
+      }, { status: 402 })
+    }
+    userId = commercialSession.userId
+    email = commercialSession.email
+    shouldClearCommercialSession = true
+  } else {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  }
+
+  const body = await request.json().catch(() => null) as
+    | {
+        personType?: "PF" | "PJ"
+        document?: string
+        tradeName?: string
+        legalName?: string
+        industry?: string
+        phone?: string
+        email?: string
+        city?: string
+        state?: string
+      }
+    | null
+
+  if (!body?.document || !body.tradeName) {
+    return NextResponse.json({ error: "Documento e nome da empresa são obrigatórios." }, { status: 400 })
+  }
+
+  try {
+    const context = await createOrganizationForUser(userId, email, {
+      personType: body.personType === "PF" ? "PF" : "PJ",
+      document: body.document,
+      tradeName: body.tradeName,
+      legalName: body.legalName,
+      industry: body.industry,
+      phone: body.phone,
+      email: body.email,
+      city: body.city,
+      state: body.state,
+    })
+
+    const response = NextResponse.json({
+      ok: true,
+      organization: {
+        id: context.organizationId,
+        name: context.organizationName,
+        slug: context.organizationSlug,
+        role: context.role,
+        publicOrderingEnabled: false,
+      },
+      switched: true,
+      onboardingRequired: true,
+      onboardingUrl: "/onboarding",
+    }, { status: 201 })
+
+    response.cookies.set(
+      ADMIN_SESSION_COOKIE,
+      createSessionToken(context),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
+      },
+    )
+
+    if (shouldClearCommercialSession) {
+      response.cookies.set(BILLING_SESSION_COOKIE, "", clearCommercialBillingCookieOptions)
+    }
+
+    return response
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : "Não foi possível criar a empresa.",
+    }, { status: billingErrorStatus(error) })
+  }
+}
+
+
+===== app\api\admin\switch-organization\route.ts =====
+
+import { NextResponse } from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  createSessionToken,
+} from "@/lib/auth"
+import {
+  getOrganizationContextForUser,
+} from "@/lib/tenant-context"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+
+export async function POST(
+  request: Request,
+) {
+  const session =
+    await getVerifiedTenantSession()
+
+  if (!session) {
+    return NextResponse.json(
+      {
+        error:
+          "Não autorizado.",
+      },
+      { status: 401 },
+    )
+  }
+
+  const body = (await request
+    .json()
+    .catch(() => null)) as
+    | {
+        organizationId?: string
+      }
+    | null
+
+  if (!body?.organizationId) {
+    return NextResponse.json(
+      {
+        error:
+          "Empresa inválida.",
+      },
+      { status: 400 },
+    )
+  }
+
+  const context =
+    await getOrganizationContextForUser(
+      session.userId,
+      body.organizationId,
+    )
+
+  if (!context) {
+    return NextResponse.json(
+      {
+        error:
+          "Você não possui acesso a esta empresa.",
+      },
+      { status: 403 },
+    )
+  }
+
+  const response =
+    NextResponse.json({
+      ok: true,
+      organization: {
+        id: context.organizationId,
+        name:
+          context.organizationName,
+        slug:
+          context.organizationSlug,
+        role: context.role,
+      },
+    })
+
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE,
+    createSessionToken(context),
+    {
+      httpOnly: true,
+      sameSite: "lax",
+      secure:
+        process.env.NODE_ENV ===
+        "production",
+      path: "/",
+      maxAge:
+        60 * 60 * 24 * 7,
+    },
+  )
+
+  return response
+}
+
+
+===== app\api\demo\public\start\route.ts =====
+
+import { NextResponse } from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+  createSessionToken,
+} from "@/lib/auth"
+import { createDemoEnvironment } from "@/lib/demo-db"
+import { PUBLIC_TENANT_COOKIE } from "@/lib/public-tenant"
+import { demoRequestFingerprint, requestIsSameOrigin } from "@/lib/demo-request"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+export async function POST(request: Request) {
+  if (!requestIsSameOrigin(request)) {
+    return NextResponse.json({ error: "Origem da requisição não permitida." }, { status: 403 })
+  }
+
+  try {
+    const demo = await createDemoEnvironment({
+      kind: "public",
+      requestFingerprint: demoRequestFingerprint(request),
+    })
+    const remainingSeconds = Math.max(60, Math.floor((new Date(demo.expiresAt).getTime() - Date.now()) / 1000))
+    const response = NextResponse.json({
+      ok: true,
+      kind: demo.kind,
+      expiresAt: demo.expiresAt,
+      redirectTo: "/admin?demo=1",
+      storeUrl: `/loja/${encodeURIComponent(demo.organization.slug)}`,
+    }, { status: 201 })
+
+    response.cookies.set(ADMIN_SESSION_COOKIE, createSessionToken(demo.tenantContext), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: remainingSeconds,
+    })
+    response.cookies.set(LEGACY_ADMIN_SESSION_COOKIE, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 0,
+    })
+    response.cookies.set(PUBLIC_TENANT_COOKIE, demo.organization.slug, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: remainingSeconds,
+    })
+    return response
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : "Não foi possível iniciar a demonstração.",
+    }, { status: 503 })
+  }
+}
+
+
+===== app\api\demo\trial\start\route.ts =====
+
+import { NextResponse } from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+  createSessionToken,
+} from "@/lib/auth"
+import { getCommercialBillingSession } from "@/lib/billing-commercial-session"
+import { createDemoEnvironment } from "@/lib/demo-db"
+import { PUBLIC_TENANT_COOKIE } from "@/lib/public-tenant"
+import { requestIsSameOrigin } from "@/lib/demo-request"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+export async function POST(request: Request) {
+  if (!requestIsSameOrigin(request)) {
+    return NextResponse.json({ error: "Origem da requisição não permitida." }, { status: 403 })
+  }
+
+  const commercialSession = await getCommercialBillingSession()
+  if (!commercialSession) {
+    return NextResponse.json({
+      error: "Entre ou crie sua conta comercial antes de iniciar o trial individual.",
+      signInUrl: "/contratar",
+    }, { status: 401 })
+  }
+
+  try {
+    const demo = await createDemoEnvironment({
+      kind: "trial",
+      requestedByUserId: commercialSession.userId,
+    })
+    const remainingSeconds = Math.max(60, Math.floor((new Date(demo.expiresAt).getTime() - Date.now()) / 1000))
+    const response = NextResponse.json({
+      ok: true,
+      kind: demo.kind,
+      reused: demo.reused,
+      expiresAt: demo.expiresAt,
+      redirectTo: "/admin?trial=1",
+      storeUrl: `/loja/${encodeURIComponent(demo.organization.slug)}`,
+    })
+
+    response.cookies.set(ADMIN_SESSION_COOKIE, createSessionToken(demo.tenantContext), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: remainingSeconds,
+    })
+    response.cookies.set(LEGACY_ADMIN_SESSION_COOKIE, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 0,
+    })
+    response.cookies.set(PUBLIC_TENANT_COOKIE, demo.organization.slug, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: remainingSeconds,
+    })
+    return response
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : "Não foi possível iniciar o trial.",
+    }, { status: 503 })
+  }
+}
+

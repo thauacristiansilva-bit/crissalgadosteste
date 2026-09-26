@@ -287,6 +287,8 @@ export async function getCrmOverview(session: TenantAdminSession) {
     loyalty: {
       enabled: Boolean(settings?.loyaltyEnabled),
       pointsPerReal: Number(settings?.loyaltyPointsPerReal || 0),
+      cashbackEnabled: Boolean(settings?.cashbackEnabled),
+      cashbackPercent: Number(settings?.cashbackPercent || 0),
       rewardPoints,
       rewardText: settings?.loyaltyRewardText || "",
       outstandingPoints: customers.reduce((sum, item) => sum + Math.max(0, item.loyaltyPoints), 0),

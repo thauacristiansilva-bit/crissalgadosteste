@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { updateTenantCategory } from "@/lib/catalog-db"
+import { deleteTenantCategory, updateTenantCategory } from "@/lib/catalog-db"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   canManageCatalog,
@@ -66,5 +66,20 @@ export async function PATCH(
       },
       { status: 400 },
     )
+  }
+}
+
+export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+  if (!session) return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  if (!canManageCatalog(session.role)) return NextResponse.json({ error: "Seu perfil não pode alterar o catálogo." }, { status: 403 })
+  const { id } = await context.params
+  const numericId = Number(id)
+  if (!Number.isInteger(numericId) || numericId < 1) return NextResponse.json({ error: "Categoria inválida." }, { status: 400 })
+  try {
+    await runWithTenantRlsScope([session.organizationId], session.userId, () => deleteTenantCategory(session.organizationId, numericId), "tenant-session")
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível excluir a categoria." }, { status: 400 })
   }
 }

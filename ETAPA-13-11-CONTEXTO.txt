@@ -1,0 +1,312 @@
+
+================ next.config.mjs ================
+
+import path from "node:path"
+
+const securityHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+  },
+  {
+    key: "Strict-Transport-Security",
+    value: "max-age=31536000; includeSubDomains",
+  },
+  {
+    key: "X-Content-Type-Options",
+    value: "nosniff",
+  },
+  {
+    key: "X-Frame-Options",
+    value: "DENY",
+  },
+  {
+    key: "Referrer-Policy",
+    value: "strict-origin-when-cross-origin",
+  },
+  {
+    key: "Permissions-Policy",
+    value:
+      "camera=(), microphone=(self), geolocation=(self), payment=(self), browsing-topics=()",
+  },
+]
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  poweredByHeader: false,
+  images: { unoptimized: true },
+  turbopack: { root: path.resolve(process.cwd()) },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
+      },
+      {
+        source: "/admin/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+      {
+        source: "/superadmin/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+      {
+        source: "/api/admin/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
+      {
+        source: "/api/auth/:path*",
+        headers: [{ key: "Cache-Control", value: "no-store" }],
+      },
+    ]
+  },
+}
+
+export default nextConfig
+
+================ proxy.ts ================
+
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_IDLE_SECONDS,
+  SUPERADMIN_SESSION_COOKIE,
+  refreshAdminSessionToken,
+  refreshSuperadminSessionToken,
+} from "@/lib/auth"
+import {
+  browserRequestLooksCrossSite,
+  requestIsSameOrigin,
+} from "@/lib/security/request-security"
+
+const COOKIE = "saborflow_store_slug"
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+
+const CROSS_ORIGIN_API_EXCEPTIONS = [
+  "/api/billing/webhooks/mercado-pago",
+  "/api/integrations/webhooks/",
+  "/api/internal/integrations/process",
+]
+
+const AUTH_PATHS_WITHOUT_REFRESH = [
+  "/api/auth/login",
+  "/api/auth/google",
+  "/api/auth/logout",
+  "/api/auth/2fa/",
+  "/api/auth/passkey/",
+]
+
+function normalizeHost(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, "")
+}
+
+function isCrossOriginApiException(pathname: string) {
+  return CROSS_ORIGIN_API_EXCEPTIONS.some((prefix) =>
+    pathname.startsWith(prefix),
+  )
+}
+
+function protectStateChangingApiRequest(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
+  if (
+    !pathname.startsWith("/api/") ||
+    SAFE_METHODS.has(request.method.toUpperCase()) ||
+    isCrossOriginApiException(pathname)
+  ) {
+    return null
+  }
+
+  // Bloqueia requisições de browser vindas de outro site/subdomínio.
+  // Chamadas servidor-servidor sem Fetch Metadata continuam dependendo
+  // da autenticação/assinatura do próprio endpoint.
+  if (browserRequestLooksCrossSite(request)) {
+    return NextResponse.json(
+      { error: "Origem da requisição não autorizada." },
+      { status: 403 },
+    )
+  }
+
+  if (!requestIsSameOrigin(request)) {
+    return NextResponse.json(
+      { error: "Origem da requisição não autorizada." },
+      { status: 403 },
+    )
+  }
+
+  return null
+}
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: ADMIN_SESSION_IDLE_SECONDS,
+    priority: "high" as const,
+  }
+}
+
+function clearSessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  }
+}
+
+function requestShouldRefreshAuthentication(pathname: string) {
+  return !AUTH_PATHS_WITHOUT_REFRESH.some((prefix) =>
+    pathname.startsWith(prefix),
+  )
+}
+
+function refreshAuthenticationCookies(
+  request: NextRequest,
+  response: NextResponse,
+) {
+  if (!requestShouldRefreshAuthentication(request.nextUrl.pathname)) {
+    return
+  }
+
+  const currentAdminToken =
+    request.cookies.get(ADMIN_SESSION_COOKIE)?.value
+
+  if (!currentAdminToken) {
+    return
+  }
+
+  const refreshedAdminToken =
+    refreshAdminSessionToken(currentAdminToken)
+
+  if (!refreshedAdminToken) {
+    response.cookies.set(
+      ADMIN_SESSION_COOKIE,
+      "",
+      clearSessionCookieOptions(),
+    )
+    response.cookies.set(
+      SUPERADMIN_SESSION_COOKIE,
+      "",
+      clearSessionCookieOptions(),
+    )
+    return
+  }
+
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE,
+    refreshedAdminToken,
+    sessionCookieOptions(),
+  )
+
+  const currentSuperadminToken =
+    request.cookies.get(SUPERADMIN_SESSION_COOKIE)?.value
+
+  if (!currentSuperadminToken) {
+    return
+  }
+
+  const refreshedSuperadminToken =
+    refreshSuperadminSessionToken(currentSuperadminToken)
+
+  if (!refreshedSuperadminToken) {
+    response.cookies.set(
+      SUPERADMIN_SESSION_COOKIE,
+      "",
+      clearSessionCookieOptions(),
+    )
+    return
+  }
+
+  response.cookies.set(
+    SUPERADMIN_SESSION_COOKIE,
+    refreshedSuperadminToken,
+    sessionCookieOptions(),
+  )
+}
+
+export function proxy(request: NextRequest) {
+  const blocked = protectStateChangingApiRequest(request)
+  if (blocked) return blocked
+
+  const response = NextResponse.next()
+  const pathname = request.nextUrl.pathname
+
+  refreshAuthenticationCookies(request, response)
+
+  const match = pathname.match(
+    /^\/loja\/([^/]+)(?:\/|$)/,
+  )
+
+  if (match?.[1]) {
+    response.cookies.set(
+      COOKIE,
+      decodeURIComponent(match[1]),
+      {
+        path: "/",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 30,
+      },
+    )
+
+    return response
+  }
+
+  // Na raiz do domínio compartilhado do Railway, voltar para a loja
+  // padrão do deployment. Domínios customizados usam o próprio host.
+  if (pathname === "/") {
+    const host = normalizeHost(
+      request.headers.get("x-forwarded-host") ||
+        request.headers.get("host") ||
+        "",
+    )
+
+    const railway = normalizeHost(
+      process.env.RAILWAY_PUBLIC_DOMAIN || "",
+    )
+
+    if (host && railway && host === railway) {
+      response.cookies.delete(COOKIE)
+    }
+  }
+
+  return response
+}
+
+export const config = {
+  matcher: [
+    "/",
+    "/loja/:path*",
+    "/api/:path*",
+    "/admin/:path*",
+    "/superadmin/:path*",
+    "/gerente/:path*",
+    "/pdv/:path*",
+    "/cozinha/:path*",
+    "/entregador/:path*",
+    "/onboarding/:path*",
+    "/minha-loja/:path*",
+  ],
+}
+app\api\admin\reports\export\route.ts:69:"X-Content-Type-Options": "nosniff",
+app\api\auth\2fa\qr\route.ts:71:"X-Content-Type-Options":
+app\cardapio\page.tsx:11:const host = hostFromHeaders(await headers())
+app\pedir\page.tsx:11:const host = hostFromHeaders(await headers())
+app\page.tsx:11:const requestHeaders = await headers()
+app\page.tsx:12:const host = hostFromHeaders(requestHeaders)
+lib\storage\r2.ts:150:const headers = new Headers()
+lib\public-host.ts:38:export function hostFromHeaders(requestHeaders: { get(name: string): string | null }) {
+lib\public-tenant.ts:113:const headerStore = await headers()

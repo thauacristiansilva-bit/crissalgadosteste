@@ -38,6 +38,7 @@ type CustomerPublic = {
   defaultLatitude: number | null
   defaultLongitude: number | null
   loyaltyPoints: number
+  cashbackCents?: number
 }
 
 export function ClientAccountModal({
@@ -154,7 +155,7 @@ export function ClientAccountModal({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-2xl border border-gray-200 p-4"><p className="text-xs text-gray-500">CPF</p><p className="mt-1 font-black">•••.•••.•••-{customer.cpfLast4}</p></div>
-              <div className="rounded-2xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Pontos</p><p className="mt-1 text-xl font-black text-orange-600">{customer.loyaltyPoints}</p></div>
+              <div className="rounded-2xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Pontos</p><p className="mt-1 text-xl font-black text-orange-600">{customer.loyaltyPoints}</p><p className="mt-2 text-xs text-gray-500">Cashback para usar na loja</p><p className="font-black text-emerald-700">{money((customer.cashbackCents || 0) / 100)}</p></div>
             </div>
             <section className="rounded-2xl border border-gray-200 p-4">
               <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-black text-gray-950">Meus pedidos</p><p className="text-xs text-gray-500">Acompanhe pedidos atuais e consulte os últimos pedidos desta loja.</p></div><PackageCheck className="h-5 w-5 text-orange-500" /></div>

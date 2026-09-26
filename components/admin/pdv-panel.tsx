@@ -19,6 +19,7 @@ import { GoogleAddressAutocomplete } from "@/components/maps/google-address-auto
 import { geocodeGoogleAddress } from "@/lib/google-maps-client"
 import { modifierSelectionKey, productHasModifiers } from "@/lib/product-composition"
 import { HelpTip } from "@/components/admin/help-tip"
+import { categoryIncludes, categoryShortName, parentCategoryName } from "@/lib/category-hierarchy"
 import type { CustomerAccount, Order, OrderItemModifier, Product, StoreSettings } from "@/lib/types"
 
 const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -57,6 +58,7 @@ const emptyAddress = {
 
 export function PdvPanel({ products, settings, onOrderCreated }: { products: Product[]; settings: StoreSettings; onOrderCreated: (order: Order) => void }) {
   const [search, setSearch] = useState("")
+  const [selectedCategory, setSelectedCategory] = useState("Todos")
   const [items, setItems] = useState<Item[]>([])
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
   const [editingItemKey, setEditingItemKey] = useState<string | null>(null)
@@ -72,17 +74,25 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
   const [customersLoaded, setCustomersLoaded] = useState(false)
   const [customersLoading, setCustomersLoading] = useState(false)
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
+  const [redeemCashback, setRedeemCashback] = useState(false)
   const [deliveryAddress, setDeliveryAddress] = useState(emptyAddress)
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null)
   const [quoteBusy, setQuoteBusy] = useState(false)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
-    return products.filter((p) => p.active && (!q || p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)))
-  }, [products, search])
+    return products.filter((p) => p.active && (selectedCategory === "Todos" || (parentCategoryName(selectedCategory) ? p.category === selectedCategory : categoryIncludes(selectedCategory, p.category))) && (!q || p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)))
+      .sort((a, b) => a.category.localeCompare(b.category, "pt-BR", { numeric: true }) || a.name.localeCompare(b.name, "pt-BR", { numeric: true }))
+  }, [products, search, selectedCategory])
+  const categoryNames = useMemo(() => [...new Set(products.filter((p) => p.active).map((p) => p.category))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })), [products])
+  const roots = [...new Set(categoryNames.map((name) => parentCategoryName(name) || name))]
+  const activeRoot = parentCategoryName(selectedCategory) || selectedCategory
 
   const subtotal = useMemo(() => items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [items])
-  const total = subtotal + (orderType === "delivery" ? deliveryQuote?.fee || 0 : 0)
+  const amountBeforeCashback = subtotal + (orderType === "delivery" ? deliveryQuote?.fee || 0 : 0)
+  const balance = customers.find((customer) => customer.id === selectedAccountId)?.cashbackCents || 0
+  const cashbackUsed = redeemCashback && settings.cashbackEnabled ? Math.min(balance / 100, amountBeforeCashback) : 0
+  const total = amountBeforeCashback - cashbackUsed
 
   useEffect(() => {
     if (orderType !== "delivery" || customersLoaded || customersLoading) return
@@ -305,6 +315,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
           paymentMethod,
           customer,
           accountId: selectedAccountId || undefined,
+          redeemCashback,
           items: items.map((item) => ({ productId: item.product.id, quantity: item.quantity, modifierOptionIds: item.optionIds })),
           timing: "now",
           notes,
@@ -315,6 +326,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
 
       onOrderCreated(data.order)
       setItems([])
+      setRedeemCashback(false)
       setOrderType(settings.pickupEnabled ? "pickup" : settings.deliveryEnabled ? "delivery" : "pickup")
       setName(settings.pickupEnabled ? "Balcão" : "")
       setPhone("")
@@ -337,6 +349,8 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
           <div><h2 className="text-lg font-black">Pedidos PDV</h2><p className="text-sm text-gray-500">Balcão, retirada ou entrega com preço, complementos e estoque validados no servidor.</p></div>
           <label className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar produto" className="h-10 rounded-xl border border-gray-200 pl-9 pr-3 text-sm"/></label>
         </div>
+        <nav aria-label="Categorias no PDV" className="mb-2 flex flex-wrap gap-2">{["Todos", ...roots].map((root) => <button key={root} type="button" onClick={() => setSelectedCategory(root)} className={`rounded-full px-3 py-2 text-xs font-bold ${activeRoot === root ? "bg-blue-700 text-white" : "bg-gray-100 text-gray-700"}`}>{root}</button>)}</nav>
+        {categoryNames.some((name) => parentCategoryName(name) === activeRoot) && <nav aria-label="Subcategorias no PDV" className="mb-4 flex flex-wrap gap-2">{[activeRoot, ...categoryNames.filter((name) => parentCategoryName(name) === activeRoot)].map((name) => <button key={name} type="button" onClick={() => setSelectedCategory(name)} className={`rounded-lg border px-3 py-2 text-xs font-bold ${selectedCategory === name ? "border-blue-700 text-blue-700" : "border-gray-200 text-gray-600"}`}>{name === activeRoot ? "Todos" : categoryShortName(name)}</button>)}</nav>}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((product) => { const q = totalQuantity(product.id); const unavailable = (product.trackStock && product.stock <= 0) || product.ingredientStockAvailable === false; const configurable = productHasModifiers(product); return <article key={product.id} className="rounded-2xl border border-gray-200 p-3"><div className="flex gap-3"><div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-amber-50">{product.image ? <img src={product.image} alt="" className="h-full w-full object-cover"/> : "🥟"}</div><div className="min-w-0 flex-1"><p className="truncate font-black">{product.name}</p><p className="text-xs text-gray-500">{product.category}</p><p className="mt-1 font-black text-blue-700">{configurable ? `a partir de ${money(product.price)}` : money(product.price)}</p></div></div><div className="mt-3">{unavailable ? <span className="text-xs font-bold text-red-600">Indisponível por estoque</span> : configurable ? <button onClick={() => setCustomizingProduct(product)} className="h-9 w-full rounded-xl bg-blue-700 text-xs font-black text-white">Montar {q > 0 ? `· ${q} no pedido` : ""}</button> : q === 0 ? <button onClick={() => setSimpleQuantity(product, 1)} className="h-9 w-full rounded-xl bg-blue-700 text-xs font-black text-white">Adicionar</button> : <div className="flex items-center justify-between rounded-xl bg-gray-100 p-1"><button onClick={() => setSimpleQuantity(product, q - 1)} className="rounded-lg p-2 hover:bg-white"><Minus className="h-4 w-4"/></button><strong>{q}</strong><button onClick={() => setSimpleQuantity(product, q + 1)} className="rounded-lg p-2 hover:bg-white"><Plus className="h-4 w-4"/></button></div>}</div></article> })}</div>
       </div>
 
@@ -359,6 +373,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
               <option value="">Digitar cliente / endereço manualmente</option>
               {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.phone}{customer.defaultAddress ? " · endereço salvo" : ""}</option>)}
             </select>
+            {settings.cashbackEnabled && selectedAccountId && balance > 0 && <label className="mt-2 flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900"><input type="checkbox" checked={redeemCashback} onChange={(event) => setRedeemCashback(event.target.checked)} /> Usar cashback: {money(balance / 100)}</label>}
             {customersLoading && <p className="mt-1 flex items-center gap-1 text-[11px] text-gray-500"><Loader2 className="h-3 w-3 animate-spin"/>Carregando clientes…</p>}
 
             <div className="mt-3">
@@ -410,7 +425,7 @@ export function PdvPanel({ products, settings, onOrderCreated }: { products: Pro
         <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
           <div className="flex items-center justify-between text-sm"><span className="font-bold text-gray-500">Subtotal</span><strong>{money(subtotal)}</strong></div>
           {orderType === "delivery" && <div className="flex items-center justify-between text-sm"><span className="font-bold text-gray-500">Entrega</span><strong>{deliveryQuote ? money(deliveryQuote.fee) : "Calcular"}</strong></div>}
-          <div className="flex items-center justify-between"><span className="font-black text-gray-700">Total</span><strong className="text-2xl">{money(total)}</strong></div>
+          <div className="flex items-center justify-between"><span className="font-black text-gray-700">Total{cashbackUsed > 0 ? ` (cashback -${money(cashbackUsed)})` : ""}</span><strong className="text-2xl">{money(total)}</strong></div>
         </div>
 
         {message && <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">{message}</p>}

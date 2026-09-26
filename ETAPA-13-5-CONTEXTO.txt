@@ -1,0 +1,5996 @@
+
+===== package.json =====
+
+{
+  "name": "saborflow",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "13.1.2",
+    "@simplewebauthn/server": "13.1.2",
+    "lucide-react": "^1.16.0",
+    "next": "16.3.3",
+    "pg": "^8.23.0",
+    "qrcode": "^1.5.4",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24",
+    "@types/pg": "^8.21.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.7.3"
+  }
+}
+
+
+===== lib\admin-user-db.ts =====
+
+import {
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from "node:crypto"
+import { getPostgresPool } from "@/lib/postgres"
+import {
+  createAuthToken,
+  getValidAuthToken,
+  revokeOutstandingAuthTokens,
+} from "@/lib/security-tokens"
+import { runWithRlsBypass } from "@/lib/rls-context"
+
+const PREFIX = "scrypt$v1"
+const MIN_ADMIN_PASSWORD_LENGTH = 8
+const PASSWORD_POLICY_MESSAGE =
+  "A senha deve ter pelo menos 8 caracteres, 1 letra maiúscula e 1 caractere especial."
+
+const DUMMY_PASSWORD_HASH = `${PREFIX}$saborflow-auth-dummy$${scryptSync(
+  "__saborflow_invalid_password__",
+  "saborflow-auth-dummy",
+  32,
+).toString("hex")}`
+
+type AdminUserCredentialRow = {
+  id: string
+  name: string
+  email: string
+  cpf: string | null
+  password_hash: string | null
+  status: string
+}
+
+export type AuthenticatedAdminUser = {
+  id: string
+  name: string
+  email: string
+}
+
+function normalizeAdminLoginIdentifier(identifier: string) {
+  const trimmed = identifier.trim()
+
+  if (trimmed.includes("@")) {
+    return {
+      type: "email" as const,
+      value: trimmed.toLowerCase(),
+    }
+  }
+
+  return {
+    type: "cpf" as const,
+    value: trimmed.replace(/\D/g, ""),
+  }
+}
+
+function hasUppercaseLetter(password: string) {
+  return password !== password.toLocaleLowerCase("pt-BR")
+}
+
+function hasSpecialCharacter(password: string) {
+  return /[^\p{L}\p{N}\s]/u.test(password)
+}
+
+export function validateAdminPasswordPolicy(password: string) {
+  if (
+    password.length < MIN_ADMIN_PASSWORD_LENGTH ||
+    !hasUppercaseLetter(password) ||
+    !hasSpecialCharacter(password)
+  ) {
+    throw new Error(PASSWORD_POLICY_MESSAGE)
+  }
+
+  return true
+}
+
+async function findAdminUserCredential(identifier: string) {
+  const normalized = normalizeAdminLoginIdentifier(identifier)
+
+  if (
+    normalized.type === "cpf" &&
+    normalized.value.length !== 11
+  ) {
+    return null
+  }
+
+  const result =
+    await getPostgresPool().query<AdminUserCredentialRow>(
+      `
+        SELECT
+          id,
+          name,
+          email,
+          cpf,
+          password_hash,
+          status
+        FROM sf_users
+        WHERE (
+          $2 = 'email'
+          AND lower(email) = lower($1)
+        )
+        OR (
+          $2 = 'cpf'
+          AND regexp_replace(
+            COALESCE(cpf, ''),
+            '[^0-9]',
+            '',
+            'g'
+          ) = $1
+        )
+        LIMIT 1
+      `,
+      [normalized.value, normalized.type],
+    )
+
+  return result.rows[0] || null
+}
+
+export function hashAdminPassword(password: string) {
+  validateAdminPasswordPolicy(password)
+
+  const salt = randomBytes(16).toString("hex")
+  const digest = scryptSync(
+    password,
+    salt,
+    32,
+  ).toString("hex")
+
+  return `${PREFIX}$${salt}$${digest}`
+}
+
+export function verifyAdminPassword(
+  password: string,
+  stored: string,
+) {
+  const [algorithm, version, salt, digest] =
+    stored.split("$")
+
+  if (
+    algorithm !== "scrypt" ||
+    version !== "v1" ||
+    !salt ||
+    !digest
+  ) {
+    return false
+  }
+
+  try {
+    const actual = scryptSync(
+      password,
+      salt,
+      32,
+    )
+    const expected = Buffer.from(
+      digest,
+      "hex",
+    )
+
+    return (
+      actual.length === expected.length &&
+      timingSafeEqual(actual, expected)
+    )
+  } catch {
+    return false
+  }
+}
+
+export async function getAdminUserCredentialState(
+  identifier: string,
+) {
+  const row =
+    await findAdminUserCredential(identifier)
+
+  return row
+    ? {
+        userId: row.id,
+        name: row.name,
+        email: row.email,
+        active: row.status === "active",
+        passwordReady:
+          Boolean(row.password_hash),
+      }
+    : null
+}
+
+export async function authenticateAdminUser(
+  identifier: string,
+  password: string,
+): Promise<AuthenticatedAdminUser | null> {
+  const row =
+    await findAdminUserCredential(identifier)
+
+  const passwordHash =
+    row?.password_hash ||
+    DUMMY_PASSWORD_HASH
+
+  const passwordMatches =
+    verifyAdminPassword(
+      password,
+      passwordHash,
+    )
+
+  if (
+    !row ||
+    row.status !== "active" ||
+    !row.password_hash ||
+    !passwordMatches
+  ) {
+    return null
+  }
+
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        last_login_at = now(),
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [row.id],
+  )
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+  }
+}
+
+export async function createSelfServicePasswordReset(
+  identifier: string,
+) {
+  const row =
+    await findAdminUserCredential(identifier)
+
+  if (
+    !row ||
+    row.status !== "active" ||
+    !row.email?.trim()
+  ) {
+    return null
+  }
+
+  await revokeOutstandingAuthTokens(
+    row.id,
+    "password_reset",
+  )
+
+  const created =
+    await createAuthToken({
+      userId: row.id,
+      organizationId: null,
+      purpose: "password_reset",
+      expiresInMinutes: 30,
+      metadata: {
+        email: row.email,
+        source: "self_service",
+      },
+    })
+
+  return {
+    email: row.email.trim().toLowerCase(),
+    token: created.token,
+    expiresAt: created.expiresAt,
+  }
+}
+
+export async function authenticateAdminGoogleUser(
+  googleSubject: string,
+  email: string,
+): Promise<AuthenticatedAdminUser | null> {
+  const result =
+    await getPostgresPool().query<AdminUserCredentialRow>(
+      `
+        SELECT
+          id,
+          name,
+          email,
+          cpf,
+          password_hash,
+          status
+        FROM sf_users
+        WHERE google_subject = $1
+        LIMIT 1
+      `,
+      [googleSubject.trim()],
+    )
+
+  const row = result.rows[0]
+
+  if (
+    !row ||
+    row.status !== "active" ||
+    row.email.trim().toLowerCase() !==
+      email.trim().toLowerCase()
+  ) {
+    return null
+  }
+
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        last_login_at = now(),
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [row.id],
+  )
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+  }
+}
+
+export async function upgradeLegacyAdminPassword(
+  email: string,
+  password: string,
+) {
+  const state =
+    await getAdminUserCredentialState(email)
+
+  if (
+    !state ||
+    !state.active ||
+    state.passwordReady
+  ) {
+    return false
+  }
+
+  const hash =
+    hashAdminPassword(password)
+
+  const result =
+    await getPostgresPool().query(
+      `
+        UPDATE sf_users
+        SET
+          password_hash = $2,
+          password_updated_at = now(),
+          last_login_at = now(),
+          updated_at = now()
+        WHERE id = $1
+          AND password_hash IS NULL
+        RETURNING id
+      `,
+      [state.userId, hash],
+    )
+
+  return Boolean(result.rowCount)
+}
+
+export async function changeAdminUserPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+) {
+  const result =
+    await getPostgresPool().query<{
+      password_hash: string | null
+      status: string
+    }>(
+      `
+        SELECT
+          password_hash,
+          status
+        FROM sf_users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId],
+    )
+
+  const row = result.rows[0]
+
+  if (
+    !row ||
+    row.status !== "active" ||
+    !row.password_hash ||
+    !verifyAdminPassword(
+      currentPassword,
+      row.password_hash,
+    )
+  ) {
+    throw new Error(
+      "Senha atual incorreta.",
+    )
+  }
+
+  if (
+    currentPassword === newPassword
+  ) {
+    throw new Error(
+      "A nova senha precisa ser diferente da atual.",
+    )
+  }
+
+  const passwordHash =
+    hashAdminPassword(newPassword)
+
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        password_hash = $2,
+        password_updated_at = now(),
+        session_version = session_version + 1,
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [userId, passwordHash],
+  )
+
+  await revokeOutstandingAuthTokens(
+    userId,
+    "password_reset",
+  )
+
+  return true
+}
+
+export async function getPasswordResetPreview(
+  token: string,
+) {
+  const valid =
+    await getValidAuthToken(
+      token,
+      "password_reset",
+    )
+
+  if (!valid) return null
+
+  const result =
+    await getPostgresPool().query<{
+      name: string
+      email: string
+      status: string
+    }>(
+      `
+        SELECT
+          name,
+          email,
+          status
+        FROM sf_users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [valid.userId],
+    )
+
+  const user = result.rows[0]
+
+  if (
+    !user ||
+    user.status === "blocked"
+  ) {
+    return null
+  }
+
+  return {
+    tokenId: valid.id,
+    userId: valid.userId,
+    organizationId:
+      valid.organizationId,
+    name: user.name,
+    email: user.email,
+    expiresAt: valid.expiresAt,
+  }
+}
+
+export async function resetAdminUserPassword(
+  token: string,
+  newPassword: string,
+) {
+  const preview =
+    await getPasswordResetPreview(token)
+
+  if (!preview) {
+    throw new Error(
+      "Link de recuperação inválido ou expirado.",
+    )
+  }
+
+  const passwordHash =
+    hashAdminPassword(newPassword)
+
+  return runWithRlsBypass(
+    async () => {
+      const client =
+        await getPostgresPool().connect()
+
+      try {
+        await client.query("BEGIN")
+
+        const consumed =
+          await client.query(
+            `
+              UPDATE sf_auth_tokens
+              SET used_at = now()
+              WHERE id = $1
+                AND used_at IS NULL
+                AND expires_at > now()
+              RETURNING id
+            `,
+            [preview.tokenId],
+          )
+
+        if (!consumed.rowCount) {
+          throw new Error(
+            "Este link já foi usado ou expirou.",
+          )
+        }
+
+        const updatedUser =
+          await client.query(
+            `
+              UPDATE sf_users
+              SET
+                password_hash = $2,
+                password_updated_at = now(),
+                session_version =
+                  session_version + 1,
+                status = CASE
+                  WHEN status = 'blocked'
+                    THEN status
+                  ELSE 'active'
+                END,
+                updated_at = now()
+              WHERE id = $1
+              RETURNING id
+            `,
+            [
+              preview.userId,
+              passwordHash,
+            ],
+          )
+
+        if (!updatedUser.rowCount) {
+          throw new Error(
+            "Usuário não encontrado para redefinição de senha.",
+          )
+        }
+
+        await client.query(
+          `
+            UPDATE sf_auth_tokens
+            SET used_at =
+              COALESCE(used_at, now())
+            WHERE user_id = $1
+              AND id <> $2
+              AND used_at IS NULL
+          `,
+          [
+            preview.userId,
+            preview.tokenId,
+          ],
+        )
+
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+
+      return {
+        email: preview.email,
+      }
+    },
+  )
+}
+
+
+===== lib\security\rate-limit.ts =====
+
+import { createHash } from "node:crypto"
+
+type RateBucket = {
+  failures: number
+  resetAt: number
+}
+
+type RateLimitState = {
+  allowed: boolean
+  remaining: number
+  retryAfterSeconds: number
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __saborflowAuthRateBuckets: Map<string, RateBucket> | undefined
+}
+
+const buckets =
+  globalThis.__saborflowAuthRateBuckets || new Map<string, RateBucket>()
+
+globalThis.__saborflowAuthRateBuckets = buckets
+
+function keyFor(scope: string, value: string) {
+  const digest = createHash("sha256")
+    .update(value.trim().toLowerCase())
+    .digest("hex")
+  return `${scope}:${digest}`
+}
+
+function cleanExpired(now: number) {
+  if (buckets.size < 500) return
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key)
+  }
+}
+
+export function authRateLimitKey(scope: "ip" | "account", value: string) {
+  return keyFor(scope, value || "unknown")
+}
+
+export function checkAuthRateLimit(
+  key: string,
+  limit: number,
+  windowMs: number,
+): RateLimitState {
+  const now = Date.now()
+  cleanExpired(now)
+
+  const bucket = buckets.get(key)
+  if (!bucket || bucket.resetAt <= now) {
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const allowed = bucket.failures < limit
+  return {
+    allowed,
+    remaining: Math.max(0, limit - bucket.failures),
+    retryAfterSeconds: allowed
+      ? 0
+      : Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+  }
+}
+
+export function registerAuthFailure(
+  key: string,
+  windowMs: number,
+) {
+  const now = Date.now()
+  const current = buckets.get(key)
+
+  if (!current || current.resetAt <= now) {
+    buckets.set(key, {
+      failures: 1,
+      resetAt: now + windowMs,
+    })
+    return
+  }
+
+  current.failures += 1
+  buckets.set(key, current)
+}
+
+export function clearAuthFailures(key: string) {
+  buckets.delete(key)
+}
+
+
+===== lib\security\two-factor.ts =====
+
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto"
+import { getPostgresPool } from "@/lib/postgres"
+
+const BASE32_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+const TOTP_PERIOD_SECONDS = 30
+const TOTP_DIGITS = 6
+const TOTP_WINDOW = 1
+const RECOVERY_CODE_COUNT = 10
+
+type MfaRow = {
+  user_id: string
+  secret_encrypted: string
+  enabled: boolean
+  last_totp_step: string | null
+  recovery_code_hashes: unknown
+  pending_secret_encrypted: string | null
+  pending_secret_created_at: Date | string | null
+}
+
+const RECONFIGURATION_TTL_MS =
+  10 * 60 * 1000
+
+function getEncryptionKey() {
+  const configured =
+    process.env
+      .TWO_FACTOR_ENCRYPTION_KEY
+      ?.trim()
+
+  if (!configured) {
+    throw new Error(
+      "TWO_FACTOR_ENCRYPTION_KEY é obrigatório para o 2FA.",
+    )
+  }
+
+  const key = Buffer.from(
+    configured,
+    "base64url",
+  )
+
+  if (key.length !== 32) {
+    throw new Error(
+      "TWO_FACTOR_ENCRYPTION_KEY deve conter exatamente 32 bytes em base64url.",
+    )
+  }
+
+  return key
+}
+
+function base32Encode(input: Buffer) {
+  let bits = ""
+  let output = ""
+
+  for (const byte of input) {
+    bits += byte
+      .toString(2)
+      .padStart(8, "0")
+  }
+
+  for (
+    let index = 0;
+    index < bits.length;
+    index += 5
+  ) {
+    const chunk = bits
+      .slice(index, index + 5)
+      .padEnd(5, "0")
+
+    output +=
+      BASE32_ALPHABET[
+        Number.parseInt(chunk, 2)
+      ]
+  }
+
+  return output
+}
+
+function base32Decode(value: string) {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/=+$/g, "")
+    .replace(/\s+/g, "")
+
+  let bits = ""
+
+  for (const character of normalized) {
+    const index =
+      BASE32_ALPHABET.indexOf(
+        character,
+      )
+
+    if (index < 0) {
+      throw new Error(
+        "Segredo TOTP inválido.",
+      )
+    }
+
+    bits += index
+      .toString(2)
+      .padStart(5, "0")
+  }
+
+  const bytes: number[] = []
+
+  for (
+    let index = 0;
+    index + 8 <= bits.length;
+    index += 8
+  ) {
+    bytes.push(
+      Number.parseInt(
+        bits.slice(index, index + 8),
+        2,
+      ),
+    )
+  }
+
+  return Buffer.from(bytes)
+}
+
+function aadForUser(userId: string) {
+  return Buffer.from(
+    `saborflow:mfa:totp:v1:${userId}`,
+    "utf8",
+  )
+}
+
+function encryptSecret(
+  userId: string,
+  secret: string,
+) {
+  const key = getEncryptionKey()
+  const iv = randomBytes(12)
+
+  const cipher = createCipheriv(
+    "aes-256-gcm",
+    key,
+    iv,
+  )
+
+  cipher.setAAD(
+    aadForUser(userId),
+  )
+
+  const ciphertext = Buffer.concat([
+    cipher.update(
+      secret,
+      "utf8",
+    ),
+    cipher.final(),
+  ])
+
+  const tag = cipher.getAuthTag()
+
+  return [
+    "mfaenc1",
+    iv.toString("base64url"),
+    tag.toString("base64url"),
+    ciphertext.toString("base64url"),
+  ].join(".")
+}
+
+function decryptSecret(
+  userId: string,
+  encrypted: string,
+) {
+  const [
+    version,
+    ivEncoded,
+    tagEncoded,
+    ciphertextEncoded,
+  ] = encrypted.split(".")
+
+  if (
+    version !== "mfaenc1" ||
+    !ivEncoded ||
+    !tagEncoded ||
+    !ciphertextEncoded
+  ) {
+    throw new Error(
+      "Segredo 2FA armazenado em formato inválido.",
+    )
+  }
+
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    getEncryptionKey(),
+    Buffer.from(
+      ivEncoded,
+      "base64url",
+    ),
+  )
+
+  decipher.setAAD(
+    aadForUser(userId),
+  )
+
+  decipher.setAuthTag(
+    Buffer.from(
+      tagEncoded,
+      "base64url",
+    ),
+  )
+
+  const plain = Buffer.concat([
+    decipher.update(
+      Buffer.from(
+        ciphertextEncoded,
+        "base64url",
+      ),
+    ),
+    decipher.final(),
+  ])
+
+  return plain.toString("utf8")
+}
+
+function createTotpSecret() {
+  return base32Encode(
+    randomBytes(20),
+  )
+}
+
+function totpCodeForStep(
+  secret: string,
+  step: number,
+) {
+  const key =
+    base32Decode(secret)
+
+  const counter =
+    Buffer.alloc(8)
+
+  counter.writeBigUInt64BE(
+    BigInt(step),
+  )
+
+  const digest = createHmac(
+    "sha1",
+    key,
+  )
+    .update(counter)
+    .digest()
+
+  const offset =
+    digest[digest.length - 1] & 0x0f
+
+  const binary =
+    (digest[offset] & 0x7f) *
+      0x1000000 +
+    digest[offset + 1] *
+      0x10000 +
+    digest[offset + 2] *
+      0x100 +
+    digest[offset + 3]
+
+  return String(
+    binary %
+      10 ** TOTP_DIGITS,
+  ).padStart(
+    TOTP_DIGITS,
+    "0",
+  )
+}
+
+function codeMatches(
+  actual: string,
+  expected: string,
+) {
+  const left =
+    Buffer.from(actual)
+  const right =
+    Buffer.from(expected)
+
+  return (
+    left.length === right.length &&
+    timingSafeEqual(left, right)
+  )
+}
+
+function matchingTotpStep(
+  secret: string,
+  rawCode: string,
+) {
+  const code =
+    rawCode.replace(/\D/g, "")
+
+  if (
+    code.length !==
+    TOTP_DIGITS
+  ) {
+    return null
+  }
+
+  const currentStep =
+    Math.floor(
+      Date.now() / 1000 /
+        TOTP_PERIOD_SECONDS,
+    )
+
+  for (
+    let offset = -TOTP_WINDOW;
+    offset <= TOTP_WINDOW;
+    offset += 1
+  ) {
+    const step =
+      currentStep + offset
+
+    if (
+      codeMatches(
+        code,
+        totpCodeForStep(
+          secret,
+          step,
+        ),
+      )
+    ) {
+      return step
+    }
+  }
+
+  return null
+}
+
+function normalizeRecoveryCode(
+  value: string,
+) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+}
+
+function hashRecoveryCode(
+  value: string,
+) {
+  const normalized =
+    normalizeRecoveryCode(value)
+
+  return createHmac(
+    "sha256",
+    getEncryptionKey(),
+  )
+    .update(
+      `saborflow:recovery:v1:${normalized}`,
+    )
+    .digest("hex")
+}
+
+function createRecoveryCode() {
+  const raw = randomBytes(10)
+    .toString("hex")
+    .toUpperCase()
+
+  return raw
+    .match(/.{1,4}/g)
+    ?.join("-") || raw
+}
+
+function createRecoveryCodes() {
+  return Array.from(
+    {
+      length:
+        RECOVERY_CODE_COUNT,
+    },
+    () => createRecoveryCode(),
+  )
+}
+
+function otpAuthUrl(
+  email: string,
+  secret: string,
+) {
+  const issuer = "SaborFlow"
+  const label =
+    `${issuer}:${email.trim().toLowerCase()}`
+
+  const query =
+    new URLSearchParams({
+      secret,
+      issuer,
+      algorithm: "SHA1",
+      digits:
+        String(TOTP_DIGITS),
+      period:
+        String(
+          TOTP_PERIOD_SECONDS,
+        ),
+    })
+
+  return (
+    `otpauth://totp/` +
+    `${encodeURIComponent(label)}?` +
+    query.toString()
+  )
+}
+
+async function getMfaRow(
+  userId: string,
+) {
+  const result =
+    await getPostgresPool()
+      .query<MfaRow>(
+        `
+          SELECT
+            user_id,
+            secret_encrypted,
+            enabled,
+            last_totp_step::text,
+            recovery_code_hashes,
+            pending_secret_encrypted,
+            pending_secret_created_at
+          FROM sf_user_mfa
+          WHERE user_id = $1
+          LIMIT 1
+        `,
+        [userId],
+      )
+
+  return result.rows[0] || null
+}
+
+function recoveryCodeCount(
+  value: unknown,
+) {
+  if (Array.isArray(value)) {
+    return value.length
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed =
+        JSON.parse(value)
+      return Array.isArray(parsed)
+        ? parsed.length
+        : 0
+    } catch {
+      return 0
+    }
+  }
+
+  return 0
+}
+
+function pendingReconfigurationExpiresAt(
+  row: MfaRow | null,
+) {
+  if (
+    !row?.pending_secret_encrypted ||
+    !row.pending_secret_created_at
+  ) {
+    return null
+  }
+
+  const createdAt =
+    new Date(
+      row.pending_secret_created_at,
+    ).getTime()
+
+  if (
+    !Number.isFinite(createdAt)
+  ) {
+    return null
+  }
+
+  const expiresAt =
+    createdAt +
+    RECONFIGURATION_TTL_MS
+
+  if (expiresAt <= Date.now()) {
+    return null
+  }
+
+  return expiresAt
+}
+
+export async function getTwoFactorState(
+  userId: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const pendingExpiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  return {
+    configured: Boolean(row),
+    enabled:
+      Boolean(row?.enabled),
+    recoveryCodesRemaining:
+      recoveryCodeCount(
+        row?.recovery_code_hashes,
+      ),
+    reconfigurationPending:
+      Boolean(pendingExpiresAt),
+    reconfigurationExpiresAt:
+      pendingExpiresAt
+        ? new Date(
+            pendingExpiresAt,
+          ).toISOString()
+        : null,
+  }
+}
+
+export async function ensureTwoFactorEnrollment(
+  userId: string,
+  email: string,
+) {
+  let row =
+    await getMfaRow(userId)
+
+  if (!row) {
+    const secret =
+      createTotpSecret()
+
+    const encrypted =
+      encryptSecret(
+        userId,
+        secret,
+      )
+
+    await getPostgresPool()
+      .query(
+        `
+          INSERT INTO sf_user_mfa (
+            user_id,
+            method,
+            secret_encrypted,
+            enabled,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            'totp',
+            $2,
+            false,
+            now(),
+            now()
+          )
+          ON CONFLICT (user_id)
+          DO NOTHING
+        `,
+        [
+          userId,
+          encrypted,
+        ],
+      )
+
+    row =
+      await getMfaRow(userId)
+  }
+
+  if (!row) {
+    throw new Error(
+      "Não foi possível preparar o 2FA.",
+    )
+  }
+
+  if (row.enabled) {
+    throw new Error(
+      "O 2FA já está ativado nesta conta.",
+    )
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  return {
+    secret,
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+  }
+}
+
+export async function activateTwoFactor(
+  userId: string,
+  rawCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  if (
+    !row ||
+    row.enabled
+  ) {
+    return null
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      rawCode,
+    )
+
+  if (step === null) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            enabled = true,
+            verified_at = now(),
+            last_totp_step = $2,
+            recovery_code_hashes =
+              $3::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = false
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+          JSON.stringify(
+            hashes,
+          ),
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+async function verifyAndConsumeTotp(
+  userId: string,
+  rawCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  if (
+    !row ||
+    !row.enabled
+  ) {
+    return false
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      rawCode,
+    )
+
+  if (step === null) {
+    return false
+  }
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            last_totp_step = $2,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND (
+              last_totp_step IS NULL
+              OR last_totp_step < $2
+            )
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+        ],
+      )
+
+  return Boolean(
+    updated.rowCount,
+  )
+}
+
+async function verifyAndConsumeRecoveryCode(
+  userId: string,
+  rawCode: string,
+) {
+  const normalized =
+    normalizeRecoveryCode(
+      rawCode,
+    )
+
+  if (
+    normalized.length < 16
+  ) {
+    return false
+  }
+
+  const hash =
+    hashRecoveryCode(
+      normalized,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            recovery_code_hashes =
+              COALESCE(
+                (
+                  SELECT jsonb_agg(value)
+                  FROM jsonb_array_elements_text(
+                    recovery_code_hashes
+                  ) AS codes(value)
+                  WHERE value <> $2
+                ),
+                '[]'::jsonb
+              ),
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND recovery_code_hashes ? $2
+          RETURNING user_id
+        `,
+        [
+          userId,
+          hash,
+        ],
+      )
+
+  return Boolean(
+    updated.rowCount,
+  )
+}
+
+export async function verifySecondFactor(
+  userId: string,
+  rawCode: string,
+) {
+  const trimmed =
+    rawCode.trim()
+
+  if (
+    /^\d{6}$/.test(trimmed)
+  ) {
+    return verifyAndConsumeTotp(
+      userId,
+      trimmed,
+    )
+  }
+
+  return verifyAndConsumeRecoveryCode(
+    userId,
+    trimmed,
+  )
+}
+
+export async function regenerateRecoveryCodes(
+  userId: string,
+  currentTotpCode: string,
+) {
+  const verified =
+    await verifyAndConsumeTotp(
+      userId,
+      currentTotpCode,
+    )
+
+  if (!verified) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            recovery_code_hashes =
+              $2::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+          RETURNING user_id
+        `,
+        [
+          userId,
+          JSON.stringify(
+            hashes,
+          ),
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+export async function beginTwoFactorReconfiguration(
+  userId: string,
+  email: string,
+  currentSecondFactor: string,
+) {
+  const verified =
+    await verifySecondFactor(
+      userId,
+      currentSecondFactor,
+    )
+
+  if (!verified) {
+    return null
+  }
+
+  const secret =
+    createTotpSecret()
+
+  const encrypted =
+    encryptSecret(
+      userId,
+      secret,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            pending_secret_encrypted = $2,
+            pending_secret_created_at = now(),
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+          RETURNING
+            pending_secret_created_at
+        `,
+        [
+          userId,
+          encrypted,
+        ],
+      )
+
+  const createdAt =
+    updated.rows[0]
+      ?.pending_secret_created_at
+
+  if (!createdAt) {
+    return null
+  }
+
+  const expiresAt =
+    new Date(
+      new Date(
+        createdAt,
+      ).getTime() +
+        RECONFIGURATION_TTL_MS,
+    ).toISOString()
+
+  return {
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+    expiresAt,
+  }
+}
+
+export async function getPendingTwoFactorReconfiguration(
+  userId: string,
+  email: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const expiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  if (
+    !row?.enabled ||
+    !row.pending_secret_encrypted ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.pending_secret_encrypted,
+    )
+
+  return {
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+    expiresAt:
+      new Date(
+        expiresAt,
+      ).toISOString(),
+  }
+}
+
+export async function confirmTwoFactorReconfiguration(
+  userId: string,
+  newTotpCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const expiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  if (
+    !row?.enabled ||
+    !row.pending_secret_encrypted ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  const pendingEncrypted =
+    row.pending_secret_encrypted
+
+  const secret =
+    decryptSecret(
+      userId,
+      pendingEncrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      newTotpCode,
+    )
+
+  if (step === null) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            secret_encrypted =
+              pending_secret_encrypted,
+            pending_secret_encrypted =
+              NULL,
+            pending_secret_created_at =
+              NULL,
+            verified_at = now(),
+            last_totp_step = $2,
+            recovery_code_hashes =
+              $3::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND pending_secret_encrypted = $4
+            AND pending_secret_created_at >=
+              now() - interval '10 minutes'
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+          JSON.stringify(
+            hashes,
+          ),
+          pendingEncrypted,
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+export async function cancelTwoFactorReconfiguration(
+  userId: string,
+) {
+  await getPostgresPool()
+    .query(
+      `
+        UPDATE sf_user_mfa
+        SET
+          pending_secret_encrypted =
+            NULL,
+          pending_secret_created_at =
+            NULL,
+          updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId],
+    )
+}
+
+export async function markAdminUserLoginCompleted(
+  userId: string,
+) {
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        last_login_at = now(),
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [userId],
+  )
+}
+
+===== app\api\auth\login\route.ts =====
+
+import {
+  NextResponse,
+} from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+  SUPERADMIN_SESSION_COOKIE,
+} from "@/lib/auth"
+import {
+  authenticateAdminUser,
+} from "@/lib/admin-user-db"
+import {
+  getDefaultAdminTenantContextForUserId,
+} from "@/lib/tenant-context"
+import {
+  userCanReceiveSuperadminCpfSession,
+} from "@/lib/superadmin-auth"
+import {
+  authRateLimitKey,
+  checkAuthRateLimit,
+  clearAuthFailures,
+  registerAuthFailure,
+} from "@/lib/security/rate-limit"
+import {
+  requestIp,
+  requestIsSameOrigin,
+} from "@/lib/security/request-security"
+import {
+  getTwoFactorState,
+} from "@/lib/security/two-factor"
+import {
+  TWO_FACTOR_CHALLENGE_COOKIE,
+  createTwoFactorChallenge,
+  twoFactorChallengeCookieOptions,
+} from "@/lib/security/two-factor-challenge"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const ACCOUNT_LIMIT = 8
+const IP_LIMIT = 30
+const RATE_WINDOW_MS =
+  15 * 60 * 1000
+
+function jsonError(
+  message: string,
+  status: number,
+  retryAfterSeconds = 0,
+) {
+  const response =
+    NextResponse.json(
+      { error: message },
+      { status },
+    )
+
+  response.headers.set(
+    "Cache-Control",
+    "no-store",
+  )
+
+  if (
+    retryAfterSeconds > 0
+  ) {
+    response.headers.set(
+      "Retry-After",
+      String(
+        retryAfterSeconds,
+      ),
+    )
+  }
+
+  return response
+}
+
+function clearCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure:
+      process.env.NODE_ENV ===
+      "production",
+    path: "/",
+    maxAge: 0,
+  }
+}
+
+function identifierIsCpf(
+  identifier: string,
+) {
+  if (
+    identifier.includes("@")
+  ) {
+    return false
+  }
+
+  return (
+    identifier
+      .replace(/\D/g, "")
+      .length === 11
+  )
+}
+
+function clearExistingSessions(
+  response: NextResponse,
+) {
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE,
+    "",
+    clearCookieOptions(),
+  )
+
+  response.cookies.set(
+    LEGACY_ADMIN_SESSION_COOKIE,
+    "",
+    clearCookieOptions(),
+  )
+
+  response.cookies.set(
+    SUPERADMIN_SESSION_COOKIE,
+    "",
+    clearCookieOptions(),
+  )
+}
+
+export async function POST(
+  request: Request,
+) {
+  if (
+    !requestIsSameOrigin(
+      request,
+    )
+  ) {
+    return jsonError(
+      "Origem da requisição não autorizada.",
+      403,
+    )
+  }
+
+  const ipKey =
+    authRateLimitKey(
+      "ip",
+      requestIp(request),
+    )
+
+  const ipLimit =
+    checkAuthRateLimit(
+      ipKey,
+      IP_LIMIT,
+      RATE_WINDOW_MS,
+    )
+
+  if (!ipLimit.allowed) {
+    return jsonError(
+      "Muitas tentativas de login. Tente novamente mais tarde.",
+      429,
+      ipLimit.retryAfterSeconds,
+    )
+  }
+
+  const body =
+    (await request
+      .json()
+      .catch(() => null)) as
+      | {
+          identifier?: string
+          email?: string
+          password?: string
+        }
+      | null
+
+  const identifier =
+    body?.identifier?.trim() ||
+    body?.email?.trim() ||
+    ""
+
+  const password =
+    body?.password || ""
+
+  if (
+    !identifier ||
+    !password
+  ) {
+    registerAuthFailure(
+      ipKey,
+      RATE_WINDOW_MS,
+    )
+
+    return jsonError(
+      "CPF/e-mail ou senha inválidos.",
+      401,
+    )
+  }
+
+  const normalizedAccountKey =
+    identifier
+      .trim()
+      .toLowerCase()
+      .replace(
+        /[.\-\s]/g,
+        "",
+      )
+
+  const accountKey =
+    authRateLimitKey(
+      "account",
+      normalizedAccountKey,
+    )
+
+  const accountLimit =
+    checkAuthRateLimit(
+      accountKey,
+      ACCOUNT_LIMIT,
+      RATE_WINDOW_MS,
+    )
+
+  if (
+    !accountLimit.allowed
+  ) {
+    return jsonError(
+      "Muitas tentativas de login. Tente novamente mais tarde.",
+      429,
+      accountLimit.retryAfterSeconds,
+    )
+  }
+
+  try {
+    const user =
+      await authenticateAdminUser(
+        identifier,
+        password,
+      )
+
+    if (!user) {
+      registerAuthFailure(
+        ipKey,
+        RATE_WINDOW_MS,
+      )
+      registerAuthFailure(
+        accountKey,
+        RATE_WINDOW_MS,
+      )
+
+      return jsonError(
+        "CPF/e-mail ou senha inválidos.",
+        401,
+      )
+    }
+
+    const tenantContext =
+      await getDefaultAdminTenantContextForUserId(
+        user.id,
+      )
+
+    if (!tenantContext) {
+      registerAuthFailure(
+        accountKey,
+        RATE_WINDOW_MS,
+      )
+
+      return jsonError(
+        "Não foi possível entrar nesta conta.",
+        403,
+      )
+    }
+
+    const cpfLogin =
+      identifierIsCpf(
+        identifier,
+      )
+
+    const allowSuperadmin =
+      cpfLogin &&
+      (await userCanReceiveSuperadminCpfSession(
+        user.id,
+      ))
+
+    const mfa =
+      await getTwoFactorState(
+        user.id,
+      )
+
+    clearAuthFailures(
+      accountKey,
+    )
+
+    const mode =
+      mfa.enabled
+        ? "verify"
+        : "setup"
+
+    const response =
+      NextResponse.json({
+        ok: true,
+        requiresTwoFactor: true,
+        twoFactorMode: mode,
+        authSource:
+          cpfLogin
+            ? "cpf"
+            : "email",
+      })
+
+    response.headers.set(
+      "Cache-Control",
+      "no-store",
+    )
+
+    clearExistingSessions(
+      response,
+    )
+
+    response.cookies.set(
+      TWO_FACTOR_CHALLENGE_COOKIE,
+      createTwoFactorChallenge({
+        userId: user.id,
+        email: user.email,
+        authSource:
+          cpfLogin
+            ? "cpf"
+            : "email",
+        allowSuperadmin,
+        mode,
+      }),
+      twoFactorChallengeCookieOptions(),
+    )
+
+    return response
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Falha no login PostgreSQL:",
+      error instanceof Error
+        ? error.message
+        : error,
+    )
+
+    return jsonError(
+      "Não foi possível validar o login no momento.",
+      503,
+    )
+  }
+}
+
+
+===== app\api\auth\google\route.ts =====
+
+import {
+  NextResponse,
+} from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+  SUPERADMIN_SESSION_COOKIE,
+} from "@/lib/auth"
+import {
+  authenticateAdminGoogleUser,
+} from "@/lib/admin-user-db"
+import {
+  verifyGoogleCredential,
+} from "@/lib/auth-providers/google"
+import {
+  getDefaultAdminTenantContextForUserId,
+} from "@/lib/tenant-context"
+import {
+  authRateLimitKey,
+  checkAuthRateLimit,
+  clearAuthFailures,
+  registerAuthFailure,
+} from "@/lib/security/rate-limit"
+import {
+  requestIp,
+  requestIsSameOrigin,
+} from "@/lib/security/request-security"
+import {
+  getTwoFactorState,
+} from "@/lib/security/two-factor"
+import {
+  TWO_FACTOR_CHALLENGE_COOKIE,
+  createTwoFactorChallenge,
+  twoFactorChallengeCookieOptions,
+} from "@/lib/security/two-factor-challenge"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const LIMIT = 20
+const WINDOW_MS =
+  15 * 60 * 1000
+
+function jsonError(
+  message: string,
+  status: number,
+  retryAfterSeconds = 0,
+) {
+  const response =
+    NextResponse.json(
+      { error: message },
+      { status },
+    )
+
+  response.headers.set(
+    "Cache-Control",
+    "no-store",
+  )
+
+  if (
+    retryAfterSeconds > 0
+  ) {
+    response.headers.set(
+      "Retry-After",
+      String(
+        retryAfterSeconds,
+      ),
+    )
+  }
+
+  return response
+}
+
+function clearCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure:
+      process.env.NODE_ENV ===
+      "production",
+    path: "/",
+    maxAge: 0,
+  }
+}
+
+function clearExistingSessions(
+  response: NextResponse,
+) {
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE,
+    "",
+    clearCookieOptions(),
+  )
+
+  response.cookies.set(
+    LEGACY_ADMIN_SESSION_COOKIE,
+    "",
+    clearCookieOptions(),
+  )
+
+  // Login por Google continua sem conceder
+  // a autorização especial do Superadmin.
+  response.cookies.set(
+    SUPERADMIN_SESSION_COOKIE,
+    "",
+    clearCookieOptions(),
+  )
+}
+
+export async function POST(
+  request: Request,
+) {
+  if (
+    !requestIsSameOrigin(
+      request,
+    )
+  ) {
+    return jsonError(
+      "Origem da requisição não autorizada.",
+      403,
+    )
+  }
+
+  const key =
+    authRateLimitKey(
+      "ip",
+      `admin-google:${requestIp(
+        request,
+      )}`,
+    )
+
+  const state =
+    checkAuthRateLimit(
+      key,
+      LIMIT,
+      WINDOW_MS,
+    )
+
+  if (!state.allowed) {
+    return jsonError(
+      "Muitas tentativas. Tente novamente mais tarde.",
+      429,
+      state.retryAfterSeconds,
+    )
+  }
+
+  const body =
+    (await request
+      .json()
+      .catch(() => null)) as
+      | {
+          credential?: string
+        }
+      | null
+
+  if (!body?.credential) {
+    registerAuthFailure(
+      key,
+      WINDOW_MS,
+    )
+
+    return jsonError(
+      "Não foi possível validar sua Conta Google.",
+      400,
+    )
+  }
+
+  try {
+    const google =
+      await verifyGoogleCredential(
+        body.credential,
+      )
+
+    const user =
+      await authenticateAdminGoogleUser(
+        google.subject,
+        google.email,
+      )
+
+    if (!user) {
+      registerAuthFailure(
+        key,
+        WINDOW_MS,
+      )
+
+      return jsonError(
+        "Esta Conta Google não está vinculada a um usuário administrativo do SaborFlow.",
+        403,
+      )
+    }
+
+    const tenantContext =
+      await getDefaultAdminTenantContextForUserId(
+        user.id,
+      )
+
+    if (!tenantContext) {
+      registerAuthFailure(
+        key,
+        WINDOW_MS,
+      )
+
+      return jsonError(
+        "Não foi possível entrar nesta conta.",
+        403,
+      )
+    }
+
+    const mfa =
+      await getTwoFactorState(
+        user.id,
+      )
+
+    clearAuthFailures(key)
+
+    const mode =
+      mfa.enabled
+        ? "verify"
+        : "setup"
+
+    const response =
+      NextResponse.json({
+        ok: true,
+        requiresTwoFactor: true,
+        twoFactorMode: mode,
+        authSource: "google",
+      })
+
+    response.headers.set(
+      "Cache-Control",
+      "no-store",
+    )
+
+    clearExistingSessions(
+      response,
+    )
+
+    response.cookies.set(
+      TWO_FACTOR_CHALLENGE_COOKIE,
+      createTwoFactorChallenge({
+        userId: user.id,
+        email: user.email,
+        authSource: "google",
+        allowSuperadmin: false,
+        mode,
+      }),
+      twoFactorChallengeCookieOptions(),
+    )
+
+    return response
+  } catch (reason) {
+    registerAuthFailure(
+      key,
+      WINDOW_MS,
+    )
+
+    console.error(
+      "[SaborFlow Google Admin] Falha ao autenticar:",
+      reason instanceof Error
+        ? reason.message
+        : reason,
+    )
+
+    return jsonError(
+      "Não foi possível entrar com Google no momento.",
+      503,
+    )
+  }
+}
+
+
+===== app\api\admin\password\change\route.ts =====
+
+import { NextResponse } from "next/server"
+import {
+  ADMIN_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+} from "@/lib/auth"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import {
+  changeAdminUserPassword,
+} from "@/lib/admin-user-db"
+
+export async function POST(
+  request: Request,
+) {
+  const session =
+    await getVerifiedTenantSession()
+
+  if (!session) {
+    return NextResponse.json(
+      {
+        error:
+          "Sessão multiempresa inválida.",
+      },
+      { status: 401 },
+    )
+  }
+
+  const body = (await request
+    .json()
+    .catch(() => null)) as
+    | {
+        currentPassword?: string
+        newPassword?: string
+      }
+    | null
+
+  try {
+    await changeAdminUserPassword(
+      session.userId,
+      body?.currentPassword || "",
+      body?.newPassword || "",
+    )
+
+    const response =
+      NextResponse.json({
+        ok: true,
+        relogin: true,
+      })
+
+    response.cookies.delete(
+      ADMIN_SESSION_COOKIE,
+    )
+    response.cookies.delete(
+      LEGACY_ADMIN_SESSION_COOKIE,
+    )
+
+    return response
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível alterar a senha.",
+      },
+      { status: 400 },
+    )
+  }
+}
+
+
+===== components\admin\login-form.tsx =====
+
+"use client"
+
+import Link from "next/link"
+import Script from "next/script"
+import {
+  browserSupportsWebAuthn,
+  startAuthentication,
+} from "@simplewebauthn/browser"
+import {
+  FormEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
+import {
+  useRouter,
+} from "next/navigation"
+import {
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LockKeyhole,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react"
+
+type TwoFactorMode =
+  | "setup"
+  | "verify"
+
+type LoginStep =
+  | "credentials"
+  | "twoFactor"
+  | "recoveryCodes"
+
+type SetupInfo = {
+  issuer: string
+  account: string
+  manualKey: string
+}
+
+export function LoginForm() {
+  const router = useRouter()
+
+  const [
+    identifier,
+    setIdentifier,
+  ] = useState("")
+
+  const [
+    password,
+    setPassword,
+  ] = useState("")
+
+  const [
+    showPassword,
+    setShowPassword,
+  ] = useState(false)
+
+  const [
+    busy,
+    setBusy,
+  ] = useState(false)
+
+  const [
+    error,
+    setError,
+  ] = useState("")
+
+  const [
+    googleReady,
+    setGoogleReady,
+  ] = useState(false)
+
+  const [
+    step,
+    setStep,
+  ] =
+    useState<LoginStep>(
+      "credentials",
+    )
+
+  const [
+    twoFactorMode,
+    setTwoFactorMode,
+  ] =
+    useState<TwoFactorMode>(
+      "verify",
+    )
+
+  const [
+    twoFactorCode,
+    setTwoFactorCode,
+  ] = useState("")
+
+  const [
+    setupInfo,
+    setSetupInfo,
+  ] =
+    useState<SetupInfo | null>(
+      null,
+    )
+
+  const [
+    recoveryCodes,
+    setRecoveryCodes,
+  ] = useState<string[]>([])
+
+  const [
+    finalRedirect,
+    setFinalRedirect,
+  ] = useState("/admin")
+
+  const googleButtonRef =
+    useRef<HTMLDivElement | null>(
+      null,
+    )
+
+  const googleClientId =
+    process.env
+      .NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+    ""
+
+  const [
+    passkeyAvailable,
+    setPasskeyAvailable,
+  ] = useState(false)
+
+  const [
+    passkeySupported,
+    setPasskeySupported,
+  ] = useState(false)
+
+  async function loadPasskeyAvailability() {
+    const supported =
+      browserSupportsWebAuthn()
+
+    setPasskeySupported(
+      supported,
+    )
+
+    if (!supported) {
+      setPasskeyAvailable(
+        false,
+      )
+      return
+    }
+
+    const response =
+      await fetch(
+        "/api/auth/passkey/options",
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    if (!response?.ok) {
+      setPasskeyAvailable(
+        false,
+      )
+      return
+    }
+
+    const data =
+      await response
+        .json()
+        .catch(() => null)
+
+    setPasskeyAvailable(
+      Boolean(
+        data?.available,
+      ),
+    )
+  }
+
+  async function loadSetupInfo() {
+    const response =
+      await fetch(
+        "/api/auth/2fa/setup",
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      )
+
+    const data =
+      await response.json()
+
+    if (!response.ok) {
+      throw new Error(
+        data.error ||
+          "Não foi possível preparar o 2FA.",
+      )
+    }
+
+    setSetupInfo({
+      issuer:
+        String(
+          data.issuer ||
+            "SaborFlow",
+        ),
+      account:
+        String(
+          data.account ||
+            "",
+        ),
+      manualKey:
+        String(
+          data.manualKey ||
+            "",
+        ),
+    })
+  }
+
+  async function beginTwoFactor(
+    data: {
+      twoFactorMode?: string
+    },
+  ) {
+    const mode:
+      TwoFactorMode =
+      data.twoFactorMode ===
+      "setup"
+        ? "setup"
+        : "verify"
+
+    setTwoFactorMode(mode)
+    setTwoFactorCode("")
+    setSetupInfo(null)
+    setStep("twoFactor")
+
+    if (mode === "setup") {
+      setPasskeyAvailable(false)
+      await loadSetupInfo()
+      return
+    }
+
+    await loadPasskeyAvailability()
+  }
+
+  async function submit(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setBusy(true)
+    setError("")
+
+    try {
+      const response =
+        await fetch(
+          "/api/auth/login",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              identifier,
+              password,
+            }),
+          },
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Não foi possível entrar.",
+        )
+      }
+
+      if (
+        data.requiresTwoFactor
+      ) {
+        await beginTwoFactor(
+          data,
+        )
+        return
+      }
+
+      const redirectTo =
+        typeof data.redirectTo ===
+          "string" &&
+        data.redirectTo.startsWith(
+          "/",
+        )
+          ? data.redirectTo
+          : "/admin"
+
+      router.replace(
+        redirectTo,
+      )
+      router.refresh()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Erro ao entrar.",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function googleLogin(
+    credential: string,
+  ) {
+    setBusy(true)
+    setError("")
+
+    try {
+      const response =
+        await fetch(
+          "/api/auth/google",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body:
+              JSON.stringify({
+                credential,
+              }),
+          },
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Não foi possível entrar com Google.",
+        )
+      }
+
+      if (
+        data.requiresTwoFactor
+      ) {
+        await beginTwoFactor(
+          data,
+        )
+        return
+      }
+
+      const redirectTo =
+        typeof data.redirectTo ===
+          "string" &&
+        data.redirectTo.startsWith(
+          "/",
+        )
+          ? data.redirectTo
+          : "/admin"
+
+      router.replace(
+        redirectTo,
+      )
+      router.refresh()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível entrar com Google.",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function authenticateWithPasskey() {
+    setBusy(true)
+    setError("")
+
+    try {
+      if (
+        !browserSupportsWebAuthn()
+      ) {
+        throw new Error(
+          "Este navegador não oferece suporte a Passkeys/WebAuthn.",
+        )
+      }
+
+      const optionsResponse =
+        await fetch(
+          "/api/auth/passkey/options",
+          {
+            method: "POST",
+          },
+        )
+
+      const optionsData =
+        await optionsResponse
+          .json()
+          .catch(() => null)
+
+      if (!optionsResponse.ok) {
+        throw new Error(
+          optionsData?.error ||
+            "Não foi possível iniciar a Passkey.",
+        )
+      }
+
+      const authenticationResponse =
+        await startAuthentication({
+          optionsJSON:
+            optionsData.options,
+        })
+
+      const verifyResponse =
+        await fetch(
+          "/api/auth/passkey/verify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              response:
+                authenticationResponse,
+            }),
+          },
+        )
+
+      const verifyData =
+        await verifyResponse
+          .json()
+          .catch(() => null)
+
+      if (!verifyResponse.ok) {
+        throw new Error(
+          verifyData?.error ||
+            "Não foi possível validar a Passkey.",
+        )
+      }
+
+      const redirectTo =
+        typeof verifyData?.redirectTo ===
+          "string" &&
+        verifyData.redirectTo.startsWith(
+          "/",
+        )
+          ? verifyData.redirectTo
+          : "/admin"
+
+      router.replace(
+        redirectTo,
+      )
+      router.refresh()
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Não foi possível usar a Passkey."
+
+      setError(
+        message.includes(
+          "The operation either timed out or was not allowed",
+        ) ||
+          message.includes(
+            "NotAllowedError",
+          )
+          ? "A autenticação com Passkey foi cancelada ou expirou."
+          : message,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitTwoFactor(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setBusy(true)
+    setError("")
+
+    try {
+      const response =
+        await fetch(
+          "/api/auth/2fa/verify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body:
+              JSON.stringify({
+                code:
+                  twoFactorCode,
+              }),
+          },
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Não foi possível validar o código.",
+        )
+      }
+
+      const redirectTo =
+        typeof data.redirectTo ===
+          "string" &&
+        data.redirectTo.startsWith(
+          "/",
+        )
+          ? data.redirectTo
+          : "/admin"
+
+      if (
+        Array.isArray(
+          data.recoveryCodes,
+        ) &&
+        data.recoveryCodes.length >
+          0
+      ) {
+        setRecoveryCodes(
+          data.recoveryCodes.map(
+            String,
+          ),
+        )
+        setFinalRedirect(
+          redirectTo,
+        )
+        setStep(
+          "recoveryCodes",
+        )
+        return
+      }
+
+      router.replace(
+        redirectTo,
+      )
+      router.refresh()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível validar o 2FA.",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function returnToLogin() {
+    setStep(
+      "credentials",
+    )
+    setTwoFactorCode("")
+    setSetupInfo(null)
+    setRecoveryCodes([])
+    setPasskeyAvailable(false)
+    setError("")
+  }
+
+  async function copyText(
+    value: string,
+  ) {
+    try {
+      await navigator.clipboard.writeText(
+        value,
+      )
+    } catch {
+      // O valor continua visível para cópia manual.
+    }
+  }
+
+  useEffect(() => {
+    if (
+      step !==
+        "credentials" ||
+      !googleReady ||
+      !googleClientId ||
+      !googleButtonRef.current ||
+      !window.google
+    ) {
+      return
+    }
+
+    googleButtonRef.current.innerHTML =
+      ""
+
+    window.google.accounts.id.initialize(
+      {
+        client_id:
+          googleClientId,
+        callback: (
+          response: {
+            credential: string
+          },
+        ) =>
+          void googleLogin(
+            response.credential,
+          ),
+      },
+    )
+
+    window.google.accounts.id.renderButton(
+      googleButtonRef.current,
+      {
+        theme: "outline",
+        size: "large",
+        width: 420,
+        shape: "rectangular",
+        text: "signin_with",
+        locale: "pt-BR",
+      },
+    )
+  }, [
+    googleReady,
+    googleClientId,
+    step,
+  ])
+
+  return (
+    <div className="mt-7">
+      {googleClientId && (
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+          onLoad={() =>
+            setGoogleReady(
+              true,
+            )
+          }
+        />
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-700">
+          {error}
+        </div>
+      )}
+
+      {step ===
+        "recoveryCodes" && (
+        <div className="space-y-5">
+          <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+            <div>
+              <p className="font-black text-emerald-950">
+                2FA ativado com sucesso
+              </p>
+              <p className="mt-1 text-sm leading-6 text-emerald-800">
+                Guarde os códigos abaixo em um lugar seguro. Cada código de recuperação funciona apenas uma vez.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {recoveryCodes.map(
+              (code) => (
+                <code
+                  key={code}
+                  className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-center text-sm font-black tracking-wide text-gray-800"
+                >
+                  {code}
+                </code>
+              ),
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              void copyText(
+                recoveryCodes.join(
+                  "\n",
+                ),
+              )
+            }
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white text-sm font-black text-gray-700 transition hover:bg-gray-50"
+          >
+            <Copy className="h-4 w-4" />
+            Copiar códigos
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              router.replace(
+                finalRedirect,
+              )
+              router.refresh()
+            }}
+            className="h-12 w-full rounded-xl text-sm font-black text-white shadow-sm transition hover:brightness-105"
+            style={{
+              background:
+                "linear-gradient(135deg, #d96d00 0%, #f59e0b 100%)",
+            }}
+          >
+            Continuar para o painel
+          </button>
+        </div>
+      )}
+
+      {step ===
+        "twoFactor" && (
+        <div className="space-y-5">
+          <div className="text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+
+            <h2 className="mt-4 text-xl font-black text-gray-950">
+              {twoFactorMode ===
+              "setup"
+                ? "Ative a autenticação em duas etapas"
+                : "Confirme sua identidade"}
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-gray-500">
+              {twoFactorMode ===
+              "setup"
+                ? "Use Google Authenticator, Microsoft Authenticator, Authy ou outro aplicativo compatível com TOTP."
+                : "Digite o código atual do seu aplicativo autenticador ou um código de recuperação."}
+            </p>
+          </div>
+
+          {twoFactorMode ===
+            "setup" && (
+            <div className="space-y-4">
+              <div className="flex justify-center rounded-2xl border border-gray-200 bg-white p-4">
+                <img
+                  src="/api/auth/2fa/qr"
+                  alt="QR Code para configurar o 2FA do SaborFlow"
+                  width={240}
+                  height={240}
+                  className="h-60 w-60"
+                />
+              </div>
+
+              {setupInfo && (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-gray-500">
+                    Chave manual
+                  </p>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="min-w-0 flex-1 break-all text-xs font-black text-gray-800">
+                      {
+                        setupInfo.manualKey
+                      }
+                    </code>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void copyText(
+                          setupInfo.manualKey.replace(
+                            /\s/g,
+                            "",
+                          ),
+                        )
+                      }
+                      className="rounded-lg p-2 text-gray-500 transition hover:bg-white hover:text-gray-900"
+                      aria-label="Copiar chave manual"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                    Conta:{" "}
+                    {
+                      setupInfo.account
+                    }
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <form
+            onSubmit={
+              submitTwoFactor
+            }
+            className="space-y-4"
+          >
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                {twoFactorMode ===
+                "setup"
+                  ? "Código de 6 dígitos"
+                  : "Código de autenticação"}
+              </span>
+
+              <div className="relative">
+                <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+
+                <input
+                  required
+                  autoFocus
+                  type="text"
+                  inputMode={
+                    twoFactorMode ===
+                    "setup"
+                      ? "numeric"
+                      : "text"
+                  }
+                  autoComplete="one-time-code"
+                  value={
+                    twoFactorCode
+                  }
+                  onChange={(
+                    event,
+                  ) =>
+                    setTwoFactorCode(
+                      twoFactorMode ===
+                        "setup"
+                        ? event.target.value
+                            .replace(
+                              /\D/g,
+                              "",
+                            )
+                            .slice(
+                              0,
+                              6,
+                            )
+                        : event.target.value
+                            .toUpperCase()
+                            .slice(
+                              0,
+                              30,
+                            ),
+                    )
+                  }
+                  className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-center text-lg font-black tracking-[0.25em] outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                  placeholder={
+                    twoFactorMode ===
+                    "setup"
+                      ? "000000"
+                      : "000000"
+                  }
+                />
+              </div>
+            </label>
+
+            <button
+              disabled={busy}
+              type="submit"
+              className="h-12 w-full rounded-xl text-sm font-black text-white shadow-sm transition hover:brightness-105 disabled:opacity-50"
+              style={{
+                background:
+                  "linear-gradient(135deg, #d96d00 0%, #f59e0b 100%)",
+              }}
+            >
+              {busy
+                ? "Validando..."
+                : twoFactorMode ===
+                    "setup"
+                  ? "Ativar 2FA"
+                  : "Confirmar código"}
+            </button>
+          </form>
+
+          {twoFactorMode ===
+            "verify" &&
+            passkeySupported &&
+            passkeyAvailable && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-gray-200" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                    ou
+                  </span>
+                  <div className="h-px flex-1 bg-gray-200" />
+                </div>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void authenticateWithPasskey()
+                  }
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 text-sm font-black text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Usar Passkey / Windows Hello
+                </button>
+
+                <p className="text-center text-[11px] leading-4 text-gray-400">
+                  Também funciona com biometria do dispositivo e chaves de segurança FIDO2 cadastradas.
+                </p>
+              </div>
+            )}
+
+          <button
+            type="button"
+            onClick={
+              returnToLogin
+            }
+            className="w-full text-center text-xs font-black text-gray-500 underline-offset-4 transition hover:text-gray-800 hover:underline"
+          >
+            Voltar ao login
+          </button>
+        </div>
+      )}
+
+      {step ===
+        "credentials" && (
+        <>
+          {googleClientId && (
+            <>
+              <div
+                ref={
+                  googleButtonRef
+                }
+                className="flex min-h-11 justify-center"
+              />
+
+              <div className="my-5 flex items-center gap-3">
+                <div className="h-px flex-1 bg-gray-200" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                  ou entre com sua senha
+                </span>
+                <div className="h-px flex-1 bg-gray-200" />
+              </div>
+            </>
+          )}
+
+          <form
+            onSubmit={submit}
+            className="space-y-4"
+          >
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                CPF ou e-mail
+              </span>
+
+              <div className="relative">
+                <UserRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+
+                <input
+                  required
+                  type="text"
+                  autoComplete="username"
+                  value={
+                    identifier
+                  }
+                  onChange={(
+                    event,
+                  ) =>
+                    setIdentifier(
+                      event.target.value,
+                    )
+                  }
+                  className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                  placeholder="Digite seu CPF ou e-mail"
+                />
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                Senha
+              </span>
+
+              <div className="relative">
+                <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+
+                <input
+                  required
+                  type={
+                    showPassword
+                      ? "text"
+                      : "password"
+                  }
+                  autoComplete="current-password"
+                  value={
+                    password
+                  }
+                  onChange={(
+                    event,
+                  ) =>
+                    setPassword(
+                      event.target.value,
+                    )
+                  }
+                  className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-11 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                  placeholder="Digite sua senha"
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowPassword(
+                      (value) =>
+                        !value,
+                    )
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  aria-label={
+                    showPassword
+                      ? "Ocultar senha"
+                      : "Mostrar senha"
+                  }
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </label>
+
+            <div className="flex justify-end">
+              <Link
+                href="/esqueci-senha"
+                className="text-xs font-black text-amber-700 underline-offset-4 transition hover:text-amber-800 hover:underline"
+              >
+                Esqueci minha senha
+              </Link>
+            </div>
+
+            <button
+              disabled={busy}
+              type="submit"
+              className="h-12 w-full rounded-xl text-sm font-black text-white shadow-sm transition hover:brightness-105 disabled:opacity-50"
+              style={{
+                background:
+                  "linear-gradient(135deg, #d96d00 0%, #f59e0b 100%)",
+              }}
+            >
+              {busy
+                ? "Entrando..."
+                : "Entrar no painel"}
+            </button>
+          </form>
+
+          <div className="mt-4 flex items-center justify-center gap-2 text-[11px] leading-4 text-gray-400">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            <span>
+              O segundo fator de autenticação é obrigatório para o acesso administrativo.
+            </span>
+          </div>
+
+          <p className="mt-3 text-center text-[11px] leading-4 text-gray-400">
+            Você pode entrar com o CPF cadastrado ou com o e-mail da sua conta.
+          </p>
+
+          {googleClientId && (
+            <p className="mt-2 text-center text-[11px] leading-4 text-gray-400">
+              O Google funciona para contas criadas ou já vinculadas ao Google no SaborFlow e também exige 2FA.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+
+===== components\admin\security-panel.tsx =====
+
+"use client"
+
+import Script from "next/script"
+import {
+  browserSupportsWebAuthn,
+  startRegistration,
+} from "@simplewebauthn/browser"
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import type {
+  OrganizationRole,
+} from "@/lib/tenant-context"
+import { HelpLabel } from "@/components/admin/help-tip"
+
+
+type DomainStatus = {
+  domain: string
+  verified: boolean
+  primary: boolean
+  verificationRecordName: string
+  verifiedAt: string | null
+  lastCheckedAt: string | null
+}
+
+type RoutingInstruction = {
+  provider: "cloudflare_saas"
+  hostnameId: string
+  hostnameStatus: string | null
+  sslStatus: string | null
+  ready: boolean
+  cnameTarget: string
+  dnsRecords: Array<{
+    type: "CNAME" | "TXT"
+    name: string
+    value: string
+    purpose: "traffic" | "hostname_verification" | "ssl_validation"
+    status: string | null
+  }>
+  errors: string[]
+}
+
+type PrintAgent = {
+  id: string
+  name: string
+  active: boolean
+  lastSeenAt: string | null
+  createdAt: string
+}
+
+type StorageStatus = {
+  mode: "local" | "r2"
+  r2Configured: boolean
+  publicHost: string | null
+  localFileCount: number
+  uploadDirConfigured: boolean
+  replicaReady: boolean
+}
+
+type TwoFactorSecurityStatus = {
+  configured: boolean
+  enabled: boolean
+  recoveryCodesRemaining: number
+  reconfigurationPending: boolean
+  reconfigurationExpiresAt: string | null
+}
+
+type PasskeySummary = {
+  id: string
+  name: string
+  deviceType: "singleDevice" | "multiDevice"
+  backedUp: boolean
+  createdAt: string
+  lastUsedAt: string | null
+}
+
+type SecurityData = {
+  organization: {
+    id: string
+    name: string
+    slug: string
+  }
+  role: OrganizationRole
+  timeZone: string
+  domains: DomainStatus[]
+  printAgents: PrintAgent[]
+  canManageSecurity: boolean
+}
+
+const commonTimeZones = [
+  "America/Sao_Paulo",
+  "America/Fortaleza",
+  "America/Recife",
+  "America/Bahia",
+  "America/Manaus",
+  "America/Belem",
+  "America/Cuiaba",
+  "America/Campo_Grande",
+  "America/Rio_Branco",
+]
+
+function CopyButton({
+  value,
+}: {
+  value: string
+}) {
+  const [copied, setCopied] =
+    useState(false)
+
+  async function copy() {
+    await navigator.clipboard
+      .writeText(value)
+      .catch(() => null)
+
+    setCopied(true)
+    window.setTimeout(
+      () => setCopied(false),
+      1600,
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-black text-gray-700 hover:bg-gray-50"
+    >
+      {copied
+        ? "Copiado"
+        : "Copiar"}
+    </button>
+  )
+}
+
+function DnsCopyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs font-bold uppercase text-amber-700">{label}</span>
+      <div className="mt-1 flex items-center gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">{value}</code>
+        <CopyButton value={value} />
+      </div>
+    </div>
+  )
+}
+
+function RecoveryCodesBox({
+  codes,
+  title = "Códigos de recuperação",
+}: {
+  codes: string[]
+  title?: string
+}) {
+  if (!codes.length) {
+    return null
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black text-amber-950">
+            {title}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-amber-900">
+            Estes códigos aparecem somente agora. Cada código funciona uma única vez.
+          </p>
+        </div>
+        <CopyButton
+          value={codes.join("\n")}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {codes.map((code) => (
+          <code
+            key={code}
+            className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-center text-xs font-black tracking-wide text-amber-950"
+          >
+            {code}
+          </code>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function SecurityPanel({
+  canManageSecurity,
+}: {
+  canManageSecurity: boolean
+}) {
+  const [
+    data,
+    setData,
+  ] = useState<SecurityData | null>(
+    null,
+  )
+  const [
+    currentPassword,
+    setCurrentPassword,
+  ] = useState("")
+  const [
+    newPassword,
+    setNewPassword,
+  ] = useState("")
+  const [
+    confirmPassword,
+    setConfirmPassword,
+  ] = useState("")
+  const [
+    passwordMessage,
+    setPasswordMessage,
+  ] = useState("")
+  const [
+    passwordBusy,
+    setPasswordBusy,
+  ] = useState(false)
+
+  const [googleLink, setGoogleLink] = useState<{ configured: boolean; linked: boolean; email: string } | null>(null)
+  const [googleMessage, setGoogleMessage] = useState("")
+  const [googleReady, setGoogleReady] = useState(false)
+  const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null)
+  const [storageMessage, setStorageMessage] = useState("")
+  const [storageBusy, setStorageBusy] = useState(false)
+  const googleButtonRef = useRef<HTMLDivElement | null>(null)
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
+
+  const [
+    twoFactorStatus,
+    setTwoFactorStatus,
+  ] =
+    useState<TwoFactorSecurityStatus | null>(
+      null,
+    )
+  const [
+    twoFactorMessage,
+    setTwoFactorMessage,
+  ] = useState("")
+  const [
+    twoFactorBusy,
+    setTwoFactorBusy,
+  ] = useState(false)
+  const [
+    recoveryVerifier,
+    setRecoveryVerifier,
+  ] = useState("")
+  const [
+    recoveryCodes,
+    setRecoveryCodes,
+  ] = useState<string[]>([])
+  const [
+    reconfigureVerifier,
+    setReconfigureVerifier,
+  ] = useState("")
+  const [
+    reconfigureManualKey,
+    setReconfigureManualKey,
+  ] = useState("")
+  const [
+    reconfigureExpiresAt,
+    setReconfigureExpiresAt,
+  ] = useState("")
+  const [
+    reconfigureQrUrl,
+    setReconfigureQrUrl,
+  ] = useState("")
+  const [
+    reconfigureNewCode,
+    setReconfigureNewCode,
+  ] = useState("")
+  const [
+    reconfigureRecoveryCodes,
+    setReconfigureRecoveryCodes,
+  ] = useState<string[]>([])
+
+
+  const [
+    passkeys,
+    setPasskeys,
+  ] = useState<PasskeySummary[]>([])
+
+  const [
+    passkeySupported,
+    setPasskeySupported,
+  ] = useState(true)
+
+  const [
+    passkeyBusy,
+    setPasskeyBusy,
+  ] = useState(false)
+
+  const [
+    passkeyMessage,
+    setPasskeyMessage,
+  ] = useState("")
+
+  const [
+    passkeyName,
+    setPasskeyName,
+  ] = useState("")
+
+  const [
+    passkeyVerifier,
+    setPasskeyVerifier,
+  ] = useState("")
+
+
+  const [
+    timeZone,
+    setTimeZone,
+  ] = useState(
+    "America/Sao_Paulo",
+  )
+  const [
+    domain,
+    setDomain,
+  ] = useState("")
+  const [
+    verification,
+    setVerification,
+  ] = useState<{
+    domain: string
+    recordName?: string
+    recordValue?: string
+    routing?: RoutingInstruction | null
+  } | null>(null)
+
+  const storefrontRootDomain =
+    process.env.NEXT_PUBLIC_STOREFRONT_ROOT_DOMAIN || ""
+
+  const [
+    agentName,
+    setAgentName,
+  ] = useState("")
+  const [
+    newAgent,
+    setNewAgent,
+  ] = useState<{
+    id: string
+    name: string
+    token: string
+  } | null>(null)
+
+  const [
+    organizationMessage,
+    setOrganizationMessage,
+  ] = useState("")
+  const [busy, setBusy] =
+    useState(false)
+
+  const canManage = canManageSecurity
+
+  async function reload() {
+    const response = await fetch(
+      "/api/admin/organization-security",
+      { cache: "no-store" },
+    )
+
+    const next =
+      await response.json()
+
+    if (!response.ok) {
+      setOrganizationMessage(
+        next.error ||
+          "Não foi possível carregar.",
+      )
+      return
+    }
+
+    setData(next)
+    setTimeZone(next.timeZone)
+  }
+
+  async function reloadGoogle() {
+    const response = await fetch("/api/admin/google-link", { cache: "no-store" })
+    const result = await response.json().catch(() => null)
+    if (response.ok && result) setGoogleLink(result)
+  }
+
+  async function reloadTwoFactor() {
+    const response =
+      await fetch(
+        "/api/admin/2fa/security",
+        {
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    if (
+      response?.ok &&
+      result
+    ) {
+      setTwoFactorStatus(
+        result,
+      )
+    }
+  }
+
+  async function reloadPasskeys() {
+    const response =
+      await fetch(
+        "/api/admin/passkeys",
+        {
+          cache: "no-store",
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    if (
+      response?.ok &&
+      Array.isArray(
+        result?.passkeys,
+      )
+    ) {
+      setPasskeys(
+        result.passkeys,
+      )
+    }
+  }
+
+  async function reloadStorage() {
+    const response = await fetch("/api/admin/storage", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return
+    const result = await response.json().catch(() => null)
+    if (result) setStorageStatus(result)
+  }
+
+  async function migrateStorageBatch() {
+    setStorageBusy(true)
+    setStorageMessage("")
+    const response = await fetch("/api/admin/storage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    }).catch(() => null)
+    const result = await response?.json().catch(() => null)
+    setStorageBusy(false)
+
+    if (!response?.ok) {
+      setStorageMessage(result?.error || "Não foi possível migrar as imagens.")
+      return
+    }
+
+    setStorageMessage(
+      result?.complete
+        ? `Migração concluída. ${result.uploaded || 0} arquivo(s) enviados neste lote e as cópias locais já podem deixar de ser usadas.`
+        : `Lote concluído: ${result.uploaded || 0} enviado(s), ${result.alreadyStored || 0} já estavam no R2. Restam ${result.remainingLocal || 0} arquivo(s) locais. Clique novamente para continuar.`,
+    )
+    await reloadStorage()
+  }
+
+  async function linkGoogle(credential: string) {
+    setGoogleMessage("")
+    const response = await fetch("/api/admin/google-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok) {
+      setGoogleMessage(result?.error || "Não foi possível vincular o Google.")
+      return
+    }
+    setGoogleMessage("Conta Google vinculada. No próximo login você já poderá usar o Google.")
+    await reloadGoogle()
+  }
+
+  useEffect(() => {
+    void reload()
+    void reloadGoogle()
+    void reloadStorage()
+    void reloadTwoFactor()
+    void reloadPasskeys()
+
+    setPasskeySupported(
+      browserSupportsWebAuthn(),
+    )
+  }, [])
+
+  useEffect(() => {
+    if (!googleReady || !googleClientId || !googleButtonRef.current || !window.google || googleLink?.linked) return
+    googleButtonRef.current.innerHTML = ""
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: (response: { credential: string }) => void linkGoogle(response.credential),
+    })
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      width: 360,
+      shape: "rectangular",
+      text: "continue_with",
+      locale: "pt-BR",
+    })
+  }, [googleReady, googleClientId, googleLink?.linked])
+
+  const printCommand =
+    useMemo(() => {
+      if (!newAgent) return ""
+
+      if (
+        typeof window ===
+        "undefined"
+      ) {
+        return ""
+      }
+
+      return `powershell -ExecutionPolicy Bypass -File .\\INICIAR-IMPRESSAO-AUTOMATICA.ps1 -ServerUrl "${window.location.origin}" -Token "${newAgent.token}"`
+    }, [newAgent])
+
+  async function generateNewRecoveryCodes() {
+    setTwoFactorMessage("")
+    setRecoveryCodes([])
+
+    if (
+      !/^\d{6}$/.test(
+        recoveryVerifier.trim(),
+      )
+    ) {
+      setTwoFactorMessage(
+        "Informe o código de 6 dígitos do aplicativo autenticador.",
+      )
+      return
+    }
+
+    if (
+      !window.confirm(
+        "Gerar novos códigos de recuperação? Todos os códigos antigos deixarão de funcionar imediatamente.",
+      )
+    ) {
+      return
+    }
+
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/recovery-codes",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            code:
+              recoveryVerifier,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível gerar novos códigos.",
+      )
+      return
+    }
+
+    const nextCodes =
+      Array.isArray(
+        result?.recoveryCodes,
+      )
+        ? result.recoveryCodes
+        : []
+
+    setRecoveryVerifier("")
+    setRecoveryCodes(
+      nextCodes,
+    )
+    setTwoFactorMessage(
+      "Novos códigos gerados. Os códigos anteriores foram invalidados. Guarde estes novos códigos em local seguro.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function startAuthenticatorChange() {
+    setTwoFactorMessage("")
+    setReconfigureRecoveryCodes([])
+
+    const code =
+      reconfigureVerifier.trim()
+
+    if (!code) {
+      setTwoFactorMessage(
+        "Informe o código atual do Authenticator ou um código de recuperação.",
+      )
+      return
+    }
+
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/reconfigure",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            code,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível iniciar a troca do autenticador.",
+      )
+      return
+    }
+
+    setReconfigureVerifier("")
+    setReconfigureManualKey(
+      result?.manualKey || "",
+    )
+    setReconfigureExpiresAt(
+      result?.expiresAt || "",
+    )
+    setReconfigureQrUrl(
+      result?.qrUrl || "",
+    )
+    setReconfigureNewCode("")
+    setTwoFactorMessage(
+      "Novo Authenticator preparado. O autenticador atual continuará funcionando até você confirmar o novo.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function confirmAuthenticatorChange() {
+    setTwoFactorMessage("")
+
+    const code =
+      reconfigureNewCode.trim()
+
+    if (!/^\d{6}$/.test(code)) {
+      setTwoFactorMessage(
+        "Informe o código de 6 dígitos exibido no novo Authenticator.",
+      )
+      return
+    }
+
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/reconfigure",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            code,
+          }),
+        },
+      ).catch(() => null)
+
+    const result =
+      await response
+        ?.json()
+        .catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível confirmar o novo Authenticator.",
+      )
+      return
+    }
+
+    const nextCodes =
+      Array.isArray(
+        result?.recoveryCodes,
+      )
+        ? result.recoveryCodes
+        : []
+
+    setReconfigureNewCode("")
+    setReconfigureManualKey("")
+    setReconfigureExpiresAt("")
+    setReconfigureQrUrl("")
+    setReconfigureRecoveryCodes(
+      nextCodes,
+    )
+    setRecoveryCodes([])
+    setTwoFactorMessage(
+      "Authenticator trocado com sucesso. O antigo não é mais válido. Guarde os novos códigos de recuperação.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function cancelAuthenticatorChange() {
+    setTwoFactorBusy(true)
+
+    const response =
+      await fetch(
+        "/api/admin/2fa/reconfigure",
+        {
+          method: "DELETE",
+        },
+      ).catch(() => null)
+
+    setTwoFactorBusy(false)
+
+    if (!response?.ok) {
+      const result =
+        await response
+          ?.json()
+          .catch(() => null)
+
+      setTwoFactorMessage(
+        result?.error ||
+          "Não foi possível cancelar a troca.",
+      )
+      return
+    }
+
+    setReconfigureManualKey("")
+    setReconfigureExpiresAt("")
+    setReconfigureQrUrl("")
+    setReconfigureNewCode("")
+    setTwoFactorMessage(
+      "Troca de Authenticator cancelada. O autenticador atual continua ativo.",
+    )
+
+    await reloadTwoFactor()
+  }
+
+  async function addPasskey() {
+    setPasskeyMessage("")
+
+    if (
+      !browserSupportsWebAuthn()
+    ) {
+      setPasskeySupported(false)
+      setPasskeyMessage(
+        "Este navegador não oferece suporte a Passkeys/WebAuthn.",
+      )
+      return
+    }
+
+    const name =
+      passkeyName
+        .trim()
+        .replace(/\s+/g, " ")
+
+    const code =
+      passkeyVerifier.trim()
+
+    if (
+      name.length < 2 ||
+      name.length > 80
+    ) {
+      setPasskeyMessage(
+        "Informe um nome de 2 a 80 caracteres para identificar esta Passkey.",
+      )
+      return
+    }
+
+    if (!code) {
+      setPasskeyMessage(
+        "Confirme com o código atual do Authenticator ou um código de recuperação.",
+      )
+      return
+    }
+
+    setPasskeyBusy(true)
+
+    try {
+      const optionsResponse =
+        await fetch(
+          "/api/admin/passkeys/register/options",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              name,
+              code,
+            }),
+          },
+        )
+
+      const optionsData =
+        await optionsResponse
+          .json()
+          .catch(() => null)
+
+      if (!optionsResponse.ok) {
+        throw new Error(
+          optionsData?.error ||
+            "Não foi possível preparar a Passkey.",
+        )
+      }
+
+      const registrationResponse =
+        await startRegistration({
+          optionsJSON:
+            optionsData.options,
+        })
+
+      const verifyResponse =
+        await fetch(
+          "/api/admin/passkeys/register/verify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              response:
+                registrationResponse,
+            }),
+          },
+        )
+
+      const verifyData =
+        await verifyResponse
+          .json()
+          .catch(() => null)
+
+      if (!verifyResponse.ok) {
+        throw new Error(
+          verifyData?.error ||
+            "Não foi possível confirmar a Passkey.",
+        )
+      }
+
+      setPasskeyName("")
+      setPasskeyVerifier("")
+      setPasskeyMessage(
+        "Passkey cadastrada com sucesso. Ela já pode ser usada como segundo fator no próximo login.",
+      )
+
+      await reloadPasskeys()
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Não foi possível cadastrar a Passkey."
+
+      setPasskeyMessage(
+        message.includes(
+          "The operation either timed out or was not allowed",
+        ) ||
+          message.includes(
+            "NotAllowedError",
+          )
+          ? "O cadastro da Passkey foi cancelado ou expirou."
+          : message,
+      )
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }
+
+  async function removePasskey(
+    credentialId: string,
+    name: string,
+  ) {
+    setPasskeyMessage("")
+
+    const code =
+      passkeyVerifier.trim()
+
+    if (!code) {
+      setPasskeyMessage(
+        "Informe o código atual do Authenticator ou um código de recuperação antes de remover uma Passkey.",
+      )
+      return
+    }
+
+    if (
+      !window.confirm(
+        `Remover a Passkey "${name}" desta conta?`,
+      )
+    ) {
+      return
+    }
+
+    setPasskeyBusy(true)
+
+    try {
+      const response =
+        await fetch(
+          "/api/admin/passkeys",
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              credentialId,
+              code,
+            }),
+          },
+        )
+
+      const result =
+        await response
+          .json()
+          .catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            "Não foi possível remover a Passkey.",
+        )
+      }
+
+      setPasskeyVerifier("")
+      setPasskeyMessage(
+        "Passkey removida. Ela não pode mais ser usada no login.",
+      )
+
+      await reloadPasskeys()
+    } catch (err) {
+      setPasskeyMessage(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível remover a Passkey.",
+      )
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }
+
+  async function changePassword(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setPasswordMessage("")
+
+    if (newPassword.length < 12) {
+      return setPasswordMessage(
+        "A nova senha precisa ter pelo menos 12 caracteres.",
+      )
+    }
+
+    if (
+      newPassword !==
+      confirmPassword
+    ) {
+      return setPasswordMessage(
+        "As novas senhas não conferem.",
+      )
+    }
+
+    setPasswordBusy(true)
+
+    const response = await fetch(
+      "/api/admin/password/change",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    if (!response.ok) {
+      setPasswordBusy(false)
+      return setPasswordMessage(
+        result.error ||
+          "Não foi possível alterar.",
+      )
+    }
+
+    setPasswordMessage(
+      "Senha alterada. Entre novamente.",
+    )
+
+    window.setTimeout(() => {
+      window.location.href =
+        "/login"
+    }, 700)
+  }
+
+  async function saveTimeZone() {
+    setBusy(true)
+    setOrganizationMessage("")
+
+    const response = await fetch(
+      "/api/admin/organization-security",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          timeZone,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível salvar.",
+      )
+    }
+
+    setOrganizationMessage(
+      "Timezone atualizado.",
+    )
+    await reload()
+  }
+
+  async function createDomain(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setBusy(true)
+    setOrganizationMessage("")
+    setVerification(null)
+
+    const response = await fetch(
+      "/api/admin/domains",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível cadastrar.",
+      )
+    }
+
+    setVerification(
+      result.verification,
+    )
+    setDomain("")
+    setOrganizationMessage(
+      "Domínio cadastrado no SaborFlow e no Cloudflare for SaaS. Configure os registros DNS exibidos abaixo e depois clique em Verificar.",
+    )
+    await reload()
+  }
+
+  async function verifyDomain(
+    value: string,
+  ) {
+    setBusy(true)
+    setOrganizationMessage("")
+
+    const response = await fetch(
+      "/api/admin/domains/verify",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain: value,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "DNS ainda não validado.",
+      )
+    }
+
+    setVerification({
+      domain: value,
+      routing: result.routing || null,
+    })
+    setOrganizationMessage(
+      result.routing?.ready
+        ? "Domínio verificado e Cloudflare/SSL prontos."
+        : "Domínio verificado no SaborFlow. O Cloudflare ainda está validando DNS/SSL.",
+    )
+    await reload()
+  }
+
+  async function removeDomain(
+    value: string,
+  ) {
+    if (
+      !window.confirm(
+        `Remover ${value} desta empresa?`,
+      )
+    ) {
+      return
+    }
+
+    const response = await fetch(
+      "/api/admin/domains",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain: value,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível remover.",
+      )
+    }
+
+    await reload()
+  }
+
+  async function createAgent(
+    event: FormEvent,
+  ) {
+    event.preventDefault()
+    setBusy(true)
+    setOrganizationMessage("")
+    setNewAgent(null)
+
+    const response = await fetch(
+      "/api/admin/print-agents",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          name: agentName,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    setBusy(false)
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível criar.",
+      )
+    }
+
+    setNewAgent(
+      result.agent,
+    )
+    setAgentName("")
+    setOrganizationMessage(
+      "Agente criado. O token abaixo é exibido somente nesta tela agora.",
+    )
+    await reload()
+  }
+
+  async function revokeAgent(
+    id: string,
+  ) {
+    const response = await fetch(
+      "/api/admin/print-agents",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          id,
+        }),
+      },
+    )
+
+    const result =
+      await response.json()
+
+    if (!response.ok) {
+      return setOrganizationMessage(
+        result.error ||
+          "Não foi possível revogar.",
+      )
+    }
+
+    await reload()
+  }
+
+  return (
+    <div className="space-y-5">
+      {googleClientId && <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={() => setGoogleReady(true)} />}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-black">
+          Minha conta
+        </h2>
+        <p className="mt-1 text-sm text-gray-500">
+          A nova senha invalida as
+          sessões administrativas antigas.
+        </p>
+
+        <form
+          onSubmit={changePassword}
+          className="mt-5 grid gap-3 md:grid-cols-3"
+        >
+          <input
+            type="password"
+            autoComplete="current-password"
+            required
+            placeholder="Senha atual"
+            value={currentPassword}
+            onChange={(event) =>
+              setCurrentPassword(
+                event.target.value,
+              )
+            }
+            className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            required
+            placeholder="Nova senha"
+            value={newPassword}
+            onChange={(event) =>
+              setNewPassword(
+                event.target.value,
+              )
+            }
+            className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            required
+            placeholder="Confirmar nova senha"
+            value={confirmPassword}
+            onChange={(event) =>
+              setConfirmPassword(
+                event.target.value,
+              )
+            }
+            className="h-11 rounded-xl border border-gray-200 px-3 text-sm"
+          />
+
+          <button
+            disabled={passwordBusy}
+            className="h-11 rounded-xl bg-[#2f1c13] px-4 text-sm font-black text-white md:col-span-3 md:w-fit"
+          >
+            {passwordBusy
+              ? "Alterando..."
+              : "Alterar minha senha"}
+          </button>
+        </form>
+
+        {passwordMessage && (
+          <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {passwordMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">
+              Autenticação em duas etapas
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">
+              O 2FA protege sua conta com o aplicativo autenticador. Não existe botão de desativação simples: alterações sensíveis exigem uma nova confirmação.
+            </p>
+          </div>
+
+          <div
+            className={
+              twoFactorStatus?.enabled
+                ? "w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700"
+                : "w-fit rounded-full bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-800"
+            }
+          >
+            {twoFactorStatus?.enabled
+              ? "2FA ativo"
+              : "2FA não confirmado"}
+          </div>
+        </div>
+
+        {twoFactorStatus?.enabled ? (
+          <>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="text-sm font-black text-gray-950">
+                  Códigos de recuperação
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  Restam <strong>{twoFactorStatus.recoveryCodesRemaining}</strong> código(s). Gere novos códigos somente se perdeu os antigos ou acredita que foram expostos.
+                </p>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    placeholder="Código atual de 6 dígitos"
+                    value={recoveryVerifier}
+                    onChange={(event) =>
+                      setRecoveryVerifier(
+                        event.target.value.replace(/\D/g, "").slice(0, 6),
+                      )
+                    }
+                    className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={generateNewRecoveryCodes}
+                    className="h-11 rounded-xl bg-[#2f1c13] px-4 text-sm font-black text-white disabled:opacity-60"
+                  >
+                    Gerar novos códigos
+                  </button>
+                </div>
+
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Por segurança, esta ação exige um código novo do Authenticator. Os códigos antigos são invalidados imediatamente.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="text-sm font-black text-gray-950">
+                  Trocar Authenticator
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  Use esta opção ao trocar ou perder o celular. O autenticador atual continua válido até a confirmação do novo.
+                </p>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    autoComplete="one-time-code"
+                    placeholder="Código atual ou de recuperação"
+                    value={reconfigureVerifier}
+                    onChange={(event) =>
+                      setReconfigureVerifier(
+                        event.target.value,
+                      )
+                    }
+                    className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={startAuthenticatorChange}
+                    className="h-11 rounded-xl border border-gray-300 px-4 text-sm font-black text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    Preparar troca
+                  </button>
+                </div>
+
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Se você perdeu o celular, pode usar um dos seus códigos de recuperação para autorizar esta troca.
+                </p>
+              </div>
+            </div>
+
+            {twoFactorStatus.reconfigurationPending &&
+              !reconfigureManualKey && (
+                <div className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-amber-950">
+                      Existe uma troca de Authenticator pendente.
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-amber-900">
+                      Para continuar, autorize novamente com o código atual. Se você não iniciou a troca, cancele agora.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={cancelAuthenticatorChange}
+                    className="rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-black text-amber-900 disabled:opacity-60"
+                  >
+                    Cancelar troca pendente
+                  </button>
+                </div>
+              )}
+
+            <RecoveryCodesBox
+              codes={recoveryCodes}
+              title="Novos códigos de recuperação"
+            />
+
+            {reconfigureManualKey && (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-blue-950">
+                      Configure o novo Authenticator
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-blue-900">
+                      Escaneie o QR Code abaixo com o novo celular. O autenticador antigo só será substituído depois da confirmação.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={twoFactorBusy}
+                    onClick={cancelAuthenticatorChange}
+                    className="rounded-xl border border-blue-300 bg-white px-3 py-2 text-xs font-black text-blue-900 disabled:opacity-60"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
+                  <div className="overflow-hidden rounded-2xl border border-blue-200 bg-white p-3">
+                    {reconfigureQrUrl && (
+                      <img
+                        src={reconfigureQrUrl}
+                        alt="QR Code do novo Authenticator"
+                        width={280}
+                        height={280}
+                        className="h-auto w-full"
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold uppercase text-blue-800">
+                      Chave manual
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <code className="min-w-0 flex-1 break-all rounded-xl bg-white px-3 py-3 text-xs font-black text-blue-950">
+                        {reconfigureManualKey}
+                      </code>
+                      <CopyButton
+                        value={reconfigureManualKey.replace(/\s+/g, "")}
+                      />
+                    </div>
+
+                    {reconfigureExpiresAt && (
+                      <p className="mt-2 text-xs text-blue-800">
+                        Esta troca expira às{" "}
+                        <strong>
+                          {new Date(
+                            reconfigureExpiresAt,
+                          ).toLocaleTimeString(
+                            "pt-BR",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
+                        </strong>.
+                      </p>
+                    )}
+
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="Código do novo Authenticator"
+                        value={reconfigureNewCode}
+                        onChange={(event) =>
+                          setReconfigureNewCode(
+                            event.target.value.replace(/\D/g, "").slice(0, 6),
+                          )
+                        }
+                        className="h-11 min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={twoFactorBusy}
+                        onClick={confirmAuthenticatorChange}
+                        className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-60"
+                      >
+                        Confirmar novo Authenticator
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <RecoveryCodesBox
+              codes={reconfigureRecoveryCodes}
+              title="Novos códigos após a troca"
+            />
+          </>
+        ) : (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            O 2FA ainda não está confirmado nesta conta. Saia e entre novamente para concluir a ativação obrigatória.
+          </div>
+        )}
+
+        {twoFactorMessage && (
+          <p className="mt-4 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {twoFactorMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">
+              Passkeys e chaves de segurança
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">
+              Cadastre Windows Hello, biometria do celular, Passkeys sincronizadas ou uma chave física FIDO2. No login, elas podem substituir o código de 6 dígitos como segundo fator.
+            </p>
+          </div>
+
+          <span className="w-fit rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">
+            {passkeys.length} cadastrada(s)
+          </span>
+        </div>
+
+        {!passkeySupported ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Este navegador ou dispositivo não oferece suporte a Passkeys/WebAuthn. Você pode continuar usando o Authenticator normalmente.
+          </div>
+        ) : !twoFactorStatus?.enabled ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Conclua primeiro a ativação obrigatória do 2FA para cadastrar Passkeys.
+          </div>
+        ) : (
+          <>
+            <div className="mt-5 rounded-2xl border border-gray-200 p-4">
+              <h3 className="text-sm font-black text-gray-950">
+                Adicionar uma Passkey
+              </h3>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                A confirmação abaixo protege o cadastro de novas chaves. Se acabou de usar um código do Authenticator, aguarde o próximo código antes de confirmar.
+              </p>
+
+              <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+                <input
+                  type="text"
+                  maxLength={80}
+                  placeholder="Nome, ex.: Notebook principal"
+                  value={passkeyName}
+                  onChange={(event) =>
+                    setPasskeyName(
+                      event.target.value,
+                    )
+                  }
+                  className="h-11 min-w-0 rounded-xl border border-gray-200 px-3 text-sm"
+                />
+
+                <input
+                  type="text"
+                  autoComplete="one-time-code"
+                  placeholder="Código atual ou de recuperação"
+                  value={passkeyVerifier}
+                  onChange={(event) =>
+                    setPasskeyVerifier(
+                      event.target.value,
+                    )
+                  }
+                  className="h-11 min-w-0 rounded-xl border border-gray-200 px-3 text-sm"
+                />
+
+                <button
+                  type="button"
+                  disabled={passkeyBusy}
+                  onClick={() =>
+                    void addPasskey()
+                  }
+                  className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-60"
+                >
+                  {passkeyBusy
+                    ? "Aguarde..."
+                    : "Adicionar Passkey"}
+                </button>
+              </div>
+
+              <p className="mt-2 text-xs leading-5 text-gray-500">
+                A chave privada fica protegida no seu dispositivo ou chave física. O SaborFlow armazena somente a credencial pública necessária para verificar o login.
+              </p>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {passkeys.map(
+                (passkey) => (
+                  <div
+                    key={passkey.id}
+                    className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black text-gray-950">
+                        {passkey.name}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        Cadastrada em{" "}
+                        {new Date(
+                          passkey.createdAt,
+                        ).toLocaleString(
+                          "pt-BR",
+                        )}
+                        {" · "}
+                        {passkey.backedUp ||
+                        passkey.deviceType ===
+                          "multiDevice"
+                          ? "Passkey sincronizável"
+                          : "Dispositivo/chave física"}
+                        {passkey.lastUsedAt
+                          ? ` · último uso ${new Date(
+                              passkey.lastUsedAt,
+                            ).toLocaleString(
+                              "pt-BR",
+                            )}`
+                          : " · ainda não utilizada"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={passkeyBusy}
+                      onClick={() =>
+                        void removePasskey(
+                          passkey.id,
+                          passkey.name,
+                        )
+                      }
+                      className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-60"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ),
+              )}
+
+              {!passkeys.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
+                  Nenhuma Passkey ou chave de segurança cadastrada ainda.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+        {passkeyMessage && (
+          <p className="mt-4 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+            {passkeyMessage}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-black">Login com Google</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Vincule a mesma Conta Google do seu e-mail SaborFlow para entrar no painel sem digitar a senha.
+        </p>
+
+        {!googleClientId || googleLink?.configured === false ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            Login com Google ainda não foi habilitado nas variáveis do Railway.
+          </div>
+        ) : googleLink?.linked ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            Conta Google vinculada a <strong>{googleLink.email}</strong>.
+          </div>
+        ) : (
+          <div className="mt-4">
+            <div ref={googleButtonRef} className="min-h-11 max-w-sm" />
+            <p className="mt-2 text-xs leading-5 text-gray-500">Use exatamente a Conta Google com o e-mail <strong>{googleLink?.email || "da sua conta SaborFlow"}</strong>.</p>
+          </div>
+        )}
+
+        {googleMessage && (
+          <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{googleMessage}</p>
+        )}
+      </section>
+
+      {!canManage && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-black">
+            Segurança da empresa
+          </h2>
+          <p className="mt-2 text-sm text-gray-500">
+            Domínios, timezone e agentes
+            de impressão são gerenciados
+            por proprietário ou
+            administrador.
+          </p>
+        </section>
+      )}
+
+      {canManage && (
+        <>
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">Storage e CDN</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Imagens no Cloudflare R2 deixam a aplicação independente do disco do Railway e preparam o serviço para múltiplas réplicas.
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">Modo atual</p>
+                <p className="mt-1 font-black">{storageStatus?.mode === "r2" ? "Cloudflare R2" : "Disco / Volume"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">CDN pública</p>
+                <p className="mt-1 break-all font-black">{storageStatus?.publicHost || "Não configurada"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-bold uppercase text-gray-500">Arquivos legados locais</p>
+                <p className="mt-1 font-black">{storageStatus?.localFileCount ?? "—"}</p>
+              </div>
+            </div>
+
+            {storageStatus?.mode === "r2" && storageStatus.r2Configured ? (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">R2 configurado e ativo.</p>
+                <p className="mt-1 text-xs leading-5 text-emerald-800">
+                  Novos uploads já vão para o R2. Enquanto ainda existirem arquivos locais, mantenha o Volume do Railway conectado e migre os arquivos antigos.
+                </p>
+                {(storageStatus.localFileCount || 0) > 0 && (
+                  <button
+                    type="button"
+                    disabled={storageBusy}
+                    onClick={migrateStorageBatch}
+                    className="mt-3 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-60"
+                  >
+                    {storageBusy ? "Migrando..." : "Migrar próximo lote de imagens"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Configure as variáveis R2 no Railway e defina <code className="font-black">MEDIA_STORAGE_MODE=r2</code>. Até lá, o sistema continua usando o armazenamento local atual.
+              </div>
+            )}
+
+            {storageMessage && (
+              <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{storageMessage}</p>
+            )}
+
+            {storageStatus?.replicaReady && (
+              <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                O serviço está sem arquivos locais detectados e com R2 ativo. Depois de confirmar que todas as imagens abrem corretamente, você pode remover o Volume para liberar o uso de réplicas.
+              </p>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">
+              <HelpLabel helpKey="security.timezone">Timezone da empresa</HelpLabel>
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Usado para datas operacionais,
+              relatórios e impressão.
+            </p>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <input
+                list="saborflow-timezones"
+                value={timeZone}
+                onChange={(event) =>
+                  setTimeZone(
+                    event.target.value,
+                  )
+                }
+                className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+              />
+              <datalist id="saborflow-timezones">
+                {commonTimeZones.map(
+                  (item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    />
+                  ),
+                )}
+              </datalist>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveTimeZone}
+                className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white"
+              >
+                Salvar timezone
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">
+              <HelpLabel helpKey="security.domain">Domínio customizado</HelpLabel>
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              O SaborFlow cadastra o domínio automaticamente no Cloudflare for SaaS,
+              prepara o SSL e informa exatamente quais registros DNS o cliente deve criar.
+            </p>
+
+            {storefrontRootDomain && data?.organization?.slug && (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-xs font-bold uppercase text-blue-700">Subdomínio automático SaborFlow</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
+                    {`https://${data.organization.slug}.${storefrontRootDomain}`}
+                  </code>
+                  <CopyButton value={`https://${data.organization.slug}.${storefrontRootDomain}`} />
+                </div>
+                <p className="mt-2 text-xs text-blue-800">
+                  Esse endereço usa o slug da empresa e funciona pelo wildcard da plataforma, sem cadastrar cada loja individualmente.
+                </p>
+              </div>
+            )}
+
+            <form
+              onSubmit={createDomain}
+              className="mt-4 flex flex-col gap-3 sm:flex-row"
+            >
+              <input
+                required
+                placeholder="pedidos.suaempresa.com.br"
+                value={domain}
+                onChange={(event) =>
+                  setDomain(
+                    event.target.value,
+                  )
+                }
+                className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+              />
+              <button
+                disabled={busy}
+                className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white"
+              >
+                Gerar verificação
+              </button>
+            </form>
+
+            {verification && (
+              <div className="mt-4 space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                {verification.recordName && verification.recordValue && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-black text-amber-900">1. Verificação de propriedade do SaborFlow</p>
+                    <DnsCopyRow label="TXT — Nome" value={verification.recordName} />
+                    <DnsCopyRow label="TXT — Valor" value={verification.recordValue} />
+                  </div>
+                )}
+
+                {verification.routing && (
+                  <div className="space-y-3 border-t border-amber-200 pt-4">
+                    <p className="text-sm font-black text-amber-900">2. Roteamento e SSL automáticos — Cloudflare for SaaS</p>
+                    {verification.routing.dnsRecords.map((record, index) => (
+                      <div key={`${record.name}-${record.value}-${index}`} className="rounded-xl border border-amber-200 bg-white/70 p-3">
+                        <p className="mb-2 text-xs font-black text-amber-800">
+                          {record.purpose === "traffic"
+                            ? "Tráfego da loja"
+                            : record.purpose === "hostname_verification"
+                              ? "Validação do hostname"
+                              : "Validação do certificado SSL"}
+                        </p>
+                        <DnsCopyRow label={`${record.type} — Nome`} value={record.name} />
+                        <div className="mt-2"><DnsCopyRow label={`${record.type} — Valor`} value={record.value} /></div>
+                        {record.status && <p className="mt-2 text-xs text-amber-800">Status Cloudflare: {record.status}</p>}
+                      </div>
+                    ))}
+                    <div className="rounded-xl border border-amber-200 bg-white/70 p-3 text-xs text-amber-900">
+                      <p><strong>Hostname:</strong> {verification.routing.hostnameStatus || "aguardando"}</p>
+                      <p className="mt-1"><strong>SSL:</strong> {verification.routing.sslStatus || "aguardando"}</p>
+                    </div>
+                    {verification.routing.errors.length > 0 && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+                        {verification.routing.errors.join(" • ")}
+                      </div>
+                    )}
+                    <p className={verification.routing.ready ? "text-xs font-bold text-emerald-700" : "text-xs font-bold text-amber-800"}>
+                      {verification.routing.ready
+                        ? "Cloudflare: hostname e certificado SSL ativos."
+                        : "Cloudflare: aguardando propagação/validação. Clique em Verificar novamente após o DNS propagar."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-5 space-y-2">
+              {data?.domains.map(
+                (item) => (
+                  <div
+                    key={item.domain}
+                    className="flex flex-col gap-3 rounded-xl border border-gray-200 p-3 sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <strong className="break-all text-sm">
+                        {item.domain}
+                      </strong>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                        <span
+                          className={
+                            item.verified
+                              ? "font-bold text-emerald-700"
+                              : "font-bold text-amber-700"
+                          }
+                        >
+                          {item.verified
+                            ? "Verificado"
+                            : "Pendente"}
+                        </span>
+                        {item.primary && (
+                          <span className="font-bold text-blue-700">
+                            Principal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => verifyDomain(item.domain)}
+                      className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white"
+                    >
+                      {item.verified ? "Atualizar Cloudflare/SSL" : "Verificar"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        removeDomain(
+                          item.domain,
+                        )
+                      }
+                      className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ),
+              )}
+
+              {!data?.domains.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
+                  Nenhum domínio customizado
+                  cadastrado.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-black">
+              <HelpLabel helpKey="security.printAgent">Agentes de impressão</HelpLabel>
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Cada empresa recebe seu próprio
+              token. Um token de uma empresa não
+              acessa a fila de outra.
+            </p>
+
+            <form
+              onSubmit={createAgent}
+              className="mt-4 flex flex-col gap-3 sm:flex-row"
+            >
+              <input
+                required
+                placeholder="Caixa principal"
+                value={agentName}
+                onChange={(event) =>
+                  setAgentName(
+                    event.target.value,
+                  )
+                }
+                className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm"
+              />
+              <button
+                disabled={busy}
+                className="h-11 rounded-xl bg-blue-700 px-4 text-sm font-black text-white"
+              >
+                Criar agente
+              </button>
+            </form>
+
+            {newAgent && (
+              <div className="mt-4 space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">
+                  Token exibido uma única vez
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 text-xs">
+                    {newAgent.token}
+                  </code>
+                  <CopyButton
+                    value={
+                      newAgent.token
+                    }
+                  />
+                </div>
+
+                {printCommand && (
+                  <>
+                    <p className="text-xs font-bold text-emerald-800">
+                      Comando no computador
+                      Windows:
+                    </p>
+                    <div className="flex items-start gap-2">
+                      <code className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded-lg bg-white px-3 py-2 text-xs">
+                        {printCommand}
+                      </code>
+                      <CopyButton
+                        value={
+                          printCommand
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="mt-5 space-y-2">
+              {data?.printAgents.map(
+                (agent) => (
+                  <div
+                    key={agent.id}
+                    className="flex items-center gap-3 rounded-xl border border-gray-200 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <strong className="text-sm">
+                        {agent.name}
+                      </strong>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {agent.active
+                          ? "Ativo"
+                          : "Revogado"}
+                        {agent.lastSeenAt
+                          ? ` · último contato ${new Date(
+                              agent.lastSeenAt,
+                            ).toLocaleString(
+                              "pt-BR",
+                            )}`
+                          : " · ainda não conectado"}
+                      </p>
+                    </div>
+
+                    {agent.active && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          revokeAgent(
+                            agent.id,
+                          )
+                        }
+                        className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700"
+                      >
+                        Revogar
+                      </button>
+                    )}
+                  </div>
+                ),
+              )}
+
+              {!data?.printAgents.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500">
+                  Nenhum agente específico da
+                  empresa ainda.
+                </p>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+
+      {organizationMessage && (
+        <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+          {organizationMessage}
+        </p>
+      )}
+    </div>
+  )
+}
+
+
+===== app\api\auth\password-reset\request\route.ts =====
+
+import { NextResponse } from "next/server"
+import { createHash } from "node:crypto"
+import { createSelfServicePasswordReset } from "@/lib/admin-user-db"
+import {
+  authRateLimitKey,
+  checkAuthRateLimit,
+  registerAuthFailure,
+} from "@/lib/security/rate-limit"
+import {
+  requestIp,
+  requestIsSameOrigin,
+} from "@/lib/security/request-security"
+
+const IP_LIMIT = 12
+const ACCOUNT_LIMIT = 5
+const RATE_WINDOW_MS = 15 * 60 * 1000
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status = 200,
+  retryAfterSeconds = 0,
+) {
+  const response = NextResponse.json(body, { status })
+  response.headers.set("Cache-Control", "no-store")
+
+  if (retryAfterSeconds > 0) {
+    response.headers.set(
+      "Retry-After",
+      String(retryAfterSeconds),
+    )
+  }
+
+  return response
+}
+
+function normalizeIdentifier(identifier: string) {
+  const trimmed = identifier.trim()
+
+  if (trimmed.includes("@")) {
+    return trimmed.toLowerCase()
+  }
+
+  return trimmed.replace(/\D/g, "")
+}
+
+function genericSuccess() {
+  return jsonResponse({
+    ok: true,
+    message:
+      "Se os dados informados estiverem vinculados a uma conta ativa, enviaremos as instruções de recuperação para o e-mail cadastrado.",
+  })
+}
+
+async function sendPasswordResetEmail(input: {
+  recipient: string
+  resetUrl: string
+  expiresAt: string
+}) {
+  const apiKey =
+    process.env.AUTH_RESEND_API_KEY?.trim() || ""
+
+  const from =
+    process.env.AUTH_EMAIL_FROM?.trim() || ""
+
+  if (!apiKey || !from) {
+    throw new Error(
+      "AUTH_RESEND_API_KEY e AUTH_EMAIL_FROM precisam estar configuradas.",
+    )
+  }
+
+  const idempotencyKey = createHash("sha256")
+    .update(
+      `password-reset:${input.recipient}:${input.expiresAt}`,
+    )
+    .digest("hex")
+
+  const response = await fetch(
+    "https://api.resend.com/emails",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        "idempotency-key":
+          idempotencyKey.slice(0, 250),
+        "user-agent": "SaborFlow/Auth",
+      },
+      body: JSON.stringify({
+        from,
+        to: [input.recipient],
+        subject:
+          "Redefinição de senha - SaborFlow",
+        text: [
+          "Recebemos uma solicitação para redefinir a senha da sua conta SaborFlow.",
+          "",
+          "Abra o link abaixo para criar uma nova senha:",
+          input.resetUrl,
+          "",
+          "Este link expira em 30 minutos e pode ser usado uma única vez.",
+          "",
+          "Se você não solicitou essa alteração, ignore este e-mail.",
+        ].join("\n"),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  )
+
+  if (!response.ok) {
+    const raw = await response.text()
+
+    throw new Error(
+      `Falha no envio do e-mail de recuperação (${response.status}): ${raw.slice(0, 300)}`,
+    )
+  }
+}
+
+export async function POST(request: Request) {
+  if (!requestIsSameOrigin(request)) {
+    return jsonResponse(
+      {
+        error:
+          "Origem da requisição não autorizada.",
+      },
+      403,
+    )
+  }
+
+  const ipKey = authRateLimitKey(
+    "ip",
+    requestIp(request),
+  )
+
+  const ipLimit = checkAuthRateLimit(
+    ipKey,
+    IP_LIMIT,
+    RATE_WINDOW_MS,
+  )
+
+  if (!ipLimit.allowed) {
+    return jsonResponse(
+      {
+        error:
+          "Muitas solicitações de recuperação. Tente novamente mais tarde.",
+      },
+      429,
+      ipLimit.retryAfterSeconds,
+    )
+  }
+
+  const body = (await request.json().catch(
+    () => null,
+  )) as
+    | {
+        identifier?: string
+      }
+    | null
+
+  const identifier =
+    body?.identifier?.trim() || ""
+
+  if (!identifier) {
+    registerAuthFailure(
+      ipKey,
+      RATE_WINDOW_MS,
+    )
+
+    return jsonResponse(
+      {
+        error:
+          "Informe seu CPF ou e-mail.",
+      },
+      400,
+    )
+  }
+
+  const normalized =
+    normalizeIdentifier(identifier)
+
+  const accountKey = authRateLimitKey(
+    "account",
+    normalized,
+  )
+
+  const accountLimit =
+    checkAuthRateLimit(
+      accountKey,
+      ACCOUNT_LIMIT,
+      RATE_WINDOW_MS,
+    )
+
+  if (!accountLimit.allowed) {
+    return genericSuccess()
+  }
+
+  try {
+    const reset =
+      await createSelfServicePasswordReset(
+        identifier,
+      )
+
+    if (!reset) {
+      registerAuthFailure(
+        accountKey,
+        RATE_WINDOW_MS,
+      )
+
+      return genericSuccess()
+    }
+
+    const configuredBaseUrl =
+      process.env.APP_BASE_URL?.trim()
+
+    const baseUrl =
+      configuredBaseUrl ||
+      new URL(request.url).origin
+
+    const resetUrl =
+      `${baseUrl.replace(/\/+$/, "")}` +
+      `/recuperar-senha/${encodeURIComponent(
+        reset.token,
+      )}`
+
+    await sendPasswordResetEmail({
+      recipient: reset.email,
+      resetUrl,
+      expiresAt: reset.expiresAt,
+    })
+
+    return genericSuccess()
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Falha ao solicitar recuperação de senha:",
+      error instanceof Error
+        ? error.message
+        : error,
+    )
+
+    return jsonResponse(
+      {
+        error:
+          "Não foi possível enviar a recuperação de senha no momento.",
+      },
+      503,
+    )
+  }
+}
+
+001_core_multiempresa.sql
+002_organization_onboarding.sql
+003_catalog_multiempresa.sql
+004_orders_multiempresa.sql
+005_customers_multiempresa.sql
+006_operations_multiempresa.sql
+007_tenant_runtime.sql
+008_admin_auth_onboarding_checkout.sql
+009_security_team_domain_rls.sql
+010_food_composition_inventory.sql
+011_backfill_rls_after_out_of_order_010.sql
+012_saas_billing_plans.sql
+013_billing_checkout_webhooks.sql
+014_commercial_onboarding.sql
+015_reconcile_legacy_commercial_onboarding.sql
+016_demo_trials.sql
+017_superadmin_control_plane.sql
+018_superadmin_registration_finance.sql
+019_corporate_groups_branches.sql
+020_crm_loyalty_marketing.sql
+021_advanced_food_operations.sql
+022_integrations.sql
+023_definitive_postgres_rls.sql
+024_reconcile_onboarding_after_rls.sql
+025_delivery_dispatch_identity.sql
+026_staff_profile_details.sql
+027_delivery_live_tracking.sql
+028_admin_totp_2fa.sql
+029_admin_2fa_recovery_management.sql
+030_admin_passkeys.sql

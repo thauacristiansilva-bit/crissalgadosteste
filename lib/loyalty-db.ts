@@ -21,7 +21,7 @@ async function loyaltyCutoverAt(client: PoolClient) {
   return value ? new Date(value).getTime() : null
 }
 
-async function loyaltyEntitlementActive(client: PoolClient, organizationId: string) {
+export async function loyaltyEntitlementActive(client: PoolClient, organizationId: string) {
   const billing = await client.query<{
     account_status: string
     subscription_status: string | null

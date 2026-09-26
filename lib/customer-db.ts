@@ -34,6 +34,7 @@ type CustomerAccountRow = {
   default_latitude: number | null
   default_longitude: number | null
   loyalty_points: number
+  cashback_cents?: number
   active: boolean
   created_at: Date | string
   updated_at: Date | string
@@ -70,6 +71,7 @@ function mapAccount(row: CustomerAccountRow): CustomerAccount {
         ? null
         : Number(row.default_longitude),
     loyaltyPoints: Number(row.loyalty_points),
+    cashbackCents: Number(row.cashback_cents || 0),
     active: Boolean(row.active),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
@@ -224,6 +226,7 @@ export async function getTenantCustomerAccounts(
         default_latitude,
         default_longitude,
         loyalty_points,
+        COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents,
         active,
         created_at,
         updated_at
@@ -263,6 +266,7 @@ export async function getTenantCustomerAccount(
         default_latitude,
         default_longitude,
         loyalty_points,
+        COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents,
         active,
         created_at,
         updated_at
@@ -306,6 +310,7 @@ export async function authenticateTenantCustomer(
         default_latitude,
         default_longitude,
         loyalty_points,
+        COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents,
         active,
         created_at,
         updated_at
@@ -556,6 +561,7 @@ export async function updateTenantCustomerAccount(
         default_latitude,
         default_longitude,
         loyalty_points,
+        COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents,
         active,
         created_at,
         updated_at
@@ -613,6 +619,7 @@ export async function upsertTenantCustomerAccount(
         default_latitude,
         default_longitude,
         loyalty_points,
+        COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents,
         active,
         auth_provider,
         created_at,

@@ -4,9 +4,10 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, PackageCheck, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
-import { isStoreOpenNow, zonedDateString, zonedDateTime } from "@/lib/operations"
+import { isStoreOpenNow, isWithinBusinessDay, zonedDateString, zonedDateTime } from "@/lib/operations"
 import { categoryIncludes, categoryShortName, parentCategoryName, sortedCategories } from "@/lib/category-hierarchy"
 import { isPricedFlavorGroup, pricedFlavorStartingPrice } from "@/lib/product-composition"
+import { whatsappOrderText } from "@/lib/order-summary"
 import { IMMEDIATE_DELIVERY_MIN_MINUTES, IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
 import { geocodeGoogleAddress, reverseGeocodeGoogle, type GoogleAddress } from "@/lib/google-maps-client"
 import { DeliveryLocationMap } from "@/components/store/delivery-location-map"
@@ -45,7 +46,7 @@ type CartItem = {
 type CustomerPublic = {
   id: number; cpfLast4: string; name: string; phone: string; email: string
   defaultAddress: string; defaultNumber: string; defaultDistrict: string; defaultCity: string; defaultState: string; defaultZipCode: string; defaultComplement: string
-  defaultLatitude: number | null; defaultLongitude: number | null; loyaltyPoints: number
+  defaultLatitude: number | null; defaultLongitude: number | null; loyaltyPoints: number; cashbackCents?: number
 }
 type Checkout = {
   name: string; phone: string; type: "pickup" | "delivery"; timing: "now" | "scheduled"; scheduleDate: string; scheduleTime: string
@@ -126,6 +127,7 @@ export function Storefront({
   const [accountOpen, setAccountOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const [customer, setCustomer] = useState<CustomerPublic | null>(null)
+  const [redeemCashback, setRedeemCashback] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const [addressNotice, setAddressNotice] = useState("")
@@ -457,7 +459,7 @@ export function Storefront({
     for (let value = start; value <= end; value += settings.slotIntervalMinutes) {
       const text = minutesToTime(value)
       const date = zonedDateTime(selectedDate, text, organizationTimeZone)
-      if (date.getTime() >= minimum) result.push(text)
+      if (date.getTime() >= minimum && isWithinBusinessDay(schedule, text)) result.push(text)
     }
     return result
   }, [checkout.timing, checkout.type, selectedDate, settings.businessHours, settings.deliveryMinMinutes, settings.pickupLeadMinutes, settings.slotIntervalMinutes, organizationTimeZone])
@@ -549,7 +551,9 @@ export function Storefront({
       .slice(0, 4)
   }, [cart, products])
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
-  const total = Math.max(0, subtotal - couponDiscount) + deliveryFee
+  const amountBeforeCashback = Math.max(0, subtotal - couponDiscount) + deliveryFee
+  const cashbackUsed = redeemCashback && settings.cashbackEnabled && customer ? Math.min((customer.cashbackCents || 0) / 100, amountBeforeCashback) : 0
+  const total = Math.max(0, amountBeforeCashback - cashbackUsed)
 
   function validateCartCustomization(product: Product, optionIds: number[], quantity = 1) {
     const result = validateAndPriceModifierSelection(
@@ -956,11 +960,7 @@ export function Storefront({
   }
 
   function whatsappOrderUrl(order: Order) {
-    const items = order.items.map((item) => {
-      const modifiers = (item.modifiers || []).map((modifier) => `  + ${modifier.optionName}${modifier.included ? " (incluído)" : modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`).join("\n")
-      return `${item.quantity}x ${item.name} - ${money(item.subtotal)}${modifiers ? `\n${modifiers}` : ""}`
-    }).join("\n")
-    const text = `Olá! Acabei de fazer o pedido ${order.code} (${order.reference}).\n\n${items}\n\nTotal: ${money(order.total)}\nRecebimento: ${new Date(order.requestedFor).toLocaleString("pt-BR")}\nTipo: ${order.type === "delivery" ? "Delivery" : "Retirada"}`
+    const text = whatsappOrderText(order, settings.storeName, settings.timeZone)
     return `https://wa.me/${settings.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`
   }
 
@@ -1018,7 +1018,7 @@ export function Storefront({
       const requestedFor = checkout.timing === "scheduled"
         ? zonedDateTime(date, time, organizationTimeZone).toISOString()
         : undefined
-      const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: checkout.type, timing: checkout.timing, requestedFor, paymentMethod: checkout.paymentMethod, changeFor: checkout.paymentMethod === "cash" ? checkout.changeFor : "", notes: checkout.notes, couponCode: checkout.couponCode.trim() || undefined, customer: { name: checkout.name, phone: checkout.phone, address: checkout.address, number: checkout.number, district: checkout.district, city: checkout.city, state: checkout.state, zipCode: checkout.zipCode, complement: checkout.complement, latitude: checkout.latitude, longitude: checkout.longitude }, items: cart.map((item) => ({
+      const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: checkout.type, timing: checkout.timing, requestedFor, paymentMethod: checkout.paymentMethod, changeFor: checkout.paymentMethod === "cash" ? checkout.changeFor : "", notes: checkout.notes, couponCode: checkout.couponCode.trim() || undefined, redeemCashback, customer: { name: checkout.name, phone: checkout.phone, address: checkout.address, number: checkout.number, district: checkout.district, city: checkout.city, state: checkout.state, zipCode: checkout.zipCode, complement: checkout.complement, latitude: checkout.latitude, longitude: checkout.longitude }, items: cart.map((item) => ({
         productId: item.product.id,
         quantity: item.quantity,
         modifierOptionIds: item.optionIds,
@@ -1355,7 +1355,8 @@ export function Storefront({
             {checkoutStep === 3 && <div className="space-y-5">
               <section><div className="flex items-center justify-between"><div><h3 className="text-lg font-black">Revise seu pedido</h3><p className="text-sm text-gray-500">Nada será enviado antes de você confirmar.</p></div><button type="button" onClick={() => { setCheckoutOpen(false); setCartOpen(true) }} className="text-xs font-black text-orange-600">Editar itens</button></div><div className="mt-4 space-y-2">{cart.map((item) => <div key={item.key} className="rounded-xl border border-gray-100 p-3"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm">{item.quantity}x {item.product.name}</strong>{item.modifiers.length > 0 && <div className="mt-1 text-xs text-gray-500">{item.modifiers.map((modifier) => modifier.optionName).join(" · ")}</div>}</div><strong className="whitespace-nowrap text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong></div></div>)}</div></section>
               <section className="rounded-2xl bg-gray-50 p-4"><p className="text-xs font-black uppercase tracking-wide text-gray-400">Recebimento</p><p className="mt-2 text-sm font-bold">{checkout.type === "delivery" ? "Delivery" : "Retirada"} · {checkout.timing === "now" ? "para agora" : `${checkout.scheduleDate.split("-").reverse().join("/")} às ${selectedTime}`}</p>{checkout.type === "delivery" && <p className="mt-1 text-sm text-gray-600">{checkout.address}, {checkout.number}{checkout.district ? ` · ${checkout.district}` : ""}</p>}<p className="mt-1 text-sm text-gray-600">Pagamento: {checkout.paymentMethod === "pix" ? "PIX" : checkout.paymentMethod === "cash" ? "Dinheiro" : "Cartão na entrega"}</p></section>
-              <section className="rounded-2xl bg-gray-950 p-4 text-white"><div className="flex justify-between text-sm text-gray-300"><span>Produtos</span><span>{money(subtotal)}</span></div>{couponDiscount > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Desconto</span><span>-{money(couponDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-2 flex justify-between text-sm text-gray-300"><span>Taxa de entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}<div className="mt-3 flex justify-between border-t border-white/10 pt-3"><strong>Total</strong><strong className="text-xl">{money(total)}</strong></div></section>
+              {settings.cashbackEnabled && customer && (customer.cashbackCents || 0) > 0 && <label className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-900"><input type="checkbox" checked={redeemCashback} onChange={(event) => setRedeemCashback(event.target.checked)} className="h-5 w-5" /> Usar cashback disponível: {money((customer.cashbackCents || 0) / 100)}</label>}
+              <section className="rounded-2xl bg-gray-950 p-4 text-white"><div className="flex justify-between text-sm text-gray-300"><span>Produtos</span><span>{money(subtotal)}</span></div>{couponDiscount > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Desconto</span><span>-{money(couponDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-2 flex justify-between text-sm text-gray-300"><span>Taxa de entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}{cashbackUsed > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Cashback</span><span>-{money(cashbackUsed)}</span></div>}<div className="mt-3 flex justify-between border-t border-white/10 pt-3"><strong>Total</strong><strong className="text-xl">{money(total)}</strong></div></section>
               <p className="text-center text-[11px] leading-5 text-gray-400">Seus dados serão utilizados para processar e acompanhar este pedido. Consulte o <a href="/privacidade" target="_blank" className="font-bold text-gray-500 underline">Aviso de Privacidade</a>.</p>
             </div>}
           </div>
@@ -1429,7 +1430,7 @@ export function Storefront({
                   const active = item.day === todayDay
                   return <div key={item.day} style={active ? { backgroundColor: `${settings.primaryColor}12`, color: settings.primaryColor } : undefined} className={`flex items-center justify-between gap-4 rounded-lg px-3 py-2.5 text-sm ${active ? "font-black" : "text-gray-700"}`}>
                     <span>{item.label}</span>
-                    <span className="flex items-center gap-2 whitespace-nowrap"><Clock3 className="h-4 w-4"/>{item.enabled ? `${item.open} – ${item.close}` : "Fechado"}</span>
+                    <span className="flex items-center gap-2 whitespace-nowrap"><Clock3 className="h-4 w-4"/>{item.enabled ? item.pauseStart && item.pauseEnd ? `${item.open}–${item.pauseStart} · ${item.pauseEnd}–${item.close}` : `${item.open}–${item.close}` : "Fechado"}</span>
                   </div>
                 })}
               </div>

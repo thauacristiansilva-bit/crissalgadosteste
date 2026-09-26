@@ -58,6 +58,7 @@ export async function POST(
         changeFor?: string
         couponCode?: string
         accountId?: number
+        redeemCashback?: boolean
       }
     | null
 
@@ -109,6 +110,7 @@ export async function POST(
       body.changeFor,
     couponCode:
       body.couponCode,
+    redeemCashback: body.redeemCashback === true,
     accountId:
       Number.isFinite(Number(body.accountId)) && Number(body.accountId) > 0
         ? Math.floor(Number(body.accountId))

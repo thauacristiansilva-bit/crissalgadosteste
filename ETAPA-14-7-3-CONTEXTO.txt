@@ -1,0 +1,2337 @@
+SABORFLOW - ETAPA 14.7.3 - SEGURANCA IA PUBLICA
+
+
+============================================================
+===== app\api\storefront\ai-order\route.ts =====
+============================================================
+import {
+  NextResponse,
+} from "next/server"
+
+import {
+  generateGeminiOrderJson,
+} from "@/lib/ai/gemini-order"
+
+export const dynamic =
+  "force-dynamic"
+
+export const runtime =
+  "nodejs"
+
+const MAX_AUDIO_BYTES =
+  8 * 1024 * 1024
+
+const MAX_PRODUCTS =
+  250
+
+const MAX_TEXT_LENGTH =
+  1200
+
+type CatalogItem = {
+  id: number
+  name: string
+  description: string
+  available: boolean
+  hasModifiers: boolean
+}
+
+type AiItem = {
+  productId: number
+  quantity: number
+  note: string
+  requiresCustomization: boolean
+}
+
+type RateEntry = {
+  count: number
+  resetAt: number
+}
+
+const rateGlobal =
+  globalThis as typeof globalThis & {
+    __saborflowAiOrderRate?: Map<
+      string,
+      RateEntry
+    >
+  }
+
+const rateStore =
+  rateGlobal.__saborflowAiOrderRate ||
+  new Map<string, RateEntry>()
+
+rateGlobal.__saborflowAiOrderRate =
+  rateStore
+
+function checkRate(
+  request: Request,
+) {
+  const ip =
+    request.headers.get(
+      "cf-connecting-ip",
+    ) ||
+    request.headers
+      .get("x-forwarded-for")
+      ?.split(",")[0]
+      ?.trim() ||
+    "unknown"
+
+  const now =
+    Date.now()
+
+  const current =
+    rateStore.get(ip)
+
+  if (
+    !current ||
+    now >
+      current.resetAt
+  ) {
+    rateStore.set(ip, {
+      count: 1,
+      resetAt:
+        now + 5 * 60_000,
+    })
+
+    return true
+  }
+
+  if (
+    current.count >= 12
+  ) {
+    return false
+  }
+
+  current.count += 1
+  rateStore.set(ip, current)
+
+  return true
+}
+
+function cleanCatalog(
+  value: unknown,
+): CatalogItem[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const items: CatalogItem[] = []
+
+  for (
+    const raw of value.slice(
+      0,
+      MAX_PRODUCTS,
+    )
+  ) {
+    if (
+      !raw ||
+      typeof raw !== "object"
+    ) {
+      continue
+    }
+
+    const item =
+      raw as Record<
+        string,
+        unknown
+      >
+
+    const id =
+      Number(item.id)
+
+    const name =
+      typeof item.name ===
+      "string"
+        ? item.name
+            .trim()
+            .slice(0, 120)
+        : ""
+
+    if (
+      !Number.isInteger(id) ||
+      id <= 0 ||
+      !name
+    ) {
+      continue
+    }
+
+    items.push({
+      id,
+      name,
+      description:
+        typeof item.description ===
+        "string"
+          ? item.description
+              .trim()
+              .slice(0, 180)
+          : "",
+      available:
+        item.available !== false,
+      hasModifiers:
+        item.hasModifiers === true,
+    })
+  }
+
+  return items
+}
+
+function extractJson(
+  value: string,
+) {
+  let text =
+    value.trim()
+
+  text =
+    text.replace(
+      /^```(?:json)?/i,
+      "",
+    )
+
+  text =
+    text.replace(
+      /```$/i,
+      "",
+    )
+
+  text =
+    text.trim()
+
+  const first =
+    text.indexOf("{")
+
+  const last =
+    text.lastIndexOf("}")
+
+  if (
+    first >= 0 &&
+    last > first
+  ) {
+    text =
+      text.slice(
+        first,
+        last + 1,
+      )
+  }
+
+  return text
+}
+
+function normalizeResult(
+  raw: string,
+  catalog: CatalogItem[],
+  fallbackTranscript: string,
+) {
+  const parsed =
+    JSON.parse(
+      extractJson(raw),
+    ) as {
+      transcript?: unknown
+      message?: unknown
+      items?: unknown
+      unresolved?: unknown
+    }
+
+  const allowed =
+    new Map(
+      catalog.map(
+        (item) => [
+          item.id,
+          item,
+        ],
+      ),
+    )
+
+  const merged =
+    new Map<
+      number,
+      AiItem
+    >()
+
+  if (
+    Array.isArray(
+      parsed.items,
+    )
+  ) {
+    for (
+      const rawItem of
+        parsed.items
+    ) {
+      if (
+        !rawItem ||
+        typeof rawItem !==
+          "object"
+      ) {
+        continue
+      }
+
+      const item =
+        rawItem as Record<
+          string,
+          unknown
+        >
+
+      const productId =
+        Number(
+          item.productId,
+        )
+
+      const catalogItem =
+        allowed.get(
+          productId,
+        )
+
+      if (
+        !catalogItem ||
+        !catalogItem.available
+      ) {
+        continue
+      }
+
+      const quantity =
+        Math.min(
+          999,
+          Math.max(
+            1,
+            Math.floor(
+              Number(
+                item.quantity,
+              ) || 1,
+            ),
+          ),
+        )
+
+      const note =
+        typeof item.note ===
+        "string"
+          ? item.note
+              .trim()
+              .slice(0, 240)
+          : ""
+
+      const existing =
+        merged.get(
+          productId,
+        )
+
+      if (existing) {
+        existing.quantity =
+          Math.min(
+            999,
+            existing.quantity +
+              quantity,
+          )
+
+        if (
+          note &&
+          !existing.note
+        ) {
+          existing.note =
+            note
+        }
+
+        continue
+      }
+
+      merged.set(
+        productId,
+        {
+          productId,
+          quantity,
+          note,
+          requiresCustomization:
+            catalogItem
+              .hasModifiers,
+        },
+      )
+    }
+  }
+
+  const unresolved =
+    Array.isArray(
+      parsed.unresolved,
+    )
+      ? parsed.unresolved
+          .filter(
+            (
+              value,
+            ): value is string =>
+              typeof value ===
+              "string",
+          )
+          .map(
+            (value) =>
+              value
+                .trim()
+                .slice(0, 180),
+          )
+          .filter(Boolean)
+          .slice(0, 8)
+      : []
+
+  return {
+    transcript:
+      typeof parsed.transcript ===
+      "string"
+        ? parsed.transcript
+            .trim()
+            .slice(
+              0,
+              MAX_TEXT_LENGTH,
+            )
+        : fallbackTranscript,
+    message:
+      typeof parsed.message ===
+      "string"
+        ? parsed.message
+            .trim()
+            .slice(0, 500)
+        : "",
+    items:
+      [...merged.values()],
+    unresolved,
+  }
+}
+
+function systemInstruction() {
+  return `
+VocÃª Ã© o interpretador de pedidos do SaborFlow.
+
+Sua tarefa Ã© transformar o pedido do cliente em itens do cardÃ¡pio fornecido.
+
+REGRAS OBRIGATÃ“RIAS:
+
+1. Nunca invente produto.
+2. Nunca invente productId.
+3. Use somente IDs presentes no CATÃLOGO.
+4. Ignore preÃ§os. O SaborFlow calcula preÃ§os.
+5. NÃ£o crie descontos.
+6. NÃ£o substitua um produto por outro sem certeza.
+7. Se houver dÃºvida, coloque a dÃºvida em "unresolved".
+8. Produto indisponÃ­vel nÃ£o deve entrar em "items".
+9. "um cento" = 100.
+10. "meio cento" = 50.
+11. "uma dÃºzia" = 12.
+12. "duas dÃºzias" = 24.
+13. Quantidades devem ser nÃºmeros inteiros positivos.
+14. Produtos que possuem adicionais/opÃ§Ãµes podem ser identificados, mas serÃ£o personalizados posteriormente pelo SaborFlow.
+15. Para Ã¡udio, transcreva o que foi entendido em "transcript".
+16. Responda SOMENTE JSON vÃ¡lido, sem markdown.
+
+Formato obrigatÃ³rio:
+
+{
+  "transcript": "texto entendido",
+  "message": "resumo curto para o cliente",
+  "items": [
+    {
+      "productId": 123,
+      "quantity": 2,
+      "note": ""
+    }
+  ],
+  "unresolved": []
+}
+`.trim()
+}
+
+export async function POST(
+  request: Request,
+) {
+  if (!checkRate(request)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Muitas solicitaÃ§Ãµes. Aguarde alguns minutos.",
+      },
+      {
+        status: 429,
+      },
+    )
+  }
+
+  try {
+    const contentType =
+      request.headers
+        .get("content-type") ||
+      ""
+
+    let message = ""
+    let catalog: CatalogItem[] = []
+    let audio:
+      | {
+          mimeType: string
+          bytes: Uint8Array
+        }
+      | undefined
+
+    if (
+      contentType.includes(
+        "multipart/form-data",
+      )
+    ) {
+      const form =
+        await request.formData()
+
+      const rawCatalog =
+        form.get("catalog")
+
+      const rawMessage =
+        form.get("message")
+
+      const audioFile =
+        form.get("audio")
+
+      if (
+        typeof rawCatalog !==
+        "string"
+      ) {
+        throw new Error(
+          "CatÃ¡logo invÃ¡lido.",
+        )
+      }
+
+      catalog =
+        cleanCatalog(
+          JSON.parse(
+            rawCatalog,
+          ),
+        )
+
+      message =
+        typeof rawMessage ===
+        "string"
+          ? rawMessage
+              .trim()
+              .slice(
+                0,
+                MAX_TEXT_LENGTH,
+              )
+          : ""
+
+      if (
+        !(audioFile instanceof File)
+      ) {
+        throw new Error(
+          "Ãudio nÃ£o recebido.",
+        )
+      }
+
+      if (
+        audioFile.size <= 0 ||
+        audioFile.size >
+          MAX_AUDIO_BYTES
+      ) {
+        throw new Error(
+          "O Ã¡udio deve ter no mÃ¡ximo 8 MB.",
+        )
+      }
+
+      const mimeType =
+        (
+          audioFile.type ||
+          "audio/webm"
+        )
+          .split(";")[0]
+          .trim()
+          .toLowerCase()
+
+      const allowedAudio =
+        new Set([
+          "audio/webm",
+          "audio/ogg",
+          "audio/mp4",
+          "audio/mpeg",
+          "audio/wav",
+          "audio/x-wav",
+        ])
+
+      if (
+        !allowedAudio.has(
+          mimeType,
+        )
+      ) {
+        throw new Error(
+          "Formato de Ã¡udio nÃ£o suportado.",
+        )
+      }
+
+      audio = {
+        mimeType,
+        bytes:
+          new Uint8Array(
+            await audioFile.arrayBuffer(),
+          ),
+      }
+    } else {
+      const body =
+        (await request.json()) as {
+          message?: unknown
+          catalog?: unknown
+        }
+
+      message =
+        typeof body.message ===
+        "string"
+          ? body.message
+              .trim()
+              .slice(
+                0,
+                MAX_TEXT_LENGTH,
+              )
+          : ""
+
+      catalog =
+        cleanCatalog(
+          body.catalog,
+        )
+    }
+
+    if (!catalog.length) {
+      throw new Error(
+        "Nenhum produto disponÃ­vel para interpretaÃ§Ã£o.",
+      )
+    }
+
+    if (
+      !audio &&
+      !message
+    ) {
+      throw new Error(
+        "Digite ou grave seu pedido.",
+      )
+    }
+
+    const catalogJson =
+      JSON.stringify(
+        catalog,
+      )
+
+    const instruction =
+      audio
+        ? `
+OuÃ§a o Ã¡udio do cliente e interprete o pedido.
+
+Caso exista texto digitado junto do Ã¡udio, use como contexto:
+${message || "(nenhum)"}
+
+CATÃLOGO:
+${catalogJson}
+`.trim()
+        : `
+Interprete este pedido:
+
+"${message}"
+
+CATÃLOGO:
+${catalogJson}
+`.trim()
+
+    const generated =
+      await generateGeminiOrderJson(
+        {
+          systemInstruction:
+            systemInstruction(),
+          instruction,
+          audio,
+        },
+      )
+
+    const result =
+      normalizeResult(
+        generated.text,
+        catalog,
+        message,
+      )
+
+    return NextResponse.json({
+      ok: true,
+      ...result,
+      model:
+        generated.model,
+    })
+  } catch (error) {
+    console.error(
+      "Falha no pedido inteligente.",
+      error,
+    )
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "NÃ£o foi possÃ­vel interpretar o pedido.",
+      },
+      {
+        status: 400,
+      },
+    )
+  }
+}
+
+============================================================
+===== lib\public-tenant.ts =====
+============================================================
+import { cookies, headers } from "next/headers"
+import {
+  getPublicOrganizationByDomain,
+  getPublicOrganizationBySlug,
+  normalizePublicDomain,
+  type PublicOrganization,
+} from "@/lib/organization-db"
+import { enterTenantRlsContext } from "@/lib/rls-context"
+
+function activatePublicRls(organization: PublicOrganization | null) {
+  if (organization) {
+    enterTenantRlsContext(
+      organization.id,
+      undefined,
+      "public-store",
+    )
+  }
+  return organization
+}
+
+export const PUBLIC_TENANT_COOKIE = "saborflow_store_slug"
+
+function cookieValue(cookieHeader: string, name: string) {
+  const prefix = `${name}=`
+  for (const part of cookieHeader.split(";")) {
+    const clean = part.trim()
+    if (clean.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(clean.slice(prefix.length))
+      } catch {
+        return clean.slice(prefix.length)
+      }
+    }
+  }
+  return ""
+}
+
+function requestHost(request: Request) {
+  return normalizePublicDomain(
+    request.headers.get("x-forwarded-host") ||
+      request.headers.get("host") ||
+      "",
+  )
+}
+
+function sharedRailwayDomain() {
+  return normalizePublicDomain(process.env.RAILWAY_PUBLIC_DOMAIN || "")
+}
+
+function slugFromReferer(value?: string | null) {
+  if (!value) return ""
+  try {
+    const pathname = new URL(value).pathname
+    const match = pathname.match(/^\/loja\/([^/]+)/i)
+    return match?.[1] ? decodeURIComponent(match[1]) : ""
+  } catch {
+    return ""
+  }
+}
+
+export async function resolvePublicOrganizationForRequest(
+  request: Request,
+  explicitSlug?: string,
+): Promise<PublicOrganization | null> {
+  if (explicitSlug) {
+    return activatePublicRls(
+      await getPublicOrganizationBySlug(explicitSlug),
+    )
+  }
+
+  const host = requestHost(request)
+  const shared = sharedRailwayDomain()
+  const isSharedHost = Boolean(host) && Boolean(shared) && host === shared
+
+  // Domínio próprio da loja é autoridade pública de tenant.
+  if (host && !isSharedHost) {
+    const byDomain = await getPublicOrganizationByDomain(host)
+    if (byDomain) return activatePublicRls(byDomain)
+  }
+
+  // Demo e fluxos explicitamente selecionados podem persistir o slug em cookie.
+  const selectedSlug = cookieValue(
+    request.headers.get("cookie") || "",
+    PUBLIC_TENANT_COOKIE,
+  )
+  if (selectedSlug) {
+    const bySlug = await getPublicOrganizationBySlug(selectedSlug)
+    if (bySlug) return activatePublicRls(bySlug)
+  }
+
+  // Fetches feitos de /loja/{slug} no domínio compartilhado carregam Referer.
+  // Isso substitui a antiga escolha implícita por ADMIN_EMAIL.
+  const refererSlug = slugFromReferer(request.headers.get("referer"))
+  if (refererSlug) {
+    const byReferer = await getPublicOrganizationBySlug(refererSlug)
+    if (byReferer) return activatePublicRls(byReferer)
+  }
+
+  // Fase 25: o host compartilhado da plataforma nunca escolhe uma empresa
+  // "padrão" por ADMIN_EMAIL. Sem slug/domínio/cookie/referer, falha fechado.
+  return null
+}
+
+export async function resolveServerPublicOrganization(
+  explicitSlug?: string,
+): Promise<PublicOrganization | null> {
+  if (explicitSlug) {
+    return activatePublicRls(
+      await getPublicOrganizationBySlug(explicitSlug),
+    )
+  }
+
+  const headerStore = await headers()
+  const cookieStore = await cookies()
+  const host = normalizePublicDomain(
+    headerStore.get("x-forwarded-host") || headerStore.get("host") || "",
+  )
+  const shared = sharedRailwayDomain()
+  const isSharedHost = Boolean(host) && Boolean(shared) && host === shared
+
+  if (host && !isSharedHost) {
+    const byDomain = await getPublicOrganizationByDomain(host)
+    if (byDomain) return activatePublicRls(byDomain)
+  }
+
+  const selectedSlug = cookieStore.get(PUBLIC_TENANT_COOKIE)?.value
+  if (selectedSlug) {
+    const bySlug = await getPublicOrganizationBySlug(selectedSlug)
+    if (bySlug) return activatePublicRls(bySlug)
+  }
+
+  const refererSlug = slugFromReferer(headerStore.get("referer"))
+  if (refererSlug) {
+    const byReferer = await getPublicOrganizationBySlug(refererSlug)
+    if (byReferer) return activatePublicRls(byReferer)
+  }
+
+  return null
+}
+
+============================================================
+===== lib\public-store-db.ts =====
+============================================================
+import {
+  getTenantCategories,
+  getTenantProducts,
+  isTenantCatalogReady,
+} from "@/lib/catalog-db"
+import {
+  getTenantDeliveryZones,
+  isTenantOperationsReady,
+} from "@/lib/operations-db"
+import {
+  getTenantSettings,
+  isTenantRuntimeReady,
+  type PublicOrganization,
+} from "@/lib/organization-db"
+import { isStoreOpenNow } from "@/lib/operations"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+
+type PublicStoreSnapshot = {
+  products: Awaited<ReturnType<typeof getTenantProducts>>
+  categories: Awaited<ReturnType<typeof getTenantCategories>>
+  settings: NonNullable<Awaited<ReturnType<typeof getTenantSettings>>>
+  deliveryZones: Awaited<ReturnType<typeof getTenantDeliveryZones>>
+  organization: {
+    id: string
+    name: string
+    slug: string
+    publicOrderingEnabled: boolean
+  }
+}
+
+type PublicStoreCacheEntry = {
+  expiresAt: number
+  staleUntil: number
+  snapshot: PublicStoreSnapshot
+}
+
+type GlobalWithPublicStoreCache = typeof globalThis & {
+  __saborflowPublicStoreCache?: Map<string, PublicStoreCacheEntry>
+  __saborflowPublicStoreRefreshes?: Map<string, Promise<PublicStoreSnapshot>>
+}
+
+function cacheTtlMs() {
+  const raw = Number(process.env.PUBLIC_STORE_CACHE_TTL_MS || 15_000)
+  if (!Number.isFinite(raw)) return 15_000
+  return Math.max(0, Math.min(60_000, Math.floor(raw)))
+}
+
+function staleGraceMs() {
+  const raw = Number(process.env.PUBLIC_STORE_CACHE_STALE_MS || 30_000)
+  if (!Number.isFinite(raw)) return 30_000
+  return Math.max(0, Math.min(120_000, Math.floor(raw)))
+}
+
+function publicStoreCache() {
+  const globalCache = globalThis as GlobalWithPublicStoreCache
+  if (!globalCache.__saborflowPublicStoreCache) {
+    globalCache.__saborflowPublicStoreCache = new Map()
+  }
+  return globalCache.__saborflowPublicStoreCache
+}
+
+function publicStoreRefreshes() {
+  const globalCache = globalThis as GlobalWithPublicStoreCache
+  if (!globalCache.__saborflowPublicStoreRefreshes) {
+    globalCache.__saborflowPublicStoreRefreshes = new Map()
+  }
+  return globalCache.__saborflowPublicStoreRefreshes
+}
+
+function readCachedSnapshot(organizationId: string) {
+  const cache = publicStoreCache()
+  const cached = cache.get(organizationId)
+  if (!cached) return null
+
+  const now = Date.now()
+  if (cached.staleUntil <= now) {
+    cache.delete(organizationId)
+    return null
+  }
+
+  return {
+    snapshot: cached.snapshot,
+    fresh: cached.expiresAt > now,
+  }
+}
+
+function writeCachedSnapshot(organizationId: string, snapshot: PublicStoreSnapshot) {
+  const ttl = cacheTtlMs()
+  if (ttl <= 0) return
+
+  // Pequeno jitter evita que várias réplicas renovem o cache exatamente juntas.
+  const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(ttl * 0.2)))
+  const expiresAt = Date.now() + ttl + jitter
+
+  const cache = publicStoreCache()
+  cache.set(organizationId, {
+    expiresAt,
+    staleUntil: expiresAt + staleGraceMs(),
+    snapshot,
+  })
+
+  // Evita crescimento sem limite em processos que atendem muitos tenants.
+  if (cache.size > 250) {
+    const oldestKey = cache.keys().next().value as string | undefined
+    if (oldestKey) cache.delete(oldestKey)
+  }
+}
+
+export function invalidatePublicStoreCache(organizationId?: string) {
+  const cache = publicStoreCache()
+  if (organizationId) cache.delete(organizationId)
+  else cache.clear()
+}
+
+async function loadPublicStoreSnapshot(organization: PublicOrganization) {
+  return runWithTenantRlsScope(
+    [organization.id],
+    undefined,
+    async (): Promise<PublicStoreSnapshot> => {
+      const [runtimeReady, catalogReady, operationsReady] = await Promise.all([
+        isTenantRuntimeReady(organization.id).catch(() => false),
+        isTenantCatalogReady(organization.id).catch(() => false),
+        isTenantOperationsReady(organization.id).catch(() => false),
+      ])
+
+      if (!runtimeReady || !catalogReady || !operationsReady) {
+        throw new Error(
+          "A loja ainda não concluiu a preparação PostgreSQL necessária para publicação.",
+        )
+      }
+
+      const [settings, products, categories, deliveryZones] = await Promise.all([
+        getTenantSettings(organization.id),
+        getTenantProducts(organization.id),
+        getTenantCategories(organization.id),
+        getTenantDeliveryZones(organization.id),
+      ])
+
+      if (!settings) {
+        throw new Error("Configurações públicas da empresa não foram encontradas.")
+      }
+
+      const publicSettings = {
+        ...settings,
+        systemName: "SaborFlow",
+        acceptingOrders:
+          settings.acceptingOrders && organization.publicOrderingEnabled,
+      }
+
+      return {
+        products,
+        categories,
+        settings: publicSettings,
+        deliveryZones,
+        organization: {
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          publicOrderingEnabled: organization.publicOrderingEnabled,
+        },
+      }
+    },
+    "public-store",
+  )
+}
+
+/**
+ * Single-flight por tenant: enquanto uma réplica está atualizando o snapshot,
+ * todas as requisições concorrentes compartilham a mesma Promise em vez de
+ * disparar dezenas/centenas de consultas PostgreSQL ao mesmo tempo.
+ */
+function refreshPublicStoreSnapshot(organization: PublicOrganization) {
+  const refreshes = publicStoreRefreshes()
+  const current = refreshes.get(organization.id)
+  if (current) return current
+
+  const refresh = loadPublicStoreSnapshot(organization)
+    .then((snapshot) => {
+      writeCachedSnapshot(organization.id, snapshot)
+      return snapshot
+    })
+    .finally(() => {
+      if (refreshes.get(organization.id) === refresh) {
+        refreshes.delete(organization.id)
+      }
+    })
+
+  refreshes.set(organization.id, refresh)
+  return refresh
+}
+
+export async function getPublicStoreForOrganization(
+  organization: PublicOrganization,
+) {
+  const cached = readCachedSnapshot(organization.id)
+  let snapshot: PublicStoreSnapshot
+
+  if (cached?.fresh) {
+    snapshot = cached.snapshot
+  } else if (cached) {
+    // Stale-while-revalidate: mantém a loja rápida durante a renovação.
+    // Apenas uma atualização por tenant é executada por réplica.
+    void refreshPublicStoreSnapshot(organization).catch(() => undefined)
+    snapshot = cached.snapshot
+  } else {
+    snapshot = await refreshPublicStoreSnapshot(organization)
+  }
+
+  return {
+    ...snapshot,
+    // Horário continua sendo calculado a cada request, mesmo quando catálogo está em cache.
+    openNow: isStoreOpenNow(snapshot.settings),
+  }
+}
+
+============================================================
+===== lib\public-host.ts =====
+============================================================
+import { timingSafeEqual } from "node:crypto"
+import { normalizePublicDomain } from "@/lib/organization-db"
+
+function hostnameFromUrl(value?: string | null) {
+  if (!value) return ""
+  try {
+    return normalizePublicDomain(new URL(value).hostname)
+  } catch {
+    return ""
+  }
+}
+
+function safeEqual(left: string, right: string) {
+  const a = Buffer.from(left)
+  const b = Buffer.from(right)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+export function isPlatformHost(host: string) {
+  const clean = normalizePublicDomain(host)
+  if (!clean) return true
+
+  if (clean.endsWith(".up.railway.app")) return true
+  if (clean === "localhost" || clean === "127.0.0.1") return true
+
+  const platformHosts = new Set(
+    [
+      hostnameFromUrl(process.env.APP_BASE_URL),
+      hostnameFromUrl(process.env.NEXT_PUBLIC_APP_URL),
+      normalizePublicDomain(process.env.RAILWAY_PUBLIC_DOMAIN || ""),
+      normalizePublicDomain(process.env.STOREFRONT_ROOT_DOMAIN || ""),
+    ].filter(Boolean),
+  )
+
+  return platformHosts.has(clean)
+}
+
+export function hostFromHeaders(requestHeaders: { get(name: string): string | null }) {
+  const edgeHost = normalizePublicDomain(
+    requestHeaders.get("x-saborflow-edge-host") || "",
+  )
+  const edgeToken = requestHeaders.get("x-saborflow-edge-token") || ""
+  const expectedToken = process.env.SABORFLOW_EDGE_TOKEN || ""
+
+  // Domínios de clientes passam por um Worker Cloudflare. Só confiamos no
+  // hostname original quando o Worker prova que conhece o segredo privado.
+  if (
+    edgeHost &&
+    edgeToken &&
+    expectedToken &&
+    safeEqual(edgeToken, expectedToken)
+  ) {
+    return edgeHost
+  }
+
+  return normalizePublicDomain(
+    requestHeaders.get("host") || requestHeaders.get("x-forwarded-host") || "",
+  )
+}
+
+============================================================
+===== lib\catalog-db.ts =====
+============================================================
+import type { PoolClient } from "pg"
+import { getPostgresPool } from "@/lib/postgres"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+import type { Category, Product } from "@/lib/types"
+import {
+  getProductIngredientAvailability,
+  getProductModifierGroupsForProducts,
+} from "@/lib/food-composition-db"
+
+type CategoryRow = {
+  id: number
+  name: string
+  active: boolean
+  sort_order: number
+  created_at: Date | string
+  updated_at: Date | string
+}
+
+type ProductRow = {
+  id: number
+  name: string
+  description: string
+  category: string
+  price: string | number
+  active: boolean
+  featured: boolean
+  image: string
+  track_stock: boolean
+  stock: number
+  min_stock: number
+  created_at: Date | string
+  updated_at: Date | string
+}
+
+function iso(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
+}
+
+function mapCategory(row: CategoryRow): Category {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    active: Boolean(row.active),
+    sortOrder: Number(row.sort_order),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  }
+}
+
+function mapProduct(row: ProductRow): Product {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    description: row.description || "",
+    category: row.category,
+    price: Number(row.price),
+    active: Boolean(row.active),
+    featured: Boolean(row.featured),
+    image: row.image || "",
+    trackStock: Boolean(row.track_stock),
+    stock: Number(row.stock),
+    minStock: Number(row.min_stock),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  }
+}
+
+function databaseError(error: unknown, fallback: string) {
+  const pgError = error as { code?: string }
+  if (pgError?.code === "23505") {
+    return new Error("Já existe um registro com esses dados nesta empresa.")
+  }
+  return error instanceof Error ? error : new Error(fallback)
+}
+
+async function lockTenantCatalog(client: PoolClient, organizationId: string) {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [`saborflow-catalog:${organizationId}`],
+  )
+}
+
+async function nextScopedId(
+  client: PoolClient,
+  table: "sf_categories" | "sf_products",
+  organizationId: string,
+) {
+  const result = await client.query<{ next_id: number }>(
+    `SELECT COALESCE(MAX(id), 0)::int + 1 AS next_id
+     FROM ${table}
+     WHERE organization_id = $1`,
+    [organizationId],
+  )
+
+  return Number(result.rows[0]?.next_id || 1)
+}
+
+async function findCategoryByName(
+  client: PoolClient,
+  organizationId: string,
+  name: string,
+) {
+  const result = await client.query<CategoryRow>(
+    `
+      SELECT id, name, active, sort_order, created_at, updated_at
+      FROM sf_categories
+      WHERE organization_id = $1
+        AND lower(name) = lower($2)
+      LIMIT 1
+    `,
+    [organizationId, name.trim()],
+  )
+
+  return result.rows[0] ?? null
+}
+
+async function createCategoryWithClient(
+  client: PoolClient,
+  organizationId: string,
+  name: string,
+) {
+  const value = name.trim()
+  if (!value) throw new Error("Informe o nome da categoria.")
+
+  const existing = await findCategoryByName(client, organizationId, value)
+  if (existing) return { category: mapCategory(existing), created: false }
+
+  const id = await nextScopedId(client, "sf_categories", organizationId)
+  const sortOrderResult = await client.query<{ next_sort: number }>(
+    `
+      SELECT COALESCE(MAX(sort_order), 0)::int + 1 AS next_sort
+      FROM sf_categories
+      WHERE organization_id = $1
+    `,
+    [organizationId],
+  )
+
+  const inserted = await client.query<CategoryRow>(
+    `
+      INSERT INTO sf_categories (
+        organization_id, id, name, active, sort_order
+      )
+      VALUES ($1, $2, $3, true, $4)
+      RETURNING id, name, active, sort_order, created_at, updated_at
+    `,
+    [
+      organizationId,
+      id,
+      value,
+      Number(sortOrderResult.rows[0]?.next_sort || 1),
+    ],
+  )
+
+  return {
+    category: mapCategory(inserted.rows[0]),
+    created: true,
+  }
+}
+
+export async function isTenantCatalogReady(organizationId: string) {
+  try {
+    const result = await getPostgresPool().query<{ ready: boolean }>(
+      `
+        SELECT ready
+        FROM sf_catalog_state
+        WHERE organization_id = $1
+        LIMIT 1
+      `,
+      [organizationId],
+    )
+
+    return Boolean(result.rows[0]?.ready)
+  } catch (error) {
+    const pgError = error as { code?: string }
+    if (pgError?.code === "42P01") return false
+    throw error
+  }
+}
+
+export async function getTenantCategories(
+  organizationId: string,
+  options?: { includeInactive?: boolean },
+) {
+  const result = await getPostgresPool().query<CategoryRow>(
+    `
+      SELECT id, name, active, sort_order, created_at, updated_at
+      FROM sf_categories
+      WHERE organization_id = $1
+        ${options?.includeInactive ? "" : "AND active = true"}
+      ORDER BY sort_order ASC, name ASC, id ASC
+    `,
+    [organizationId],
+  )
+
+  return result.rows.map(mapCategory)
+}
+
+export async function getTenantProducts(
+  organizationId: string,
+  options?: { includeInactive?: boolean },
+): Promise<Product[]> {
+  const result = await getPostgresPool().query<ProductRow>(
+    `
+      SELECT
+        p.id,
+        p.name,
+        p.description,
+        c.name AS category,
+        p.price,
+        p.active,
+        p.featured,
+        p.image,
+        p.track_stock,
+        p.stock,
+        p.min_stock,
+        p.created_at,
+        p.updated_at
+      FROM sf_products p
+      INNER JOIN sf_categories c
+        ON c.organization_id = p.organization_id
+       AND c.id = p.category_id
+      WHERE p.organization_id = $1
+        ${options?.includeInactive ? "" : "AND p.active = true"}
+      ORDER BY
+        p.featured DESC,
+        c.name ASC,
+        p.name ASC,
+        p.id ASC
+    `,
+    [organizationId],
+  )
+
+  const products = result.rows.map(mapProduct)
+  const productIds = products.map((product) => product.id)
+
+  const [modifierGroups, ingredientAvailability] = await Promise.all([
+    getProductModifierGroupsForProducts(organizationId, productIds, {
+      includeInactive: Boolean(options?.includeInactive),
+    }),
+    getProductIngredientAvailability(organizationId, productIds),
+  ])
+
+  return products.map((product) => {
+    const groups = modifierGroups.get(product.id) || []
+    const requiredModifiersAvailable = groups
+      .filter((group) => group.active)
+      .every((group) => {
+        const minimum = Math.max(group.required ? 1 : 0, group.minSelect)
+        if (minimum <= 0) return true
+        return group.options.filter((option) => option.active && option.available).length >= minimum
+      })
+
+    return {
+      ...product,
+      modifierGroups: groups,
+      ingredientStockAvailable:
+        ingredientAvailability.get(product.id) !== false && requiredModifiersAvailable,
+    }
+  })
+}
+
+export async function createTenantCategory(
+  organizationId: string,
+  name: string,
+) {
+  const client = await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+    await lockTenantCatalog(client, organizationId)
+
+    const result = await createCategoryWithClient(
+      client,
+      organizationId,
+      name,
+    )
+
+    if (!result.created) {
+      throw new Error("Essa categoria já existe.")
+    }
+
+    await client.query("COMMIT")
+    return result.category
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw databaseError(error, "Não foi possível criar a categoria.")
+  } finally {
+    client.release()
+  }
+}
+
+export async function updateTenantCategory(
+  organizationId: string,
+  id: number,
+  patch: Partial<Pick<Category, "name" | "active" | "sortOrder">>,
+) {
+  const client = await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+    await lockTenantCatalog(client, organizationId)
+
+    const currentResult = await client.query<CategoryRow>(
+      `
+        SELECT id, name, active, sort_order, created_at, updated_at
+        FROM sf_categories
+        WHERE organization_id = $1 AND id = $2
+        LIMIT 1
+      `,
+      [organizationId, id],
+    )
+
+    const current = currentResult.rows[0]
+    if (!current) {
+      await client.query("ROLLBACK")
+      return null
+    }
+
+    const previousName = current.name
+    const nextName =
+      patch.name !== undefined
+        ? patch.name.trim() || current.name
+        : current.name
+    const nextActive =
+      patch.active !== undefined ? Boolean(patch.active) : current.active
+    const nextSortOrder =
+      patch.sortOrder !== undefined
+        ? Math.max(0, Math.floor(Number(patch.sortOrder)))
+        : Number(current.sort_order)
+
+    const updated = await client.query<CategoryRow>(
+      `
+        UPDATE sf_categories
+        SET
+          name = $3,
+          active = $4,
+          sort_order = $5,
+          updated_at = now()
+        WHERE organization_id = $1 AND id = $2
+        RETURNING id, name, active, sort_order, created_at, updated_at
+      `,
+      [organizationId, id, nextName, nextActive, nextSortOrder],
+    )
+
+    await client.query("COMMIT")
+
+    return {
+      category: mapCategory(updated.rows[0]),
+      previousName,
+    }
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw databaseError(error, "Não foi possível atualizar a categoria.")
+  } finally {
+    client.release()
+  }
+}
+
+export async function createTenantProduct(
+  organizationId: string,
+  input: {
+    name: string
+    description: string
+    category: string
+    price: number
+    image?: string
+    featured?: boolean
+    trackStock?: boolean
+    stock?: number
+    minStock?: number
+  },
+) {
+  const client = await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+    await lockTenantCatalog(client, organizationId)
+
+    const categoryResult = await createCategoryWithClient(
+      client,
+      organizationId,
+      input.category,
+    )
+
+    const id = await nextScopedId(client, "sf_products", organizationId)
+    const name = input.name.trim()
+    const price = Number(Number(input.price).toFixed(2))
+
+    if (!name || !Number.isFinite(price) || price < 0) {
+      throw new Error("Dados do produto inválidos.")
+    }
+
+    const inserted = await client.query<ProductRow>(
+      `
+        INSERT INTO sf_products (
+          organization_id,
+          id,
+          category_id,
+          name,
+          description,
+          price,
+          active,
+          featured,
+          image,
+          track_stock,
+          stock,
+          min_stock
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6,
+          true, $7, $8, $9, $10, $11
+        )
+        RETURNING
+          id,
+          name,
+          description,
+          $12::text AS category,
+          price,
+          active,
+          featured,
+          image,
+          track_stock,
+          stock,
+          min_stock,
+          created_at,
+          updated_at
+      `,
+      [
+        organizationId,
+        id,
+        categoryResult.category.id,
+        name,
+        input.description.trim(),
+        price,
+        Boolean(input.featured),
+        input.image?.trim() || "",
+        Boolean(input.trackStock),
+        Math.max(0, Math.floor(Number(input.stock || 0))),
+        Math.max(0, Math.floor(Number(input.minStock || 0))),
+        categoryResult.category.name,
+      ],
+    )
+
+    await client.query("COMMIT")
+
+    return {
+      product: mapProduct(inserted.rows[0]),
+      createdCategory: categoryResult.created
+        ? categoryResult.category
+        : null,
+    }
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw databaseError(error, "Não foi possível criar o produto.")
+  } finally {
+    client.release()
+  }
+}
+
+export async function updateTenantProduct(
+  organizationId: string,
+  id: number,
+  patch: Partial<
+    Pick<
+      Product,
+      | "name"
+      | "description"
+      | "category"
+      | "price"
+      | "active"
+      | "featured"
+      | "image"
+      | "trackStock"
+      | "stock"
+      | "minStock"
+    >
+  >,
+) {
+  const client = await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+    await lockTenantCatalog(client, organizationId)
+
+    const currentResult = await client.query<ProductRow & { category_id: number }>(
+      `
+        SELECT
+          p.id,
+          p.category_id,
+          p.name,
+          p.description,
+          c.name AS category,
+          p.price,
+          p.active,
+          p.featured,
+          p.image,
+          p.track_stock,
+          p.stock,
+          p.min_stock,
+          p.created_at,
+          p.updated_at
+        FROM sf_products p
+        INNER JOIN sf_categories c
+          ON c.organization_id = p.organization_id
+         AND c.id = p.category_id
+        WHERE p.organization_id = $1 AND p.id = $2
+        LIMIT 1
+      `,
+      [organizationId, id],
+    )
+
+    const current = currentResult.rows[0]
+    if (!current) {
+      await client.query("ROLLBACK")
+      return null
+    }
+
+    let categoryId = Number(current.category_id)
+    let categoryName = current.category
+    let createdCategory: Category | null = null
+
+    if (patch.category !== undefined) {
+      const categoryResult = await createCategoryWithClient(
+        client,
+        organizationId,
+        patch.category,
+      )
+      categoryId = categoryResult.category.id
+      categoryName = categoryResult.category.name
+      createdCategory = categoryResult.created
+        ? categoryResult.category
+        : null
+    }
+
+    const name =
+      patch.name !== undefined ? patch.name.trim() : current.name
+    const description =
+      patch.description !== undefined
+        ? patch.description.trim()
+        : current.description
+    const price =
+      patch.price !== undefined
+        ? Number(Number(patch.price).toFixed(2))
+        : Number(current.price)
+
+    if (!name || !Number.isFinite(price) || price < 0) {
+      throw new Error("Dados do produto inválidos.")
+    }
+
+    const updated = await client.query<ProductRow>(
+      `
+        UPDATE sf_products
+        SET
+          category_id = $3,
+          name = $4,
+          description = $5,
+          price = $6,
+          active = $7,
+          featured = $8,
+          image = $9,
+          track_stock = $10,
+          stock = $11,
+          min_stock = $12,
+          updated_at = now()
+        WHERE organization_id = $1 AND id = $2
+        RETURNING
+          id,
+          name,
+          description,
+          $13::text AS category,
+          price,
+          active,
+          featured,
+          image,
+          track_stock,
+          stock,
+          min_stock,
+          created_at,
+          updated_at
+      `,
+      [
+        organizationId,
+        id,
+        categoryId,
+        name,
+        description,
+        price,
+        patch.active !== undefined
+          ? Boolean(patch.active)
+          : current.active,
+        patch.featured !== undefined
+          ? Boolean(patch.featured)
+          : current.featured,
+        patch.image !== undefined
+          ? patch.image.trim()
+          : current.image,
+        patch.trackStock !== undefined
+          ? Boolean(patch.trackStock)
+          : current.track_stock,
+        patch.stock !== undefined
+          ? Math.max(0, Math.floor(Number(patch.stock)))
+          : Number(current.stock),
+        patch.minStock !== undefined
+          ? Math.max(0, Math.floor(Number(patch.minStock)))
+          : Number(current.min_stock),
+        categoryName,
+      ],
+    )
+
+    await client.query("COMMIT")
+
+    return {
+      product: mapProduct(updated.rows[0]),
+      createdCategory,
+    }
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw databaseError(error, "Não foi possível atualizar o produto.")
+  } finally {
+    client.release()
+  }
+}
+
+export async function deactivateTenantProduct(
+  organizationId: string,
+  id: number,
+) {
+  const result = await getPostgresPool().query<ProductRow>(
+    `
+      UPDATE sf_products p
+      SET active = false, updated_at = now()
+      FROM sf_categories c
+      WHERE p.organization_id = $1
+        AND p.id = $2
+        AND c.organization_id = p.organization_id
+        AND c.id = p.category_id
+      RETURNING
+        p.id,
+        p.name,
+        p.description,
+        c.name AS category,
+        p.price,
+        p.active,
+        p.featured,
+        p.image,
+        p.track_stock,
+        p.stock,
+        p.min_stock,
+        p.created_at,
+        p.updated_at
+    `,
+    [organizationId, id],
+  )
+
+  return result.rows[0] ? mapProduct(result.rows[0]) : null
+}
+
+export async function getCurrentDeploymentOrganizationId() {
+  // Fase 25: não existe mais "empresa original" derivada de ADMIN_EMAIL.
+  return null
+}
+
+export async function isCurrentDeploymentOrganization(
+  _organizationId: string,
+) {
+  // Fase 25: espelhos store.json foram desligados para todos os tenants.
+  return false
+}
+
+export async function syncCurrentDeploymentProductStocks(
+  _products: Array<Pick<Product, "id" | "stock">>,
+) {
+  // Compatibilidade inerte: PostgreSQL já é a autoridade de estoque.
+  return
+}
+
+export async function getTenantCatalogStats(organizationId: string) {
+  const [state, categories, products] = await Promise.all([
+    getPostgresPool().query<{
+      ready: boolean
+      source: string | null
+      categories_count: number
+      products_count: number
+      imported_at: Date | string | null
+    }>(
+      `
+        SELECT
+          ready,
+          source,
+          categories_count,
+          products_count,
+          imported_at
+        FROM sf_catalog_state
+        WHERE organization_id = $1
+        LIMIT 1
+      `,
+      [organizationId],
+    ),
+    getPostgresPool().query<{ count: string }>(
+      `
+        SELECT COUNT(*)::text AS count
+        FROM sf_categories
+        WHERE organization_id = $1
+      `,
+      [organizationId],
+    ),
+    getPostgresPool().query<{ count: string }>(
+      `
+        SELECT COUNT(*)::text AS count
+        FROM sf_products
+        WHERE organization_id = $1
+      `,
+      [organizationId],
+    ),
+  ])
+
+  const row = state.rows[0]
+
+  return {
+    ready: Boolean(row?.ready),
+    source: row?.source ?? null,
+    importedAt: row?.imported_at ? iso(row.imported_at) : null,
+    categories: Number(categories.rows[0]?.count || 0),
+    products: Number(products.rows[0]?.count || 0),
+    importedCategories: Number(row?.categories_count || 0),
+    importedProducts: Number(row?.products_count || 0),
+  }
+}
+
+============================================================
+===== lib\security\rate-limit.ts =====
+============================================================
+import { createHash } from "node:crypto"
+import { getPostgresPool } from "@/lib/postgres"
+
+type RateBucket = {
+  failures: number
+  resetAt: number
+}
+
+type RateLimitState = {
+  allowed: boolean
+  remaining: number
+  retryAfterSeconds: number
+}
+
+type PersistedRateBucketRow = {
+  failures: number
+  reset_at: Date | string
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __saborflowAuthRateBuckets: Map<string, RateBucket> | undefined
+  // eslint-disable-next-line no-var
+  var __saborflowRateLimitLastCleanupAt: number | undefined
+}
+
+const fallbackBuckets =
+  globalThis.__saborflowAuthRateBuckets || new Map<string, RateBucket>()
+
+globalThis.__saborflowAuthRateBuckets = fallbackBuckets
+
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+
+function keyFor(scope: string, value: string) {
+  const digest = createHash("sha256")
+    .update(value.trim().toLowerCase())
+    .digest("hex")
+
+  return `${scope}:${digest}`
+}
+
+function cleanExpiredFallback(now: number) {
+  if (fallbackBuckets.size < 500) return
+
+  for (const [key, bucket] of fallbackBuckets) {
+    if (bucket.resetAt <= now) {
+      fallbackBuckets.delete(key)
+    }
+  }
+}
+
+function fallbackState(
+  key: string,
+  limit: number,
+): RateLimitState {
+  const now = Date.now()
+  cleanExpiredFallback(now)
+
+  const bucket = fallbackBuckets.get(key)
+
+  if (!bucket || bucket.resetAt <= now) {
+    if (bucket) {
+      fallbackBuckets.delete(key)
+    }
+
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const allowed = bucket.failures < limit
+
+  return {
+    allowed,
+    remaining: Math.max(0, limit - bucket.failures),
+    retryAfterSeconds: allowed
+      ? 0
+      : Math.max(
+          1,
+          Math.ceil((bucket.resetAt - now) / 1000),
+        ),
+  }
+}
+
+function registerFallbackFailure(
+  key: string,
+  windowMs: number,
+) {
+  const now = Date.now()
+  const current = fallbackBuckets.get(key)
+
+  if (!current || current.resetAt <= now) {
+    fallbackBuckets.set(key, {
+      failures: 1,
+      resetAt: now + windowMs,
+    })
+    return
+  }
+
+  fallbackBuckets.set(key, {
+    failures: current.failures + 1,
+    resetAt: current.resetAt,
+  })
+}
+
+async function cleanupPersistedBuckets() {
+  const now = Date.now()
+  const lastCleanup =
+    globalThis.__saborflowRateLimitLastCleanupAt || 0
+
+  if (now - lastCleanup < CLEANUP_INTERVAL_MS) {
+    return
+  }
+
+  globalThis.__saborflowRateLimitLastCleanupAt = now
+
+  await getPostgresPool().query(
+    `
+      DELETE FROM sf_auth_rate_limits
+      WHERE reset_at <= NOW()
+    `,
+  )
+}
+
+function persistedState(
+  row: PersistedRateBucketRow | undefined,
+  limit: number,
+): RateLimitState {
+  if (!row) {
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const resetAt = new Date(row.reset_at).getTime()
+
+  if (!Number.isFinite(resetAt) || resetAt <= Date.now()) {
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const failures = Math.max(0, Number(row.failures) || 0)
+  const allowed = failures < limit
+
+  return {
+    allowed,
+    remaining: Math.max(0, limit - failures),
+    retryAfterSeconds: allowed
+      ? 0
+      : Math.max(
+          1,
+          Math.ceil((resetAt - Date.now()) / 1000),
+        ),
+  }
+}
+
+function stricterState(
+  left: RateLimitState,
+  right: RateLimitState,
+): RateLimitState {
+  return {
+    allowed: left.allowed && right.allowed,
+    remaining: Math.min(left.remaining, right.remaining),
+    retryAfterSeconds: Math.max(
+      left.retryAfterSeconds,
+      right.retryAfterSeconds,
+    ),
+  }
+}
+
+export function authRateLimitKey(
+  scope: "ip" | "account",
+  value: string,
+) {
+  return keyFor(scope, value || "unknown")
+}
+
+export async function checkAuthRateLimit(
+  key: string,
+  limit: number,
+  _windowMs: number,
+): Promise<RateLimitState> {
+  const local = fallbackState(key, limit)
+
+  try {
+    const result =
+      await getPostgresPool().query<PersistedRateBucketRow>(
+        `
+          SELECT failures, reset_at
+          FROM sf_auth_rate_limits
+          WHERE key_hash = $1
+            AND reset_at > NOW()
+          LIMIT 1
+        `,
+        [key],
+      )
+
+    const shared = persistedState(result.rows[0], limit)
+
+    return stricterState(local, shared)
+  } catch (error) {
+    console.error(
+      "Falha ao consultar rate limit persistente; usando protecao local.",
+      error,
+    )
+    return local
+  }
+}
+
+export async function registerAuthFailure(
+  key: string,
+  windowMs: number,
+) {
+  registerFallbackFailure(key, windowMs)
+
+  try {
+    await getPostgresPool().query(
+      `
+        INSERT INTO sf_auth_rate_limits (
+          key_hash,
+          failures,
+          reset_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          1,
+          NOW() + ($2::double precision * INTERVAL '1 millisecond'),
+          NOW()
+        )
+        ON CONFLICT (key_hash)
+        DO UPDATE SET
+          failures = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN 1
+            ELSE sf_auth_rate_limits.failures + 1
+          END,
+          reset_at = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN NOW() + (
+                $2::double precision * INTERVAL '1 millisecond'
+              )
+            ELSE sf_auth_rate_limits.reset_at
+          END,
+          updated_at = NOW()
+      `,
+      [key, windowMs],
+    )
+
+    await cleanupPersistedBuckets()
+  } catch (error) {
+    console.error(
+      "Falha ao registrar rate limit persistente; protecao local mantida.",
+      error,
+    )
+  }
+}
+
+export async function clearAuthFailures(key: string) {
+  fallbackBuckets.delete(key)
+
+  try {
+    await getPostgresPool().query(
+      `
+        DELETE FROM sf_auth_rate_limits
+        WHERE key_hash = $1
+      `,
+      [key],
+    )
+  } catch (error) {
+    console.error(
+      "Falha ao limpar rate limit persistente.",
+      error,
+    )
+  }
+}
+
+============================================================
+===== lib\security\request-security.ts =====
+============================================================
+function firstForwardedValue(value: string | null) {
+  return value?.split(",")[0]?.trim() || ""
+}
+
+function normalizeOrigin(value: string | null | undefined) {
+  if (!value) return null
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+export function requestIp(request: Request) {
+  return (
+    request.headers.get("cf-connecting-ip")?.trim() ||
+    firstForwardedValue(request.headers.get("x-forwarded-for")) ||
+    request.headers.get("x-real-ip")?.trim() ||
+    "unknown"
+  ).slice(0, 128)
+}
+
+export function requestTargetOrigin(request: Request) {
+  const forwardedHost =
+    firstForwardedValue(request.headers.get("x-forwarded-host")) ||
+    firstForwardedValue(request.headers.get("host"))
+  const forwardedProto = firstForwardedValue(
+    request.headers.get("x-forwarded-proto"),
+  )
+
+  if (
+    forwardedHost &&
+    (forwardedProto === "https" || forwardedProto === "http")
+  ) {
+    return normalizeOrigin(`${forwardedProto}://${forwardedHost}`)
+  }
+
+  return normalizeOrigin(request.url)
+}
+
+export function requestIsSameOrigin(request: Request) {
+  const target = requestTargetOrigin(request)
+  if (!target) return false
+
+  const origin = normalizeOrigin(request.headers.get("origin"))
+  if (origin) return origin === target
+
+  const referer = normalizeOrigin(request.headers.get("referer"))
+  if (referer) return referer === target
+
+  // Chamadas servidor-servidor e webhooks podem não enviar Origin/Referer.
+  // Endpoints públicos ainda precisam de autenticação/assinatura própria.
+  return true
+}
+
+export function browserRequestLooksCrossSite(request: Request) {
+  const site = request.headers.get("sec-fetch-site")?.toLowerCase().trim()
+  return site === "cross-site" || site === "same-site"
+}
+
+============================================================
+===== lib\rls-context.ts =====
+============================================================
+import { AsyncLocalStorage } from "node:async_hooks"
+
+export type RlsContextSource =
+  | "tenant-session"
+  | "customer-session"
+  | "public-store"
+  | "corporate-report"
+  | "bootstrap-user"
+  | "privileged-backend"
+
+export type RlsContext = {
+  organizationIds: string[]
+  userId?: string
+  bypass: boolean
+  source: RlsContextSource
+}
+
+type GlobalWithRlsStorage = typeof globalThis & {
+  __saborflowRlsContextStorage?: AsyncLocalStorage<RlsContext>
+}
+
+function getRlsStorage() {
+  const globalForRls = globalThis as GlobalWithRlsStorage
+
+  if (!globalForRls.__saborflowRlsContextStorage) {
+    globalForRls.__saborflowRlsContextStorage = new AsyncLocalStorage<RlsContext>()
+  }
+
+  return globalForRls.__saborflowRlsContextStorage
+}
+
+// Next/Turbopack pode materializar o mesmo módulo em chunks server diferentes.
+// O singleton em globalThis garante que auth.ts, páginas SSR e postgres.ts
+// compartilhem a MESMA AsyncLocalStorage dentro do processo Node.
+const storage = getRlsStorage()
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function normalizeOrganizationIds(values: string[]) {
+  const unique = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+
+  if (unique.length > 100) {
+    throw new Error("O escopo RLS excede o limite de 100 organizações.")
+  }
+
+  for (const value of unique) {
+    if (!UUID_PATTERN.test(value)) {
+      throw new Error("organization_id inválido no contexto RLS.")
+    }
+  }
+
+  return unique
+}
+
+function normalizeUserId(value?: string | null) {
+  const clean = value?.trim()
+  if (!clean) return undefined
+  if (!UUID_PATTERN.test(clean)) {
+    throw new Error("user_id inválido no contexto RLS.")
+  }
+  return clean
+}
+
+export function getCurrentRlsContext(): RlsContext | undefined {
+  return storage.getStore()
+}
+
+export function enterTenantRlsContext(
+  organizationId: string,
+  userId?: string | null,
+  source: RlsContextSource = "tenant-session",
+) {
+  const previous = storage.getStore()
+  storage.enterWith({
+    organizationIds: normalizeOrganizationIds([organizationId]),
+    userId: normalizeUserId(userId) ?? previous?.userId,
+    bypass: false,
+    source,
+  })
+}
+
+export function enterTenantRlsScope(
+  organizationIds: string[],
+  userId?: string | null,
+  source: RlsContextSource = "tenant-session",
+) {
+  const previous = storage.getStore()
+  storage.enterWith({
+    organizationIds: normalizeOrganizationIds(organizationIds),
+    userId: normalizeUserId(userId) ?? previous?.userId,
+    bypass: false,
+    source,
+  })
+}
+
+export function enterRlsUserContext(
+  userId: string,
+  source: RlsContextSource = "bootstrap-user",
+) {
+  const previous = storage.getStore()
+  storage.enterWith({
+    organizationIds: previous?.organizationIds ?? [],
+    userId: normalizeUserId(userId),
+    bypass: previous?.bypass ?? false,
+    source,
+  })
+}
+
+export async function runWithTenantRlsScope<T>(
+  organizationIds: string[],
+  userId: string | null | undefined,
+  callback: () => Promise<T>,
+  source: RlsContextSource = "tenant-session",
+): Promise<T> {
+  return storage.run(
+    {
+      organizationIds: normalizeOrganizationIds(organizationIds),
+      userId: normalizeUserId(userId),
+      bypass: false,
+      source,
+    },
+    callback,
+  )
+}
+
+export async function runWithRlsUserContext<T>(
+  userId: string,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const previous = storage.getStore()
+  return storage.run(
+    {
+      organizationIds: previous?.organizationIds ?? [],
+      userId: normalizeUserId(userId),
+      bypass: false,
+      source: "bootstrap-user",
+    },
+    callback,
+  )
+}
+
+export async function runWithRlsBypass<T>(
+  callback: () => Promise<T>,
+): Promise<T> {
+  const previous = storage.getStore()
+  return storage.run(
+    {
+      organizationIds: previous?.organizationIds ?? [],
+      userId: previous?.userId,
+      bypass: true,
+      source: "privileged-backend",
+    },
+    callback,
+  )
+}

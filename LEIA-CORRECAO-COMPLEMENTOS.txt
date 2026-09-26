@@ -1,0 +1,20 @@
+SABOR FLOW — CORRECAO DA TELA DE COMPLEMENTOS
+
+Aplique sobre o repositorio atualizado da etapa 2 (commit ccf2d55 ou posterior).
+
+1. Extraia o ZIP em uma pasta separada.
+2. Copie as pastas app e components para dentro da pasta ORIGINAL do projeto, no mesmo nivel do package.json. Aceite mesclar/substituir os cinco arquivos do ZIP. NAO copie este TXT se nao quiser.
+3. Abra no VS Code a pasta ORIGINAL do projeto. No terminal, execute:
+
+npm run typecheck
+npm run build
+git add app/api/admin/food-composition-health/route.ts app/api/admin/ingredients/route.ts "app/api/products/[id]/composition/route.ts" components/admin/product-composition-editor.tsx components/admin/products-panel.tsx
+git commit -m "Corrige acesso aos complementos no painel"
+git push origin main
+
+O Railway inicia o deploy automaticamente. Depois do deploy, recarregue:
+https://appsaborflow.com.br/api/admin/food-composition-health
+Esperado: foodComposition.ready = true.
+Em seguida abra o produto e teste a criacao de um grupo e uma opcao. Nao e necessario executar migration.
+
+Se o diagnostico permanecer false apos o deploy, nao altere o banco: procure a causa na politica RLS ou na conexao ativa do servico.

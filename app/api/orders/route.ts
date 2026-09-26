@@ -139,6 +139,7 @@ export async function POST(
           | "now"
           | "scheduled"
         couponCode?: string
+        redeemCashback?: boolean
       }
     | null
 
@@ -249,6 +250,7 @@ export async function POST(
           timing,
           couponCode:
             body.couponCode,
+          redeemCashback: body.redeemCashback === true,
           ...(account &&
           account.id
             ? {

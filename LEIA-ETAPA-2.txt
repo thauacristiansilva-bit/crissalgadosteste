@@ -1,0 +1,24 @@
+SABOR FLOW — ETAPA 2 (CADASTRO MAIS SIMPLES)
+
+Este ZIP contem tres arquivos de codigo, o package-lock.json com uma correcao de seguranca do sharp, e este guia.
+Nao substitua a pasta inteira do sistema.
+
+1. Extraia o ZIP em uma pasta temporaria.
+2. Copie a pasta "components" extraida para dentro da pasta ORIGINAL do seu projeto, no mesmo nivel de package.json. Aceite mesclar as pastas e substituir os tres arquivos em components/admin. Copie tambem o package-lock.json para a pasta original, ao lado do package.json, substituindo o antigo.
+3. Abra no VS Code a pasta ORIGINAL do projeto.
+4. No terminal do VS Code (PowerShell), rode os comandos abaixo, um de cada vez:
+
+git status --short
+npm ci
+npm audit --audit-level=high
+npm run typecheck
+npm run build
+git add components/admin/admin-dashboard.tsx components/admin/products-panel.tsx components/admin/product-composition-editor.tsx package-lock.json
+git commit -m "Simplifica cadastro e atualiza sharp"
+git push origin main
+
+O push na main inicia automaticamente o deploy em producao no Railway. Espere o servico "sabor flow" mostrar o deploy como concluido. Depois abra o painel e confira: criar categoria no cadastro, salvar produto e cadastrar complementos logo abaixo.
+
+ATENCAO: os comandos supoem que a pasta original esta na branch main do repositorio conferido em 25/09/2026. Se git status mostrar outros arquivos alterados, nao inclua esses arquivos no commit acima.
+
+Esta etapa NAO altera a regra de repeticao e quantidade de sabores. O calculo de 12 escolhas para 3 unidades sera implementado em outra entrega.

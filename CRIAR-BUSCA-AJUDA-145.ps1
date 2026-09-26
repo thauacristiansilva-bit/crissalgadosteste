@@ -1,0 +1,439 @@
+﻿$ErrorActionPreference = "Stop"
+
+Write-Host ""
+Write-Host "=== ETAPA 14.5 - BUSCA DA CENTRAL DE AJUDA ==="
+Write-Host ""
+
+if (-not (Test-Path "package.json")) {
+  throw "Execute este script na raiz do projeto SaborFlow."
+}
+
+$target = "lib\help-center-db.ts"
+
+$content = @'
+import { getPostgresPool } from "@/lib/postgres"
+
+export type HelpCenterAudience =
+  | "admin"
+  | "customer"
+  | "all"
+
+export type HelpCenterSearchResult = {
+  id: string
+  slug: string
+  featureKey: string | null
+  title: string
+  summary: string
+  content: string
+  keywords: string[]
+  audience: HelpCenterAudience
+  videoUrl: string | null
+  videoThumbnailUrl: string | null
+  videoDurationSeconds: number | null
+  categorySlug: string | null
+  categoryName: string | null
+  rank: number
+}
+
+type HelpCenterSearchRow = {
+  id: string
+  slug: string
+  feature_key: string | null
+  title: string
+  summary: string
+  content: string
+  keywords: string[] | null
+  audience: HelpCenterAudience
+  video_url: string | null
+  video_thumbnail_url: string | null
+  video_duration_seconds: number | null
+  category_slug: string | null
+  category_name: string | null
+  rank: string | number | null
+}
+
+function safeLimit(
+  value: number | undefined,
+) {
+  if (
+    !Number.isFinite(value) ||
+    !value
+  ) {
+    return 3
+  }
+
+  return Math.min(
+    5,
+    Math.max(
+      1,
+      Math.floor(value),
+    ),
+  )
+}
+
+function cleanQuestion(
+  value: string,
+) {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 500)
+}
+
+function rowToResult(
+  row: HelpCenterSearchRow,
+): HelpCenterSearchResult {
+  const rank = Number(row.rank)
+
+  return {
+    id: row.id,
+    slug: row.slug,
+    featureKey:
+      row.feature_key,
+    title: row.title,
+    summary:
+      row.summary || "",
+    content:
+      row.content || "",
+    keywords:
+      Array.isArray(row.keywords)
+        ? row.keywords
+        : [],
+    audience: row.audience,
+    videoUrl:
+      row.video_url,
+    videoThumbnailUrl:
+      row.video_thumbnail_url,
+    videoDurationSeconds:
+      row.video_duration_seconds,
+    categorySlug:
+      row.category_slug,
+    categoryName:
+      row.category_name,
+    rank:
+      Number.isFinite(rank)
+        ? rank
+        : 0,
+  }
+}
+
+export async function searchHelpCenterArticles(
+  question: string,
+  options?: {
+    audience?: Exclude<
+      HelpCenterAudience,
+      "all"
+    >
+    limit?: number
+  },
+): Promise<HelpCenterSearchResult[]> {
+  const query =
+    cleanQuestion(question)
+
+  if (!query) {
+    return []
+  }
+
+  const audience =
+    options?.audience ||
+    "admin"
+
+  const limit =
+    safeLimit(options?.limit)
+
+  const pool =
+    getPostgresPool()
+
+  const result =
+    await pool.query<HelpCenterSearchRow>(
+      `
+        WITH search_input AS (
+          SELECT
+            plainto_tsquery(
+              'portuguese',
+              $1
+            ) AS query
+        )
+        SELECT
+          article.id,
+          article.slug,
+          article.feature_key,
+          article.title,
+          article.summary,
+          article.content,
+          article.keywords,
+          article.audience,
+          article.video_url,
+          article.video_thumbnail_url,
+          article.video_duration_seconds,
+          category.slug
+            AS category_slug,
+          category.name
+            AS category_name,
+          (
+            ts_rank_cd(
+              to_tsvector(
+                'portuguese',
+                coalesce(
+                  article.title,
+                  ''
+                ) || ' ' ||
+                coalesce(
+                  article.summary,
+                  ''
+                ) || ' ' ||
+                coalesce(
+                  article.content,
+                  ''
+                )
+              ),
+              search_input.query
+            ) * 10
+            +
+            CASE
+              WHEN article.title
+                ILIKE '%' || $1 || '%'
+                THEN 5
+              ELSE 0
+            END
+            +
+            CASE
+              WHEN article.summary
+                ILIKE '%' || $1 || '%'
+                THEN 2
+              ELSE 0
+            END
+            +
+            CASE
+              WHEN EXISTS (
+                SELECT 1
+                FROM unnest(
+                  article.keywords
+                ) AS keyword
+                WHERE keyword
+                  ILIKE '%' || $1 || '%'
+              )
+                THEN 3
+              ELSE 0
+            END
+          ) AS rank
+        FROM sf_help_articles
+          AS article
+        CROSS JOIN search_input
+        LEFT JOIN sf_help_categories
+          AS category
+          ON category.id =
+            article.category_id
+        WHERE
+          article.published = true
+          AND (
+            article.audience = $2
+            OR article.audience = 'all'
+          )
+          AND (
+            to_tsvector(
+              'portuguese',
+              coalesce(
+                article.title,
+                ''
+              ) || ' ' ||
+              coalesce(
+                article.summary,
+                ''
+              ) || ' ' ||
+              coalesce(
+                article.content,
+                ''
+              )
+            )
+            @@ search_input.query
+            OR article.title
+              ILIKE '%' || $1 || '%'
+            OR article.summary
+              ILIKE '%' || $1 || '%'
+            OR EXISTS (
+              SELECT 1
+              FROM unnest(
+                article.keywords
+              ) AS keyword
+              WHERE keyword
+                ILIKE '%' || $1 || '%'
+            )
+          )
+        ORDER BY
+          rank DESC,
+          article.sort_order ASC,
+          article.title ASC
+        LIMIT $3
+      `,
+      [
+        query,
+        audience,
+        limit,
+      ],
+    )
+
+  return result.rows.map(
+    rowToResult,
+  )
+}
+
+function compactText(
+  value: string,
+  maxChars: number,
+) {
+  const clean =
+    value
+      .trim()
+      .replace(/\s+/g, " ")
+
+  if (
+    clean.length <=
+    maxChars
+  ) {
+    return clean
+  }
+
+  return `${clean.slice(
+    0,
+    Math.max(
+      0,
+      maxChars - 1,
+    ),
+  )}…`
+}
+
+export function buildHelpCenterAiContext(
+  articles: HelpCenterSearchResult[],
+  maxChars = 3600,
+) {
+  if (!articles.length) {
+    return ""
+  }
+
+  const sections: string[] = []
+  let usedChars = 0
+
+  for (
+    const article
+    of articles
+  ) {
+    const videoLine =
+      article.videoUrl
+        ? `Vídeo de ajuda: ${article.videoUrl}`
+        : ""
+
+    const block = [
+      `TÍTULO: ${article.title}`,
+      article.categoryName
+        ? `CATEGORIA: ${article.categoryName}`
+        : "",
+      article.summary
+        ? `RESUMO: ${compactText(
+            article.summary,
+            500,
+          )}`
+        : "",
+      article.content
+        ? `INSTRUÇÕES: ${compactText(
+            article.content,
+            1400,
+          )}`
+        : "",
+      videoLine,
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    if (!block) {
+      continue
+    }
+
+    const separator =
+      sections.length
+        ? "\n\n---\n\n"
+        : ""
+
+    const nextSize =
+      usedChars +
+      separator.length +
+      block.length
+
+    if (
+      nextSize >
+      maxChars
+    ) {
+      const remaining =
+        maxChars -
+        usedChars -
+        separator.length
+
+      if (
+        remaining > 120
+      ) {
+        sections.push(
+          compactText(
+            block,
+            remaining,
+          ),
+        )
+      }
+
+      break
+    }
+
+    sections.push(block)
+    usedChars = nextSize
+  }
+
+  if (!sections.length) {
+    return ""
+  }
+
+  return `
+BASE DE CONHECIMENTO DA SABORFLOW
+Use este conteúdo somente para responder dúvidas sobre como usar o SaborFlow.
+Não invente etapas que não estejam documentadas aqui.
+Quando houver vídeo, você pode indicar o vídeo ao usuário.
+
+${sections.join(
+  "\n\n---\n\n",
+)}
+  `.trim()
+}
+'@
+
+[System.IO.File]::WriteAllText(
+  $target,
+  $content,
+  [System.Text.UTF8Encoding]::new($false)
+)
+
+Write-Host "Criado: $target"
+Write-Host ""
+
+git diff --check
+
+if ($LASTEXITCODE -ne 0) {
+  throw "git diff --check falhou."
+}
+
+Remove-Item -Recurse -Force ".next" -ErrorAction SilentlyContinue
+
+npm.cmd run typecheck
+
+if ($LASTEXITCODE -ne 0) {
+  throw "typecheck falhou."
+}
+
+npm.cmd run build
+
+if ($LASTEXITCODE -ne 0) {
+  throw "build falhou."
+}
+
+git restore -- next-env.d.ts 2>$null
+
+Write-Host ""
+Write-Host "ETAPA 14.5 - BUSCA CENTRAL DE AJUDA - BUILD OK"
+Write-Host ""

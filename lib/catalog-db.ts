@@ -324,6 +324,29 @@ export async function createTenantCategory(
   }
 }
 
+export async function deleteTenantCategory(organizationId: string, id: number) {
+  const client = await getPostgresPool().connect()
+  try {
+    await client.query("BEGIN")
+    await lockTenantCatalog(client, organizationId)
+    const current = await client.query<{ name: string }>("SELECT name FROM sf_categories WHERE organization_id=$1 AND id=$2 FOR UPDATE", [organizationId, id])
+    const name = current.rows[0]?.name
+    if (!name) throw new Error("Categoria não encontrada.")
+    const children = await client.query("SELECT 1 FROM sf_categories WHERE organization_id=$1 AND left(name,length($2))=$2 LIMIT 1", [organizationId, `${name} / `])
+    if (children.rowCount) throw new Error("Remova ou mova as subcategorias antes de excluir esta categoria.")
+    const products = await client.query("SELECT 1 FROM sf_products WHERE organization_id=$1 AND category_id=$2 LIMIT 1", [organizationId, id])
+    if (products.rowCount) throw new Error("Mova os produtos para outra categoria antes de excluir esta categoria.")
+    await client.query("DELETE FROM sf_categories WHERE organization_id=$1 AND id=$2", [organizationId, id])
+    await client.query("COMMIT")
+    return true
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw databaseError(error, "Não foi possível excluir a categoria.")
+  } finally {
+    client.release()
+  }
+}
+
 export async function updateTenantCategory(
   organizationId: string,
   id: number,

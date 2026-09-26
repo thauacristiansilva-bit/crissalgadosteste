@@ -146,7 +146,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (order.customer.phone) lines.push({ text: `Telefone: ${order.customer.phone}` })
   if (order.type === "delivery") {
     lines.push({ text: `Endereco: ${order.customer.address}, ${order.customer.number || "s/n"}` })
+    if (order.customer.complement) lines.push({ text: `Complemento: ${order.customer.complement}` })
     if (order.customer.district) lines.push({ text: `Bairro: ${order.customer.district}` })
+    if (order.customer.city) lines.push({ text: `Cidade: ${order.customer.city}` })
     if (order.deliveryZoneName) lines.push({ text: `Area: ${order.deliveryZoneName}` })
     if (order.courierName) lines.push({ text: `Entregador: ${order.courierName}` })
   }
@@ -155,7 +157,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     lines.push({ text: `${item.quantity}x ${item.name}${mode === "customer" ? `  ${money(item.subtotal)}` : ""}`, bold: mode === "kitchen" })
     for (const modifier of item.modifiers || []) {
       lines.push({
-        text: `   + ${modifier.optionName}${mode === "customer" && !modifier.included && modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`,
+        text: `   ${modifier.groupName}: ${modifier.optionName}${mode === "customer" && !modifier.included && modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`,
         size: 7,
       })
     }
@@ -163,7 +165,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (order.notes) lines.push({ text: "--------------------------------------" }, { text: `OBS: ${order.notes}`, bold: true })
   if (mode === "customer") {
     lines.push({ text: "--------------------------------------" }, { text: `Subtotal: ${money(order.subtotal)}` })
-    if (order.discount > 0) lines.push({ text: `Desconto: -${money(order.discount)}` })
+    if (order.cashbackUsed) lines.push({ text: `Cashback: -${money(order.cashbackUsed)}` })
+    if (order.discount > 0) lines.push({ text: `Desconto${order.couponCode ? ` (${order.couponCode})` : ""}: -${money(order.discount)}` })
     if (order.deliveryFee > 0) lines.push({ text: `Entrega: ${money(order.deliveryFee)}` })
     lines.push({ text: `TOTAL: ${money(order.total)}`, bold: true, size: 12 }, { text: `Pagamento: ${order.paymentMethod === "pix" ? "PIX" : order.paymentMethod === "cash" ? "DINHEIRO" : "CARTAO"}` })
   }

@@ -1,0 +1,1404 @@
+
+================ package.json ================
+
+{
+  "name": "saborflow",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "13.1.2",
+    "@simplewebauthn/server": "13.1.2",
+    "lucide-react": "^1.16.0",
+    "next": "16.3.3",
+    "pg": "^8.23.0",
+    "qrcode": "^1.5.4",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24",
+    "@types/pg": "^8.21.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.7.3"
+  }
+}
+
+================ app/api/superadmin/actions/route.ts ================
+
+import { NextResponse } from "next/server"
+import { canManageCommercialState, canManageSupport, canReviewRegistrations, getSuperadminAccess } from "@/lib/superadmin-auth"
+import { changeSubscriptionPlan, createCommercialCoupon, setBillingAccountStatus, setEntitlementOverride, setRegistrationReview, setSupportCaseStatus } from "@/lib/superadmin-db"
+import { requestIp, superadminRequestIsSameOrigin } from "@/lib/superadmin-request"
+import type { PlanEntitlementKey } from "@/lib/billing-types"
+
+export const dynamic = "force-dynamic"
+
+export async function POST(request: Request) {
+  if (!superadminRequestIsSameOrigin(request)) {
+    return NextResponse.json({ error: "Origem da requisição não permitida." }, { status: 403 })
+  }
+  const access = await getSuperadminAccess()
+  if (!access) return NextResponse.json({ error: "Não autorizado." }, { status: 403 })
+  try {
+    const body = await request.json() as Record<string, unknown>
+    const action = String(body.action || "")
+    const ip = requestIp(request)
+
+    if (action === "review-registration") {
+      if (!canReviewRegistrations(access.role)) return NextResponse.json({ error: "Sem permissão para validar cadastros." }, { status: 403 })
+      const status = String(body.status || "")
+      if (status !== "approved" && status !== "rejected") throw new Error("Status de validação inválido.")
+      await setRegistrationReview(access, String(body.billingAccountId || ""), status, String(body.notes || ""), ip)
+    } else if (action === "set-account-status") {
+      if (!canManageCommercialState(access.role)) return NextResponse.json({ error: "Sem permissão para alterar cobrança." }, { status: 403 })
+      const status = String(body.status || "")
+      if (status !== "active" && status !== "suspended") throw new Error("Status inválido.")
+      await setBillingAccountStatus(access, String(body.accountId || ""), status, ip)
+    } else if (action === "change-plan") {
+      if (!canManageCommercialState(access.role)) return NextResponse.json({ error: "Sem permissão para alterar planos." }, { status: 403 })
+      await changeSubscriptionPlan(access, String(body.subscriptionId || ""), String(body.planId || ""), ip)
+    } else if (action === "set-entitlement") {
+      if (!canManageCommercialState(access.role)) return NextResponse.json({ error: "Sem permissão para liberar recursos." }, { status: 403 })
+      await setEntitlementOverride(access, String(body.accountId || ""), String(body.key || "") as PlanEntitlementKey, body.value, ip)
+    } else if (action === "create-coupon") {
+      if (!canManageCommercialState(access.role)) return NextResponse.json({ error: "Sem permissão para gerenciar cupons." }, { status: 403 })
+      const discountType = String(body.discountType || "")
+      if (discountType !== "percent" && discountType !== "fixed") throw new Error("Tipo de desconto inválido.")
+      await createCommercialCoupon(access, {
+        code: String(body.code || ""),
+        description: String(body.description || ""),
+        discountType,
+        discountValue: Number(body.discountValue),
+        validUntil: body.validUntil ? String(body.validUntil) : null,
+      }, ip)
+    } else if (action === "support-status") {
+      if (!canManageSupport(access.role)) return NextResponse.json({ error: "Sem permissão para gerenciar suporte." }, { status: 403 })
+      const status = String(body.status || "")
+      if (!["open", "pending", "resolved", "closed"].includes(status)) throw new Error("Status inválido.")
+      await setSupportCaseStatus(access, String(body.caseId || ""), status as "open" | "pending" | "resolved" | "closed", ip)
+    } else {
+      return NextResponse.json({ error: "Ação não suportada." }, { status: 400 })
+    }
+
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao executar ação." }, { status: 400 })
+  }
+}
+
+================ app/api/superadmin/finance/route.ts ================
+
+import { NextResponse } from "next/server"
+import { canManagePlatformFinance, getSuperadminAccess } from "@/lib/superadmin-auth"
+import {
+  createPlatformFinanceEntry,
+  getPlatformFinanceSnapshot,
+  setPlatformFinanceEntryStatus,
+} from "@/lib/platform-finance"
+import { requestIp, superadminRequestIsSameOrigin } from "@/lib/superadmin-request"
+
+export const dynamic = "force-dynamic"
+
+export async function GET(request: Request) {
+  const access = await getSuperadminAccess()
+  if (!access) return NextResponse.json({ error: "Não autorizado." }, { status: 403 })
+  const month = new URL(request.url).searchParams.get("month")
+  return NextResponse.json({ ok: true, data: await getPlatformFinanceSnapshot(month) })
+}
+
+export async function POST(request: Request) {
+  if (!superadminRequestIsSameOrigin(request)) {
+    return NextResponse.json({ error: "Origem da requisição não permitida." }, { status: 403 })
+  }
+  const access = await getSuperadminAccess()
+  if (!access) return NextResponse.json({ error: "Não autorizado." }, { status: 403 })
+  if (!canManagePlatformFinance(access.role)) {
+    return NextResponse.json({ error: "Sem permissão para gerenciar o financeiro da plataforma." }, { status: 403 })
+  }
+
+  try {
+    const body = await request.json() as Record<string, unknown>
+    const action = String(body.action || "")
+    const ip = requestIp(request)
+
+    if (action === "create-entry") {
+      const entryType = String(body.entryType || "")
+      if (entryType !== "revenue" && entryType !== "expense") throw new Error("Tipo de lançamento inválido.")
+      const status = String(body.status || "planned")
+      if (status !== "planned" && status !== "paid") throw new Error("Status inicial inválido.")
+      await createPlatformFinanceEntry(access, {
+        competenceDate: String(body.competenceDate || ""),
+        entryType,
+        category: String(body.category || ""),
+        description: String(body.description || ""),
+        counterparty: String(body.counterparty || ""),
+        amountCents: Number(body.amountCents),
+        status,
+        dueDate: body.dueDate ? String(body.dueDate) : null,
+        notes: String(body.notes || ""),
+      }, ip)
+    } else if (action === "set-status") {
+      const status = String(body.status || "")
+      if (!(["planned", "paid", "canceled"] as const).includes(status as "planned" | "paid" | "canceled")) {
+        throw new Error("Status inválido.")
+      }
+      await setPlatformFinanceEntryStatus(
+        access,
+        String(body.entryId || ""),
+        status as "planned" | "paid" | "canceled",
+        ip,
+      )
+    } else {
+      return NextResponse.json({ error: "Ação não suportada." }, { status: 400 })
+    }
+
+    const month = body.month ? String(body.month) : null
+    return NextResponse.json({ ok: true, data: await getPlatformFinanceSnapshot(month) })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao executar ação financeira." }, { status: 400 })
+  }
+}
+
+================ app/api/print-queue/route.ts ================
+
+import { NextResponse } from "next/server"
+import {
+  getTenantUnprintedOrders,
+  markTenantOrderPrinted,
+} from "@/lib/order-db"
+import { getTenantSettings } from "@/lib/organization-db"
+import { authenticatePrintAgent } from "@/lib/organization-security-db"
+import { assertDemoActionAllowed } from "@/lib/demo-policy"
+
+type PrintContext = {
+  organizationId: string
+  organizationName: string
+  organizationSlug: string
+  agentName: string
+}
+
+function requestToken(request: Request) {
+  return (
+    request.headers.get("x-print-token") ||
+    new URL(request.url).searchParams.get("token") ||
+    ""
+  )
+}
+
+async function resolvePrintContext(
+  request: Request,
+): Promise<PrintContext | null> {
+  const token = requestToken(request)
+  if (!token) return null
+
+  const tenantAgent = await authenticatePrintAgent(token).catch(() => null)
+  if (!tenantAgent) return null
+
+  return {
+    organizationId: tenantAgent.organizationId,
+    organizationName: tenantAgent.organizationName,
+    organizationSlug: tenantAgent.organizationSlug,
+    agentName: tenantAgent.agentName,
+  }
+}
+
+function publicPrintSettings(settings: {
+  storeName: string
+  address: string
+  printerName: string
+  printCopies: number
+  autoPrintNewOrders: boolean
+  printKitchenTicket: boolean
+  printCustomerTicket: boolean
+  timeZone?: string
+}) {
+  return {
+    storeName: settings.storeName,
+    address: settings.address,
+    printerName: settings.printerName,
+    printCopies: settings.printCopies,
+    autoPrintNewOrders: settings.autoPrintNewOrders,
+    printKitchenTicket: settings.printKitchenTicket,
+    printCustomerTicket: settings.printCustomerTicket,
+    timeZone: settings.timeZone || "America/Sao_Paulo",
+  }
+}
+
+function printOrdersWithLocalTime<T extends { requestedFor: string }>(
+  orders: T[],
+  timeZone: string,
+) {
+  return orders.map((order) => ({
+    ...order,
+    requestedForLocal: new Intl.DateTimeFormat("pt-BR", {
+      timeZone,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(order.requestedFor)),
+  }))
+}
+
+export async function GET(request: Request) {
+  const context = await resolvePrintContext(request)
+  if (!context) {
+    return NextResponse.json(
+      { error: "Agente de impressão não autorizado." },
+      { status: 401 },
+    )
+  }
+
+  try {
+    await assertDemoActionAllowed(context.organizationId, "external-print")
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Impressão bloqueada na demonstração.",
+      },
+      { status: 403 },
+    )
+  }
+
+  const [orders, settings] = await Promise.all([
+    getTenantUnprintedOrders(context.organizationId),
+    getTenantSettings(context.organizationId),
+  ])
+
+  if (!orders || !settings) {
+    return NextResponse.json(
+      { error: "Fila de impressão desta empresa ainda não está pronta." },
+      { status: 503 },
+    )
+  }
+
+  return NextResponse.json({
+    organization: {
+      id: context.organizationId,
+      name: context.organizationName,
+      slug: context.organizationSlug,
+    },
+    agent: { name: context.agentName },
+    orders: printOrdersWithLocalTime(
+      orders,
+      settings.timeZone || "America/Sao_Paulo",
+    ),
+    settings: publicPrintSettings(settings),
+  })
+}
+
+export async function POST(request: Request) {
+  const context = await resolvePrintContext(request)
+  if (!context) {
+    return NextResponse.json(
+      { error: "Agente de impressão não autorizado." },
+      { status: 401 },
+    )
+  }
+
+  const body = (await request.json().catch(() => null)) as
+    | { orderId?: number }
+    | null
+  const id = Number(body?.orderId)
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json(
+      { error: "Pedido inválido." },
+      { status: 400 },
+    )
+  }
+
+  try {
+    await assertDemoActionAllowed(context.organizationId, "external-print")
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Impressão bloqueada na demonstração.",
+      },
+      { status: 403 },
+    )
+  }
+
+  const order = await markTenantOrderPrinted(context.organizationId, id)
+  if (!order) {
+    return NextResponse.json(
+      { error: "Pedido não encontrado na empresa deste agente." },
+      { status: 404 },
+    )
+  }
+
+  return NextResponse.json({ order })
+}
+
+================ app/api/uploads/product-image/route.ts ================
+
+import { NextResponse } from "next/server"
+import { getVerifiedTenantSession, canManageCatalog } from "@/lib/tenant-access"
+import { detectSafeImageType } from "@/lib/security/image-validation"
+import { storeImage } from "@/lib/storage/media"
+
+export async function POST(request: Request) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+  if (!session) {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  }
+
+  if (!canManageCatalog(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode alterar imagens do cardápio." },
+      { status: 403 },
+    )
+  }
+
+  const form = await request.formData()
+  const file = form.get("file")
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "Selecione uma imagem." }, { status: 400 })
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    return NextResponse.json(
+      { error: "A imagem deve ter no máximo 5 MB." },
+      { status: 400 },
+    )
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const detectedType = detectSafeImageType(bytes)
+  if (!detectedType) {
+    return NextResponse.json(
+      { error: "Arquivo inválido. Use uma imagem JPG, PNG ou WEBP real." },
+      { status: 400 },
+    )
+  }
+
+  const declaredType = file.type?.toLowerCase()
+  if (declaredType && declaredType !== detectedType) {
+    return NextResponse.json(
+      { error: "O conteúdo da imagem não corresponde ao tipo informado." },
+      { status: 400 },
+    )
+  }
+
+  try {
+    const stored = await storeImage({
+      organizationId: session.organizationId,
+      area: "products",
+      bytes,
+      contentType: detectedType,
+      filenamePrefix: "product",
+    })
+
+    return NextResponse.json(
+      { url: stored.url, storage: stored.storage },
+      { status: 201 },
+    )
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Falha no upload de imagem de produto:",
+      error instanceof Error ? error.message : error,
+    )
+    return NextResponse.json(
+      { error: "Não foi possível salvar a imagem agora." },
+      { status: 503 },
+    )
+  }
+}
+
+================ app/api/uploads/store-image/route.ts ================
+
+import { NextResponse } from "next/server"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { canManageOrganizationSettings } from "@/lib/tenant-permissions"
+import { detectSafeImageType } from "@/lib/security/image-validation"
+import { storeImage } from "@/lib/storage/media"
+
+export async function POST(request: Request) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+  if (!session) {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  }
+
+  if (!canManageOrganizationSettings(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode alterar imagens da empresa." },
+      { status: 403 },
+    )
+  }
+
+  const form = await request.formData()
+  const file = form.get("file")
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "Selecione uma imagem." }, { status: 400 })
+  }
+
+  if (file.size > 8 * 1024 * 1024) {
+    return NextResponse.json(
+      { error: "A imagem deve ter no máximo 8 MB." },
+      { status: 400 },
+    )
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const detectedType = detectSafeImageType(bytes)
+  if (!detectedType) {
+    return NextResponse.json(
+      { error: "Arquivo inválido. Use uma imagem JPG, PNG ou WEBP real." },
+      { status: 400 },
+    )
+  }
+
+  const declaredType = file.type?.toLowerCase()
+  if (declaredType && declaredType !== detectedType) {
+    return NextResponse.json(
+      { error: "O conteúdo da imagem não corresponde ao tipo informado." },
+      { status: 400 },
+    )
+  }
+
+  try {
+    const stored = await storeImage({
+      organizationId: session.organizationId,
+      area: "brand",
+      bytes,
+      contentType: detectedType,
+      filenamePrefix: "brand",
+    })
+
+    return NextResponse.json(
+      { url: stored.url, storage: stored.storage },
+      { status: 201 },
+    )
+  } catch (error) {
+    console.error(
+      "[SaborFlow] Falha no upload de imagem da empresa:",
+      error instanceof Error ? error.message : error,
+    )
+    return NextResponse.json(
+      { error: "Não foi possível salvar a imagem agora." },
+      { status: 503 },
+    )
+  }
+}
+
+================ app/api/admin/dre/route.ts ================
+
+import { NextResponse } from "next/server"
+import { isAdminAuthenticated } from "@/lib/auth"
+import { getTenantDreReport } from "@/lib/dre-db"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { canViewFinance } from "@/lib/tenant-permissions"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+
+const datePattern = /^\d{4}-\d{2}-\d{2}$/
+
+function dateDiffDays(start: string, end: string) {
+  const first = new Date(`${start}T12:00:00.000Z`).getTime()
+  const last = new Date(`${end}T12:00:00.000Z`).getTime()
+  return Math.floor((last - first) / 86_400_000) + 1
+}
+
+function defaultPeriod() {
+  const end = new Date().toISOString().slice(0, 10)
+  const startDate = new Date(`${end}T12:00:00.000Z`)
+  startDate.setUTCDate(1)
+  return { start: startDate.toISOString().slice(0, 10), end }
+}
+
+export async function GET(request: Request) {
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  }
+
+  const session = await getVerifiedTenantSession()
+  if (!session) {
+    return NextResponse.json(
+      { error: "A DRE exige uma sessão multiempresa válida." },
+      { status: 409 },
+    )
+  }
+
+  if (!canViewFinance(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode acessar a DRE gerencial." },
+      { status: 403 },
+    )
+  }
+
+  try {
+    await assertOrganizationEntitlement(session.organizationId, "advancedReports")
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Recurso não disponível no plano." },
+      { status: billingErrorStatus(error) },
+    )
+  }
+
+  const url = new URL(request.url)
+  const defaults = defaultPeriod()
+  const start = url.searchParams.get("start") || defaults.start
+  const end = url.searchParams.get("end") || defaults.end
+
+  if (!datePattern.test(start) || !datePattern.test(end)) {
+    return NextResponse.json(
+      { error: "Período inválido. Use datas no formato AAAA-MM-DD." },
+      { status: 400 },
+    )
+  }
+
+  const days = dateDiffDays(start, end)
+  if (days <= 0) {
+    return NextResponse.json(
+      { error: "A data inicial não pode ser posterior à data final." },
+      { status: 400 },
+    )
+  }
+  if (days > 400) {
+    return NextResponse.json(
+      { error: "Selecione um período de no máximo 400 dias." },
+      { status: 400 },
+    )
+  }
+
+  try {
+    const report = await getTenantDreReport(session.organizationId, start, end)
+    return NextResponse.json(report)
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Erro ao calcular a DRE.",
+      },
+      { status: 500 },
+    )
+  }
+}
+
+================ app/api/admin/inventory-movements/route.ts ================
+
+import { NextResponse } from "next/server"
+import { getTenantInventoryMovements } from "@/lib/food-composition-db"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { canReadCatalog } from "@/lib/admin-access"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+export async function GET(request: Request) {
+  const session = await getVerifiedTenantSession()
+  if (!session) {
+    return NextResponse.json({ error: "Sessão multiempresa inválida." }, { status: 401 })
+  }
+  if (!canReadCatalog(session.role, session.operationalPermissions)) {
+    return NextResponse.json({ error: "Seu perfil não pode acessar o estoque." }, { status: 403 })
+  }
+  try {
+    await assertOrganizationEntitlement(session.organizationId, "inventory")
+    const url = new URL(request.url)
+    const limit = Number(url.searchParams.get("limit") || 50)
+    return NextResponse.json({
+      movements: await getTenantInventoryMovements(session.organizationId, limit),
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Inventário indisponível no plano." },
+      { status: billingErrorStatus(error) },
+    )
+  }
+}
+
+================ app/api/admin/pdv-delivery-quote/route.ts ================
+
+import { NextRequest, NextResponse } from "next/server"
+import { isAdminAuthenticated } from "@/lib/auth"
+import { calculateDeliveryQuote } from "@/lib/delivery-pricing"
+import { getTenantDeliveryZones, isTenantOperationsReady } from "@/lib/operations-db"
+import { getTenantSettings, isTenantRuntimeReady } from "@/lib/organization-db"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { canUsePdv } from "@/lib/admin-access"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+
+function internalErrorStatus(error: unknown) {
+  const billingStatus = billingErrorStatus(error)
+  return billingStatus === 400 ? 500 : billingStatus
+}
+
+export async function GET(request: NextRequest) {
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 })
+  }
+
+  const session = await getVerifiedTenantSession()
+  if (!session) {
+    return NextResponse.json(
+      { error: "Sessão da empresa inválida. Entre novamente para calcular a entrega do PDV." },
+      { status: 401 },
+    )
+  }
+
+  if (!canUsePdv(session.role, session.operationalPermissions)) {
+    return NextResponse.json({ error: "Seu perfil não pode usar o PDV." }, { status: 403 })
+  }
+
+  const latitude = Number(request.nextUrl.searchParams.get("lat"))
+  const longitude = Number(request.nextUrl.searchParams.get("lng"))
+  const subtotal = Number(request.nextUrl.searchParams.get("subtotal") || 0)
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return NextResponse.json(
+      { error: "Latitude e longitude são obrigatórias." },
+      { status: 400 },
+    )
+  }
+
+  try {
+    return await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      async () => {
+        await assertOrganizationEntitlement(session.organizationId, "delivery")
+
+        const [runtimeReady, operationsReady] = await Promise.all([
+          isTenantRuntimeReady(session.organizationId).catch(() => false),
+          isTenantOperationsReady(session.organizationId).catch(() => false),
+        ])
+
+        if (!runtimeReady || !operationsReady) {
+          return NextResponse.json(
+            {
+              error:
+                "Configurações de entrega PostgreSQL ainda não estão disponíveis para esta empresa. Não foi usado fallback para store.json.",
+            },
+            { status: 503 },
+          )
+        }
+
+        const [settings, zones] = await Promise.all([
+          getTenantSettings(session.organizationId),
+          getTenantDeliveryZones(session.organizationId),
+        ])
+
+        if (!settings) {
+          return NextResponse.json(
+            { error: "Configurações da empresa indisponíveis." },
+            { status: 503 },
+          )
+        }
+
+        const quote = await calculateDeliveryQuote(
+          settings,
+          zones,
+          latitude,
+          longitude,
+          Number.isFinite(subtotal) ? subtotal : 0,
+        )
+
+        return NextResponse.json({ quote })
+      },
+      "tenant-session",
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível calcular a entrega do PDV.",
+      },
+      { status: internalErrorStatus(error) },
+    )
+  }
+}
+
+================ app/api/delivery/quote/route.ts ================
+
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server"
+import {
+  getTenantDeliveryZones,
+  isTenantOperationsReady,
+} from "@/lib/operations-db"
+import {
+  getTenantSettings,
+  isTenantRuntimeReady,
+} from "@/lib/organization-db"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
+import {
+  calculateDeliveryQuote,
+} from "@/lib/delivery-pricing"
+import { assertOrganizationEntitlement, billingErrorStatus } from "@/lib/billing-db"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+
+export async function GET(request: NextRequest) {
+  const latitude = Number(
+    request.nextUrl.searchParams.get("lat"),
+  )
+  const longitude = Number(
+    request.nextUrl.searchParams.get("lng"),
+  )
+  const subtotal = Number(
+    request.nextUrl.searchParams.get("subtotal") || 0,
+  )
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Latitude e longitude são obrigatórias.",
+      },
+      { status: 400 },
+    )
+  }
+
+  try {
+    const organization =
+      await resolvePublicOrganizationForRequest(
+        request,
+      )
+
+    if (!organization) {
+      throw new Error("Empresa não encontrada.")
+    }
+
+    await assertOrganizationEntitlement(organization.id, "delivery")
+
+    return runWithTenantRlsScope(
+      [organization.id],
+      undefined,
+      async () => {
+        const [runtimeReady, operationsReady] = await Promise.all([
+          isTenantRuntimeReady(organization.id).catch(() => false),
+          isTenantOperationsReady(organization.id).catch(() => false),
+        ])
+
+        if (!runtimeReady || !operationsReady) {
+          throw new Error(
+            "Entrega ainda não foi habilitada para esta empresa.",
+          )
+        }
+
+        const [settings, zones] = await Promise.all([
+          getTenantSettings(organization.id),
+          getTenantDeliveryZones(organization.id),
+        ])
+
+        if (!settings) {
+          throw new Error(
+            "Entrega ainda não foi habilitada para esta empresa.",
+          )
+        }
+
+        const quote = await calculateDeliveryQuote(
+          settings,
+          zones,
+          latitude,
+          longitude,
+          Number.isFinite(subtotal)
+            ? subtotal
+            : 0,
+        )
+
+        return NextResponse.json({ quote })
+      },
+      "public-store",
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível calcular a entrega.",
+      },
+      { status: billingErrorStatus(error) },
+    )
+  }
+}
+
+================ app/api/coupons/route.ts ================
+
+import { NextResponse } from "next/server"
+import { isAdminAuthenticated } from "@/lib/auth"
+import {
+  createTenantCoupon,
+  getTenantCoupons,
+  isTenantOperationsReady,
+  validateTenantCoupon,
+} from "@/lib/operations-db"
+import {
+  getVerifiedTenantSession,
+} from "@/lib/tenant-access"
+import {
+  canManageMarketing,
+} from "@/lib/tenant-permissions"
+import {
+  resolvePublicOrganizationForRequest,
+} from "@/lib/public-tenant"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const code = url.searchParams.get("code")
+  const subtotal = Number(
+    url.searchParams.get("subtotal") || 0,
+  )
+
+  if (code) {
+    try {
+      const organization =
+        await resolvePublicOrganizationForRequest(
+          request,
+        )
+
+      if (!organization) {
+        throw new Error("Empresa não identificada.")
+      }
+
+      const result = await runWithTenantRlsScope(
+        [organization.id],
+        undefined,
+        async () => {
+          const ready = await isTenantOperationsReady(
+            organization.id,
+          ).catch(() => false)
+
+          if (!ready) return null
+
+          return validateTenantCoupon(
+            organization.id,
+            code,
+            subtotal,
+          )
+        },
+        "public-store",
+      )
+
+      if (!result) {
+        throw new Error(
+          "Cupons ainda não foram habilitados para esta empresa.",
+        )
+      }
+
+      return NextResponse.json({
+        valid: true,
+        discount: result.discount,
+        coupon: result.coupon,
+      })
+    } catch (error) {
+      return NextResponse.json(
+        {
+          valid: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Cupom inválido.",
+        },
+        { status: 400 },
+      )
+    }
+  }
+
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json(
+      { error: "Não autorizado." },
+      { status: 401 },
+    )
+  }
+
+  const session = await getVerifiedTenantSession()
+
+  if (!session) {
+    return NextResponse.json(
+      { error: "Sessão tenant obrigatória." },
+      { status: 401 },
+    )
+  }
+
+  if (!(await isTenantOperationsReady(
+    session.organizationId,
+  ).catch(() => false))) {
+    return NextResponse.json(
+      { error: "Operações PostgreSQL indisponíveis para esta empresa." },
+      { status: 503 },
+    )
+  }
+
+  return NextResponse.json({
+    coupons: await getTenantCoupons(
+      session.organizationId,
+      { includeInactive: true },
+    ),
+  })
+}
+
+export async function POST(request: Request) {
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json(
+      { error: "Não autorizado." },
+      { status: 401 },
+    )
+  }
+
+  const body = (await request.json().catch(() => null)) as
+    | Record<string, unknown>
+    | null
+
+  const input = {
+    code: String(body?.code || ""),
+    description: String(body?.description || ""),
+    type:
+      body?.type === "fixed"
+        ? ("fixed" as const)
+        : ("percent" as const),
+    value: Number(body?.value || 0),
+    minimumOrder: Number(body?.minimumOrder || 0),
+    active: body?.active !== false,
+    ...(body?.expiresAt
+      ? { expiresAt: String(body.expiresAt) }
+      : {}),
+  }
+
+  try {
+    const session = await getVerifiedTenantSession()
+    if (!session) {
+      return NextResponse.json(
+        { error: "Sessão tenant obrigatória." },
+        { status: 401 },
+      )
+    }
+
+    const ready = await isTenantOperationsReady(
+      session.organizationId,
+    ).catch(() => false)
+
+    if (!ready) {
+      return NextResponse.json(
+        { error: "Operações PostgreSQL indisponíveis para esta empresa." },
+        { status: 503 },
+      )
+    }
+
+    if (!canManageMarketing(session.role)) {
+      return NextResponse.json(
+        {
+          error:
+            "Seu perfil não pode alterar cupons.",
+        },
+        { status: 403 },
+      )
+    }
+
+    const coupon = await createTenantCoupon(
+      session.organizationId,
+      input,
+    )
+
+    return NextResponse.json(
+      { coupon },
+      { status: 201 },
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao criar cupom.",
+      },
+      { status: 400 },
+    )
+  }
+}
+
+================ app/api/admin/reports/export/route.ts ================
+
+import {
+  assertOrganizationEntitlement,
+  billingErrorStatus,
+} from "@/lib/billing-db"
+import { reportToCsv, type ReportExportDataset } from "@/lib/reports-csv"
+import { buildManagementReport, canAccessManagementReports } from "@/lib/reports-db"
+import type { ManagementReportScope } from "@/lib/reports-types"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const datasets = new Set<ReportExportDataset>(["summary", "products", "daily", "units"])
+
+export async function GET(request: Request) {
+  const session = await getVerifiedTenantSession()
+  if (!session) return new Response("Não autorizado.", { status: 401 })
+  if (!canAccessManagementReports(session)) return new Response("Seu perfil não possui acesso aos relatórios gerenciais.", { status: 403 })
+
+  try {
+    await assertOrganizationEntitlement(session.organizationId, "advancedReports")
+    const url = new URL(request.url)
+    const scope: ManagementReportScope = url.searchParams.get("scope") === "group" ? "group" : "organization"
+    const requestedDataset = (url.searchParams.get("dataset") || "summary") as ReportExportDataset
+    const dataset: ReportExportDataset = datasets.has(requestedDataset) ? requestedDataset : "summary"
+    const report = await buildManagementReport(
+      session,
+      scope,
+      url.searchParams.get("start"),
+      url.searchParams.get("end"),
+    )
+    const csv = reportToCsv(report, dataset)
+    const filename = `saborflow-${scope}-${dataset}-${report.period.start}-${report.period.end}.csv`
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    })
+  } catch (error) {
+    return new Response(error instanceof Error ? error.message : "Falha ao exportar relatório.", {
+      status: billingErrorStatus(error) || 400,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    })
+  }
+}
+
+================ lib/security/request-security.ts ================
+
+function firstForwardedValue(value: string | null) {
+  return value?.split(",")[0]?.trim() || ""
+}
+
+function normalizeOrigin(value: string | null | undefined) {
+  if (!value) return null
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+export function requestIp(request: Request) {
+  return (
+    request.headers.get("cf-connecting-ip")?.trim() ||
+    firstForwardedValue(request.headers.get("x-forwarded-for")) ||
+    request.headers.get("x-real-ip")?.trim() ||
+    "unknown"
+  ).slice(0, 128)
+}
+
+export function requestTargetOrigin(request: Request) {
+  const forwardedHost =
+    firstForwardedValue(request.headers.get("x-forwarded-host")) ||
+    firstForwardedValue(request.headers.get("host"))
+  const forwardedProto = firstForwardedValue(
+    request.headers.get("x-forwarded-proto"),
+  )
+
+  if (
+    forwardedHost &&
+    (forwardedProto === "https" || forwardedProto === "http")
+  ) {
+    return normalizeOrigin(`${forwardedProto}://${forwardedHost}`)
+  }
+
+  return normalizeOrigin(request.url)
+}
+
+export function requestIsSameOrigin(request: Request) {
+  const target = requestTargetOrigin(request)
+  if (!target) return false
+
+  const origin = normalizeOrigin(request.headers.get("origin"))
+  if (origin) return origin === target
+
+  const referer = normalizeOrigin(request.headers.get("referer"))
+  if (referer) return referer === target
+
+  // Chamadas servidor-servidor e webhooks podem não enviar Origin/Referer.
+  // Endpoints públicos ainda precisam de autenticação/assinatura própria.
+  return true
+}
+
+export function browserRequestLooksCrossSite(request: Request) {
+  const site = request.headers.get("sec-fetch-site")?.toLowerCase().trim()
+  return site === "cross-site" || site === "same-site"
+}
+
+================ lib/postgres.ts ================
+
+import { Pool, type PoolClient } from "pg"
+import { getCurrentRlsContext } from "@/lib/rls-context"
+
+type GlobalWithPostgres = typeof globalThis & {
+  __saborflowPostgresPool?: Pool
+}
+
+const RLS_RUNTIME_ROLE = "saborflow_rls_app"
+const RLS_ROLE_CACHE_MS = 5_000
+
+let roleCache:
+  | { available: boolean; checkedAt: number }
+  | undefined
+
+function integerEnv(name: string, fallback: number, min: number, max: number) {
+  const parsed = Number(process.env[name])
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(parsed)))
+}
+
+function createRawPool() {
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) {
+    throw new Error("DATABASE_URL não está configurada.")
+  }
+
+  return new Pool({
+    connectionString,
+    max: integerEnv("POSTGRES_POOL_MAX", 5, 1, 30),
+    idleTimeoutMillis: integerEnv("POSTGRES_IDLE_TIMEOUT_MS", 30_000, 5_000, 120_000),
+    connectionTimeoutMillis: integerEnv("POSTGRES_CONNECT_TIMEOUT_MS", 5_000, 1_000, 30_000),
+  })
+}
+
+type RoleQuery = <T extends Record<string, unknown> = Record<string, unknown>>(
+  text: string,
+  values?: unknown[],
+) => Promise<{ rows: T[] }>
+
+async function runtimeRoleAvailable(
+  query: RoleQuery,
+  force = false,
+) {
+  const now = Date.now()
+  const cacheTtl = roleCache?.available ? RLS_ROLE_CACHE_MS : 250
+
+  if (
+    !force &&
+    roleCache &&
+    now - roleCache.checkedAt < cacheTtl
+  ) {
+    return roleCache.available
+  }
+
+  const result = await query<{ available: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_roles
+        WHERE rolname = $1
+          AND rolsuper = false
+          AND rolbypassrls = false
+      ) AS available
+    `,
+    [RLS_RUNTIME_ROLE],
+  )
+
+  roleCache = {
+    available: Boolean(result.rows[0]?.available),
+    checkedAt: now,
+  }
+
+  return roleCache.available
+}
+
+function contextSettings() {
+  const context = getCurrentRlsContext()
+  const organizationIds = context?.organizationIds ?? []
+
+  return {
+    organizationId: organizationIds[0] ?? "",
+    organizationIds: organizationIds.join(","),
+    userId: context?.userId ?? "",
+    bypass: context?.bypass ? "true" : "false",
+  }
+}
+
+async function applyRlsSettings(
+  client: PoolClient,
+  local: boolean,
+) {
+  const settings = contextSettings()
+
+  await client.query(
+    local
+      ? `SET LOCAL ROLE ${RLS_RUNTIME_ROLE}`
+      : `SET ROLE ${RLS_RUNTIME_ROLE}`,
+  )
+
+  await client.query(
+    `
+      SELECT
+        set_config('app.organization_id', $1, $5),
+        set_config('app.organization_ids', $2, $5),
+        set_config('app.user_id', $3, $5),
+        set_config('app.rls_bypass', $4, $5)
+    `,
+    [
+      settings.organizationId,
+      settings.organizationIds,
+      settings.userId,
+      settings.bypass,
+      local,
+    ],
+  )
+}
+
+async function cleanupCheckedOutClient(client: PoolClient) {
+  try {
+    await client.query("ROLLBACK")
+  } catch {
+    // A conexão pode já estar fora de uma transação; seguimos para o reset.
+  }
+
+  await client.query("RESET app.organization_id").catch(() => undefined)
+  await client.query("RESET app.organization_ids").catch(() => undefined)
+  await client.query("RESET app.user_id").catch(() => undefined)
+  await client.query("RESET app.rls_bypass").catch(() => undefined)
+  await client.query("RESET ROLE").catch(() => undefined)
+}
+
+function installRlsBridge(pool: Pool) {
+  const rawConnect = pool.connect.bind(pool)
+
+  pool.query = (async (...args: unknown[]) => {
+    const client = await rawConnect()
+    const clientQuery = client.query.bind(client) as RoleQuery
+
+    try {
+      if (!(await runtimeRoleAvailable(clientQuery))) {
+        return await (client.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args)
+      }
+
+      await client.query("BEGIN")
+      await applyRlsSettings(client, true)
+      const result = await (client.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args)
+      await client.query("COMMIT")
+      return result
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
+  }) as Pool["query"]
+
+  pool.connect = (async () => {
+    const client = await rawConnect()
+    const clientQuery = client.query.bind(client) as RoleQuery
+
+    if (!(await runtimeRoleAvailable(clientQuery))) {
+      return client
+    }
+
+    try {
+      await applyRlsSettings(client, false)
+    } catch (error) {
+      client.release(error as Error)
+      throw error
+    }
+
+    const originalRelease = client.release
+    let released = false
+
+    client.release = ((error?: Error | boolean) => {
+      if (released) return
+      released = true
+      client.release = originalRelease
+
+      if (error) {
+        originalRelease.call(client, error)
+        return
+      }
+
+      void cleanupCheckedOutClient(client)
+        .then(() => originalRelease.call(client))
+        .catch((cleanupError) => {
+          originalRelease.call(
+            client,
+            cleanupError instanceof Error
+              ? cleanupError
+              : new Error("Falha ao limpar contexto RLS da conexão."),
+          )
+        })
+    }) as PoolClient["release"]
+
+    return client
+  }) as Pool["connect"]
+
+  return pool
+}
+
+function createPool() {
+  return installRlsBridge(createRawPool())
+}
+
+export function getPostgresPool() {
+  const globalForPostgres = globalThis as GlobalWithPostgres
+
+  if (!globalForPostgres.__saborflowPostgresPool) {
+    globalForPostgres.__saborflowPostgresPool = createPool()
+  }
+
+  return globalForPostgres.__saborflowPostgresPool
+}
+
+export async function getRlsRuntimeBridgeStatus() {
+  roleCache = undefined
+  const result = await getPostgresPool().query<{ available: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_roles
+        WHERE rolname = $1
+          AND rolsuper = false
+          AND rolbypassrls = false
+      ) AS available
+    `,
+    [RLS_RUNTIME_ROLE],
+  ).catch(() => ({ rows: [{ available: false }] }))
+
+  const roleAvailable = Boolean(result.rows[0]?.available)
+  return {
+    role: RLS_RUNTIME_ROLE,
+    roleAvailable,
+    failClosedWhenUnscoped: roleAvailable,
+  }
+}
+
+export async function checkPostgresConnection() {
+  const result = await getPostgresPool().query<{
+    ok: number
+    checked_at: Date
+  }>("SELECT 1 AS ok, NOW() AS checked_at")
+
+  return {
+    ok: result.rows[0]?.ok === 1,
+    checkedAt: result.rows[0]?.checked_at ?? new Date(),
+  }
+}

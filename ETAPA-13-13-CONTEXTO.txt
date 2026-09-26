@@ -1,0 +1,2565 @@
+
+================ lib/security/audit-log.ts ================
+
+import { getPostgresPool } from "@/lib/postgres"
+
+export type AuditEvent = {
+  id: string
+  action: string
+  entityType: string | null
+  entityId: string | null
+  metadata: Record<string, unknown>
+  category: string
+  outcome: string
+  source: string
+  sessionId: string | null
+  actorRole: string | null
+  ipHash: string | null
+  userAgentHash: string | null
+  createdAt: string
+}
+
+type AuditRow = {
+  id: string
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  metadata: Record<string, unknown> | null
+  event_category: string
+  outcome: string
+  source: string
+  session_id: string | null
+  actor_role: string | null
+  ip_hash: string | null
+  user_agent_hash: string | null
+  created_at: Date
+}
+
+function safeMetadata(value: unknown, depth = 0): unknown {
+  if (depth > 4) return "[truncated]"
+  if (value === null || value === undefined) return value
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map((item) => safeMetadata(item, depth + 1))
+  }
+
+  if (typeof value !== "object") {
+    if (typeof value === "string") return value.slice(0, 2_000)
+    return value
+  }
+
+  const blocked = /password|secret|token|credential|recovery|cookie|authorization|document|cpf|cnpj/i
+  const output: Record<string, unknown> = {}
+
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>).slice(0, 100)) {
+    output[key] = blocked.test(key) ? "[redacted]" : safeMetadata(entry, depth + 1)
+  }
+
+  return output
+}
+
+export async function listTenantAuditEvents(input: {
+  organizationId: string
+  limit: number
+  actionPrefix?: string | null
+  category?: string | null
+}) {
+  const actionPattern = input.actionPrefix ? `${input.actionPrefix}%` : null
+
+  const result = await getPostgresPool().query<AuditRow>(
+    `
+      SELECT
+        id::text,
+        action,
+        entity_type,
+        entity_id,
+        metadata,
+        event_category,
+        outcome,
+        source,
+        session_id,
+        actor_role,
+        ip_hash,
+        user_agent_hash,
+        created_at
+      FROM sf_audit_log
+      WHERE organization_id = $1
+        AND ($2::text IS NULL OR action LIKE $2)
+        AND ($3::text IS NULL OR event_category = $3)
+      ORDER BY created_at DESC
+      LIMIT $4
+    `,
+    [input.organizationId, actionPattern, input.category || null, input.limit],
+  )
+
+  return result.rows.map<AuditEvent>((row) => ({
+    id: row.id,
+    action: row.action,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    metadata: safeMetadata(row.metadata || {}) as Record<string, unknown>,
+    category: row.event_category,
+    outcome: row.outcome,
+    source: row.source,
+    sessionId: row.session_id,
+    actorRole: row.actor_role,
+    ipHash: row.ip_hash,
+    userAgentHash: row.user_agent_hash,
+    createdAt: row.created_at.toISOString(),
+  }))
+}
+
+================ lib/security/rate-limit.ts ================
+
+import { createHash } from "node:crypto"
+import { getPostgresPool } from "@/lib/postgres"
+
+type RateBucket = {
+  failures: number
+  resetAt: number
+}
+
+type RateLimitState = {
+  allowed: boolean
+  remaining: number
+  retryAfterSeconds: number
+}
+
+type PersistedRateBucketRow = {
+  failures: number
+  reset_at: Date | string
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __saborflowAuthRateBuckets: Map<string, RateBucket> | undefined
+  // eslint-disable-next-line no-var
+  var __saborflowRateLimitLastCleanupAt: number | undefined
+}
+
+const fallbackBuckets =
+  globalThis.__saborflowAuthRateBuckets || new Map<string, RateBucket>()
+
+globalThis.__saborflowAuthRateBuckets = fallbackBuckets
+
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+
+function keyFor(scope: string, value: string) {
+  const digest = createHash("sha256")
+    .update(value.trim().toLowerCase())
+    .digest("hex")
+
+  return `${scope}:${digest}`
+}
+
+function cleanExpiredFallback(now: number) {
+  if (fallbackBuckets.size < 500) return
+
+  for (const [key, bucket] of fallbackBuckets) {
+    if (bucket.resetAt <= now) {
+      fallbackBuckets.delete(key)
+    }
+  }
+}
+
+function fallbackState(
+  key: string,
+  limit: number,
+): RateLimitState {
+  const now = Date.now()
+  cleanExpiredFallback(now)
+
+  const bucket = fallbackBuckets.get(key)
+
+  if (!bucket || bucket.resetAt <= now) {
+    if (bucket) {
+      fallbackBuckets.delete(key)
+    }
+
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const allowed = bucket.failures < limit
+
+  return {
+    allowed,
+    remaining: Math.max(0, limit - bucket.failures),
+    retryAfterSeconds: allowed
+      ? 0
+      : Math.max(
+          1,
+          Math.ceil((bucket.resetAt - now) / 1000),
+        ),
+  }
+}
+
+function registerFallbackFailure(
+  key: string,
+  windowMs: number,
+) {
+  const now = Date.now()
+  const current = fallbackBuckets.get(key)
+
+  if (!current || current.resetAt <= now) {
+    fallbackBuckets.set(key, {
+      failures: 1,
+      resetAt: now + windowMs,
+    })
+    return
+  }
+
+  fallbackBuckets.set(key, {
+    failures: current.failures + 1,
+    resetAt: current.resetAt,
+  })
+}
+
+async function cleanupPersistedBuckets() {
+  const now = Date.now()
+  const lastCleanup =
+    globalThis.__saborflowRateLimitLastCleanupAt || 0
+
+  if (now - lastCleanup < CLEANUP_INTERVAL_MS) {
+    return
+  }
+
+  globalThis.__saborflowRateLimitLastCleanupAt = now
+
+  await getPostgresPool().query(
+    `
+      DELETE FROM sf_auth_rate_limits
+      WHERE reset_at <= NOW()
+    `,
+  )
+}
+
+function persistedState(
+  row: PersistedRateBucketRow | undefined,
+  limit: number,
+): RateLimitState {
+  if (!row) {
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const resetAt = new Date(row.reset_at).getTime()
+
+  if (!Number.isFinite(resetAt) || resetAt <= Date.now()) {
+    return {
+      allowed: true,
+      remaining: limit,
+      retryAfterSeconds: 0,
+    }
+  }
+
+  const failures = Math.max(0, Number(row.failures) || 0)
+  const allowed = failures < limit
+
+  return {
+    allowed,
+    remaining: Math.max(0, limit - failures),
+    retryAfterSeconds: allowed
+      ? 0
+      : Math.max(
+          1,
+          Math.ceil((resetAt - Date.now()) / 1000),
+        ),
+  }
+}
+
+function stricterState(
+  left: RateLimitState,
+  right: RateLimitState,
+): RateLimitState {
+  return {
+    allowed: left.allowed && right.allowed,
+    remaining: Math.min(left.remaining, right.remaining),
+    retryAfterSeconds: Math.max(
+      left.retryAfterSeconds,
+      right.retryAfterSeconds,
+    ),
+  }
+}
+
+export function authRateLimitKey(
+  scope: "ip" | "account",
+  value: string,
+) {
+  return keyFor(scope, value || "unknown")
+}
+
+export async function checkAuthRateLimit(
+  key: string,
+  limit: number,
+  _windowMs: number,
+): Promise<RateLimitState> {
+  const local = fallbackState(key, limit)
+
+  try {
+    const result =
+      await getPostgresPool().query<PersistedRateBucketRow>(
+        `
+          SELECT failures, reset_at
+          FROM sf_auth_rate_limits
+          WHERE key_hash = $1
+            AND reset_at > NOW()
+          LIMIT 1
+        `,
+        [key],
+      )
+
+    const shared = persistedState(result.rows[0], limit)
+
+    return stricterState(local, shared)
+  } catch (error) {
+    console.error(
+      "Falha ao consultar rate limit persistente; usando protecao local.",
+      error,
+    )
+    return local
+  }
+}
+
+export async function registerAuthFailure(
+  key: string,
+  windowMs: number,
+) {
+  registerFallbackFailure(key, windowMs)
+
+  try {
+    await getPostgresPool().query(
+      `
+        INSERT INTO sf_auth_rate_limits (
+          key_hash,
+          failures,
+          reset_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          1,
+          NOW() + ($2::double precision * INTERVAL '1 millisecond'),
+          NOW()
+        )
+        ON CONFLICT (key_hash)
+        DO UPDATE SET
+          failures = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN 1
+            ELSE sf_auth_rate_limits.failures + 1
+          END,
+          reset_at = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN NOW() + (
+                $2::double precision * INTERVAL '1 millisecond'
+              )
+            ELSE sf_auth_rate_limits.reset_at
+          END,
+          updated_at = NOW()
+      `,
+      [key, windowMs],
+    )
+
+    await cleanupPersistedBuckets()
+  } catch (error) {
+    console.error(
+      "Falha ao registrar rate limit persistente; protecao local mantida.",
+      error,
+    )
+  }
+}
+
+export async function clearAuthFailures(key: string) {
+  fallbackBuckets.delete(key)
+
+  try {
+    await getPostgresPool().query(
+      `
+        DELETE FROM sf_auth_rate_limits
+        WHERE key_hash = $1
+      `,
+      [key],
+    )
+  } catch (error) {
+    console.error(
+      "Falha ao limpar rate limit persistente.",
+      error,
+    )
+  }
+}
+
+================ lib/security/admin-sessions.ts ================
+
+import {
+  createHash,
+  randomUUID,
+} from "node:crypto"
+import {
+  ADMIN_SESSION_IDLE_SECONDS,
+} from "@/lib/auth"
+import { getPostgresPool } from "@/lib/postgres"
+import {
+  requestIp,
+} from "@/lib/security/request-security"
+import type {
+  TwoFactorAuthSource,
+} from "@/lib/security/two-factor-challenge"
+
+export type AdminSessionAuthSource =
+  | TwoFactorAuthSource
+  | "commercial"
+  | "demo"
+
+const MAX_ACTIVE_SESSIONS_PER_USER = 20
+
+type ActiveSessionRow = {
+  id: string
+  organization_id: string
+  organization_name: string
+  auth_source: AdminSessionAuthSource
+  superadmin_authorized: boolean
+  device_label: string
+  created_at: Date | string
+  last_seen_at: Date | string
+  expires_at: Date | string
+}
+
+export type AdminSessionSummary = {
+  id: string
+  organizationId: string
+  organizationName: string
+  authSource: AdminSessionAuthSource
+  superadminAuthorized: boolean
+  deviceLabel: string
+  createdAt: string
+  lastSeenAt: string
+  expiresAt: string
+  current: boolean
+}
+
+function hashSignal(
+  namespace: string,
+  value: string,
+) {
+  if (!value.trim()) {
+    return null
+  }
+
+  return createHash("sha256")
+    .update(
+      `saborflow:admin-session:${namespace}:v1:${value}`,
+    )
+    .digest("hex")
+}
+
+function browserName(
+  userAgent: string,
+) {
+  if (/Edg\//i.test(userAgent)) return "Microsoft Edge"
+  if (/OPR\//i.test(userAgent)) return "Opera"
+  if (/Firefox\//i.test(userAgent)) return "Firefox"
+  if (/Chrome\//i.test(userAgent) || /CriOS\//i.test(userAgent)) {
+    return "Google Chrome"
+  }
+  if (/Safari\//i.test(userAgent) && !/Chrome\//i.test(userAgent)) {
+    return "Safari"
+  }
+  return "Navegador"
+}
+
+function operatingSystemName(
+  userAgent: string,
+) {
+  if (/Windows/i.test(userAgent)) return "Windows"
+  if (/iPhone/i.test(userAgent)) return "iPhone"
+  if (/iPad/i.test(userAgent)) return "iPad"
+  if (/Android/i.test(userAgent)) return "Android"
+  if (/Mac OS X|Macintosh/i.test(userAgent)) return "macOS"
+  if (/Linux/i.test(userAgent)) return "Linux"
+  return "dispositivo desconhecido"
+}
+
+function deviceLabel(
+  userAgent: string,
+) {
+  if (!userAgent.trim()) {
+    return "Dispositivo nÃ£o identificado"
+  }
+
+  return `${browserName(userAgent)} no ${operatingSystemName(userAgent)}`
+}
+
+function iso(
+  value: Date | string,
+) {
+  return new Date(value).toISOString()
+}
+
+export async function createAdminSessionRecord(
+  input: {
+    userId: string
+    organizationId: string
+    sessionVersion: number
+    authSource: AdminSessionAuthSource
+    superadminAuthorized: boolean
+    request: Request
+    maxAgeSeconds?: number
+  },
+) {
+  const id = randomUUID()
+  const maxAgeSeconds =
+    Math.max(
+      60,
+      Math.min(
+        ADMIN_SESSION_IDLE_SECONDS,
+        Math.floor(
+          input.maxAgeSeconds ??
+            ADMIN_SESSION_IDLE_SECONDS,
+        ),
+      ),
+    )
+  const userAgent =
+    input.request.headers.get(
+      "user-agent",
+    ) || ""
+  const ip =
+    requestIp(input.request)
+
+  const client =
+    await getPostgresPool().connect()
+
+  try {
+    await client.query("BEGIN")
+
+    await client.query(
+      `
+        INSERT INTO sf_admin_sessions (
+          id,
+          user_id,
+          organization_id,
+          session_version,
+          auth_source,
+          superadmin_authorized,
+          device_label,
+          user_agent_hash,
+          ip_hash,
+          created_at,
+          last_seen_at,
+          expires_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          now(),
+          now(),
+          now() +
+            ($10::integer *
+              interval '1 second')
+        )
+      `,
+      [
+        id,
+        input.userId,
+        input.organizationId,
+        input.sessionVersion,
+        input.authSource,
+        input.superadminAuthorized,
+        deviceLabel(userAgent),
+        hashSignal(
+          "ua",
+          userAgent,
+        ),
+        hashSignal(
+          "ip",
+          ip,
+        ),
+        maxAgeSeconds,
+      ],
+    )
+
+    await client.query(
+      `
+        UPDATE sf_admin_sessions
+        SET
+          revoked_at = now(),
+          revoked_reason =
+            'active_session_limit'
+        WHERE user_id = $1
+          AND revoked_at IS NULL
+          AND id IN (
+            SELECT id
+            FROM sf_admin_sessions
+            WHERE user_id = $1
+              AND revoked_at IS NULL
+            ORDER BY
+              last_seen_at DESC,
+              created_at DESC
+            OFFSET $2
+          )
+      `,
+      [
+        input.userId,
+        MAX_ACTIVE_SESSIONS_PER_USER,
+      ],
+    )
+
+    await client.query("COMMIT")
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw error
+  } finally {
+    client.release()
+  }
+
+  return {
+    id,
+  }
+}
+
+export async function validateAndTouchAdminSession(
+  input: {
+    sessionId: string
+    userId: string
+    organizationId: string
+    sessionVersion: number
+  },
+) {
+  const result =
+    await getPostgresPool()
+      .query<{ id: string }>(
+        `
+          UPDATE sf_admin_sessions AS s
+          SET
+            last_seen_at = now(),
+            expires_at =
+              now() +
+              ($5::integer *
+                interval '1 second')
+          FROM sf_users AS u
+          WHERE s.id = $1
+            AND s.user_id = $2
+            AND s.organization_id = $3
+            AND s.session_version = $4
+            AND s.revoked_at IS NULL
+            AND s.expires_at > now()
+            AND u.id = s.user_id
+            AND u.status = 'active'
+            AND u.session_version =
+              s.session_version
+          RETURNING s.id
+        `,
+        [
+          input.sessionId,
+          input.userId,
+          input.organizationId,
+          input.sessionVersion,
+          ADMIN_SESSION_IDLE_SECONDS,
+        ],
+      )
+
+  return Boolean(
+    result.rowCount,
+  )
+}
+
+export async function listAdminSessions(
+  userId: string,
+  currentSessionId: string,
+) {
+  const result =
+    await getPostgresPool()
+      .query<ActiveSessionRow>(
+        `
+          SELECT
+            s.id,
+            s.organization_id,
+            o.trade_name AS organization_name,
+            s.auth_source,
+            s.superadmin_authorized,
+            s.device_label,
+            s.created_at,
+            s.last_seen_at,
+            s.expires_at
+          FROM sf_admin_sessions AS s
+          INNER JOIN sf_users AS u
+            ON u.id = s.user_id
+          INNER JOIN sf_organizations AS o
+            ON o.id = s.organization_id
+          WHERE s.user_id = $1
+            AND s.revoked_at IS NULL
+            AND s.expires_at > now()
+            AND s.session_version =
+              u.session_version
+            AND u.status = 'active'
+          ORDER BY
+            (s.id = $2) DESC,
+            s.last_seen_at DESC,
+            s.created_at DESC
+        `,
+        [
+          userId,
+          currentSessionId,
+        ],
+      )
+
+  return result.rows.map(
+    (
+      row,
+    ): AdminSessionSummary => ({
+      id: row.id,
+      organizationId:
+        row.organization_id,
+      organizationName:
+        row.organization_name,
+      authSource:
+        row.auth_source,
+      superadminAuthorized:
+        Boolean(
+          row.superadmin_authorized,
+        ),
+      deviceLabel:
+        row.device_label,
+      createdAt:
+        iso(row.created_at),
+      lastSeenAt:
+        iso(row.last_seen_at),
+      expiresAt:
+        iso(row.expires_at),
+      current:
+        row.id ===
+        currentSessionId,
+    }),
+  )
+}
+
+
+export async function moveAdminSessionToOrganization(
+  input: {
+    sessionId: string
+    userId: string
+    organizationId: string
+    sessionVersion: number
+  },
+) {
+  const result =
+    await getPostgresPool()
+      .query<{ id: string }>(
+        `
+          UPDATE sf_admin_sessions AS s
+          SET
+            organization_id = $3,
+            last_seen_at = now(),
+            expires_at =
+              now() +
+              ($5::integer *
+                interval '1 second')
+          FROM sf_users AS u
+          WHERE s.id = $1
+            AND s.user_id = $2
+            AND s.session_version = $4
+            AND s.revoked_at IS NULL
+            AND s.expires_at > now()
+            AND u.id = s.user_id
+            AND u.status = 'active'
+            AND u.session_version =
+              s.session_version
+          RETURNING s.id
+        `,
+        [
+          input.sessionId,
+          input.userId,
+          input.organizationId,
+          input.sessionVersion,
+          ADMIN_SESSION_IDLE_SECONDS,
+        ],
+      )
+
+  return Boolean(
+    result.rowCount,
+  )
+}
+
+export async function revokeAdminSession(
+  input: {
+    sessionId: string
+    userId: string
+    reason:
+      | "logout"
+      | "user_revoked"
+      | "revoke_others"
+      | "security_reset"
+  },
+) {
+  const result =
+    await getPostgresPool()
+      .query<{ id: string }>(
+        `
+          UPDATE sf_admin_sessions
+          SET
+            revoked_at =
+              COALESCE(
+                revoked_at,
+                now()
+              ),
+            revoked_reason =
+              COALESCE(
+                revoked_reason,
+                $3
+              )
+          WHERE id = $1
+            AND user_id = $2
+          RETURNING id
+        `,
+        [
+          input.sessionId,
+          input.userId,
+          input.reason,
+        ],
+      )
+
+  return Boolean(
+    result.rowCount,
+  )
+}
+
+export async function revokeOtherAdminSessions(
+  userId: string,
+  currentSessionId: string,
+) {
+  const result =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_admin_sessions
+          SET
+            revoked_at = now(),
+            revoked_reason =
+              'revoke_others'
+          WHERE user_id = $1
+            AND id <> $2
+            AND revoked_at IS NULL
+        `,
+        [
+          userId,
+          currentSessionId,
+        ],
+      )
+
+  return result.rowCount || 0
+}
+
+export async function revokeAllAdminSessionsForUser(
+  userId: string,
+) {
+  const result =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_admin_sessions
+          SET
+            revoked_at = now(),
+            revoked_reason =
+              'security_reset'
+          WHERE user_id = $1
+            AND revoked_at IS NULL
+        `,
+        [userId],
+      )
+
+  return result.rowCount || 0
+}
+
+================ lib/security/two-factor.ts ================
+
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto"
+import { getPostgresPool } from "@/lib/postgres"
+
+const BASE32_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+const TOTP_PERIOD_SECONDS = 30
+const TOTP_DIGITS = 6
+const TOTP_WINDOW = 1
+const RECOVERY_CODE_COUNT = 10
+
+type MfaRow = {
+  user_id: string
+  secret_encrypted: string
+  enabled: boolean
+  last_totp_step: string | null
+  recovery_code_hashes: unknown
+  pending_secret_encrypted: string | null
+  pending_secret_created_at: Date | string | null
+}
+
+const RECONFIGURATION_TTL_MS =
+  10 * 60 * 1000
+
+function getEncryptionKey() {
+  const configured =
+    process.env
+      .TWO_FACTOR_ENCRYPTION_KEY
+      ?.trim()
+
+  if (!configured) {
+    throw new Error(
+      "TWO_FACTOR_ENCRYPTION_KEY é obrigatório para o 2FA.",
+    )
+  }
+
+  const key = Buffer.from(
+    configured,
+    "base64url",
+  )
+
+  if (key.length !== 32) {
+    throw new Error(
+      "TWO_FACTOR_ENCRYPTION_KEY deve conter exatamente 32 bytes em base64url.",
+    )
+  }
+
+  return key
+}
+
+function base32Encode(input: Buffer) {
+  let bits = ""
+  let output = ""
+
+  for (const byte of input) {
+    bits += byte
+      .toString(2)
+      .padStart(8, "0")
+  }
+
+  for (
+    let index = 0;
+    index < bits.length;
+    index += 5
+  ) {
+    const chunk = bits
+      .slice(index, index + 5)
+      .padEnd(5, "0")
+
+    output +=
+      BASE32_ALPHABET[
+        Number.parseInt(chunk, 2)
+      ]
+  }
+
+  return output
+}
+
+function base32Decode(value: string) {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/=+$/g, "")
+    .replace(/\s+/g, "")
+
+  let bits = ""
+
+  for (const character of normalized) {
+    const index =
+      BASE32_ALPHABET.indexOf(
+        character,
+      )
+
+    if (index < 0) {
+      throw new Error(
+        "Segredo TOTP inválido.",
+      )
+    }
+
+    bits += index
+      .toString(2)
+      .padStart(5, "0")
+  }
+
+  const bytes: number[] = []
+
+  for (
+    let index = 0;
+    index + 8 <= bits.length;
+    index += 8
+  ) {
+    bytes.push(
+      Number.parseInt(
+        bits.slice(index, index + 8),
+        2,
+      ),
+    )
+  }
+
+  return Buffer.from(bytes)
+}
+
+function aadForUser(userId: string) {
+  return Buffer.from(
+    `saborflow:mfa:totp:v1:${userId}`,
+    "utf8",
+  )
+}
+
+function encryptSecret(
+  userId: string,
+  secret: string,
+) {
+  const key = getEncryptionKey()
+  const iv = randomBytes(12)
+
+  const cipher = createCipheriv(
+    "aes-256-gcm",
+    key,
+    iv,
+  )
+
+  cipher.setAAD(
+    aadForUser(userId),
+  )
+
+  const ciphertext = Buffer.concat([
+    cipher.update(
+      secret,
+      "utf8",
+    ),
+    cipher.final(),
+  ])
+
+  const tag = cipher.getAuthTag()
+
+  return [
+    "mfaenc1",
+    iv.toString("base64url"),
+    tag.toString("base64url"),
+    ciphertext.toString("base64url"),
+  ].join(".")
+}
+
+function decryptSecret(
+  userId: string,
+  encrypted: string,
+) {
+  const [
+    version,
+    ivEncoded,
+    tagEncoded,
+    ciphertextEncoded,
+  ] = encrypted.split(".")
+
+  if (
+    version !== "mfaenc1" ||
+    !ivEncoded ||
+    !tagEncoded ||
+    !ciphertextEncoded
+  ) {
+    throw new Error(
+      "Segredo 2FA armazenado em formato inválido.",
+    )
+  }
+
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    getEncryptionKey(),
+    Buffer.from(
+      ivEncoded,
+      "base64url",
+    ),
+  )
+
+  decipher.setAAD(
+    aadForUser(userId),
+  )
+
+  decipher.setAuthTag(
+    Buffer.from(
+      tagEncoded,
+      "base64url",
+    ),
+  )
+
+  const plain = Buffer.concat([
+    decipher.update(
+      Buffer.from(
+        ciphertextEncoded,
+        "base64url",
+      ),
+    ),
+    decipher.final(),
+  ])
+
+  return plain.toString("utf8")
+}
+
+function createTotpSecret() {
+  return base32Encode(
+    randomBytes(20),
+  )
+}
+
+function totpCodeForStep(
+  secret: string,
+  step: number,
+) {
+  const key =
+    base32Decode(secret)
+
+  const counter =
+    Buffer.alloc(8)
+
+  counter.writeBigUInt64BE(
+    BigInt(step),
+  )
+
+  const digest = createHmac(
+    "sha1",
+    key,
+  )
+    .update(counter)
+    .digest()
+
+  const offset =
+    digest[digest.length - 1] & 0x0f
+
+  const binary =
+    (digest[offset] & 0x7f) *
+      0x1000000 +
+    digest[offset + 1] *
+      0x10000 +
+    digest[offset + 2] *
+      0x100 +
+    digest[offset + 3]
+
+  return String(
+    binary %
+      10 ** TOTP_DIGITS,
+  ).padStart(
+    TOTP_DIGITS,
+    "0",
+  )
+}
+
+function codeMatches(
+  actual: string,
+  expected: string,
+) {
+  const left =
+    Buffer.from(actual)
+  const right =
+    Buffer.from(expected)
+
+  return (
+    left.length === right.length &&
+    timingSafeEqual(left, right)
+  )
+}
+
+function matchingTotpStep(
+  secret: string,
+  rawCode: string,
+) {
+  const code =
+    rawCode.replace(/\D/g, "")
+
+  if (
+    code.length !==
+    TOTP_DIGITS
+  ) {
+    return null
+  }
+
+  const currentStep =
+    Math.floor(
+      Date.now() / 1000 /
+        TOTP_PERIOD_SECONDS,
+    )
+
+  for (
+    let offset = -TOTP_WINDOW;
+    offset <= TOTP_WINDOW;
+    offset += 1
+  ) {
+    const step =
+      currentStep + offset
+
+    if (
+      codeMatches(
+        code,
+        totpCodeForStep(
+          secret,
+          step,
+        ),
+      )
+    ) {
+      return step
+    }
+  }
+
+  return null
+}
+
+function normalizeRecoveryCode(
+  value: string,
+) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+}
+
+function hashRecoveryCode(
+  value: string,
+) {
+  const normalized =
+    normalizeRecoveryCode(value)
+
+  return createHmac(
+    "sha256",
+    getEncryptionKey(),
+  )
+    .update(
+      `saborflow:recovery:v1:${normalized}`,
+    )
+    .digest("hex")
+}
+
+function createRecoveryCode() {
+  const raw = randomBytes(10)
+    .toString("hex")
+    .toUpperCase()
+
+  return raw
+    .match(/.{1,4}/g)
+    ?.join("-") || raw
+}
+
+function createRecoveryCodes() {
+  return Array.from(
+    {
+      length:
+        RECOVERY_CODE_COUNT,
+    },
+    () => createRecoveryCode(),
+  )
+}
+
+function otpAuthUrl(
+  email: string,
+  secret: string,
+) {
+  const issuer = "SaborFlow"
+  const label =
+    `${issuer}:${email.trim().toLowerCase()}`
+
+  const query =
+    new URLSearchParams({
+      secret,
+      issuer,
+      algorithm: "SHA1",
+      digits:
+        String(TOTP_DIGITS),
+      period:
+        String(
+          TOTP_PERIOD_SECONDS,
+        ),
+    })
+
+  return (
+    `otpauth://totp/` +
+    `${encodeURIComponent(label)}?` +
+    query.toString()
+  )
+}
+
+async function getMfaRow(
+  userId: string,
+) {
+  const result =
+    await getPostgresPool()
+      .query<MfaRow>(
+        `
+          SELECT
+            user_id,
+            secret_encrypted,
+            enabled,
+            last_totp_step::text,
+            recovery_code_hashes,
+            pending_secret_encrypted,
+            pending_secret_created_at
+          FROM sf_user_mfa
+          WHERE user_id = $1
+          LIMIT 1
+        `,
+        [userId],
+      )
+
+  return result.rows[0] || null
+}
+
+function recoveryCodeCount(
+  value: unknown,
+) {
+  if (Array.isArray(value)) {
+    return value.length
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed =
+        JSON.parse(value)
+      return Array.isArray(parsed)
+        ? parsed.length
+        : 0
+    } catch {
+      return 0
+    }
+  }
+
+  return 0
+}
+
+function pendingReconfigurationExpiresAt(
+  row: MfaRow | null,
+) {
+  if (
+    !row?.pending_secret_encrypted ||
+    !row.pending_secret_created_at
+  ) {
+    return null
+  }
+
+  const createdAt =
+    new Date(
+      row.pending_secret_created_at,
+    ).getTime()
+
+  if (
+    !Number.isFinite(createdAt)
+  ) {
+    return null
+  }
+
+  const expiresAt =
+    createdAt +
+    RECONFIGURATION_TTL_MS
+
+  if (expiresAt <= Date.now()) {
+    return null
+  }
+
+  return expiresAt
+}
+
+export async function getTwoFactorState(
+  userId: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const pendingExpiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  return {
+    configured: Boolean(row),
+    enabled:
+      Boolean(row?.enabled),
+    recoveryCodesRemaining:
+      recoveryCodeCount(
+        row?.recovery_code_hashes,
+      ),
+    reconfigurationPending:
+      Boolean(pendingExpiresAt),
+    reconfigurationExpiresAt:
+      pendingExpiresAt
+        ? new Date(
+            pendingExpiresAt,
+          ).toISOString()
+        : null,
+  }
+}
+
+export async function ensureTwoFactorEnrollment(
+  userId: string,
+  email: string,
+) {
+  let row =
+    await getMfaRow(userId)
+
+  if (!row) {
+    const secret =
+      createTotpSecret()
+
+    const encrypted =
+      encryptSecret(
+        userId,
+        secret,
+      )
+
+    await getPostgresPool()
+      .query(
+        `
+          INSERT INTO sf_user_mfa (
+            user_id,
+            method,
+            secret_encrypted,
+            enabled,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            'totp',
+            $2,
+            false,
+            now(),
+            now()
+          )
+          ON CONFLICT (user_id)
+          DO NOTHING
+        `,
+        [
+          userId,
+          encrypted,
+        ],
+      )
+
+    row =
+      await getMfaRow(userId)
+  }
+
+  if (!row) {
+    throw new Error(
+      "Não foi possível preparar o 2FA.",
+    )
+  }
+
+  if (row.enabled) {
+    throw new Error(
+      "O 2FA já está ativado nesta conta.",
+    )
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  return {
+    secret,
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+  }
+}
+
+export async function activateTwoFactor(
+  userId: string,
+  rawCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  if (
+    !row ||
+    row.enabled
+  ) {
+    return null
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      rawCode,
+    )
+
+  if (step === null) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            enabled = true,
+            verified_at = now(),
+            last_totp_step = $2,
+            recovery_code_hashes =
+              $3::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = false
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+          JSON.stringify(
+            hashes,
+          ),
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+async function verifyAndConsumeTotp(
+  userId: string,
+  rawCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  if (
+    !row ||
+    !row.enabled
+  ) {
+    return false
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.secret_encrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      rawCode,
+    )
+
+  if (step === null) {
+    return false
+  }
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            last_totp_step = $2,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND (
+              last_totp_step IS NULL
+              OR last_totp_step < $2
+            )
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+        ],
+      )
+
+  return Boolean(
+    updated.rowCount,
+  )
+}
+
+async function verifyAndConsumeRecoveryCode(
+  userId: string,
+  rawCode: string,
+) {
+  const normalized =
+    normalizeRecoveryCode(
+      rawCode,
+    )
+
+  if (
+    normalized.length < 16
+  ) {
+    return false
+  }
+
+  const hash =
+    hashRecoveryCode(
+      normalized,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            recovery_code_hashes =
+              COALESCE(
+                (
+                  SELECT jsonb_agg(value)
+                  FROM jsonb_array_elements_text(
+                    recovery_code_hashes
+                  ) AS codes(value)
+                  WHERE value <> $2
+                ),
+                '[]'::jsonb
+              ),
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND recovery_code_hashes ? $2
+          RETURNING user_id
+        `,
+        [
+          userId,
+          hash,
+        ],
+      )
+
+  return Boolean(
+    updated.rowCount,
+  )
+}
+
+export async function verifySecondFactor(
+  userId: string,
+  rawCode: string,
+) {
+  const trimmed =
+    rawCode.trim()
+
+  if (
+    /^\d{6}$/.test(trimmed)
+  ) {
+    return verifyAndConsumeTotp(
+      userId,
+      trimmed,
+    )
+  }
+
+  return verifyAndConsumeRecoveryCode(
+    userId,
+    trimmed,
+  )
+}
+
+export async function regenerateRecoveryCodes(
+  userId: string,
+  currentTotpCode: string,
+) {
+  const verified =
+    await verifyAndConsumeTotp(
+      userId,
+      currentTotpCode,
+    )
+
+  if (!verified) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            recovery_code_hashes =
+              $2::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+          RETURNING user_id
+        `,
+        [
+          userId,
+          JSON.stringify(
+            hashes,
+          ),
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+export async function beginTwoFactorReconfiguration(
+  userId: string,
+  email: string,
+  currentSecondFactor: string,
+) {
+  const verified =
+    await verifySecondFactor(
+      userId,
+      currentSecondFactor,
+    )
+
+  if (!verified) {
+    return null
+  }
+
+  const secret =
+    createTotpSecret()
+
+  const encrypted =
+    encryptSecret(
+      userId,
+      secret,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            pending_secret_encrypted = $2,
+            pending_secret_created_at = now(),
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+          RETURNING
+            pending_secret_created_at
+        `,
+        [
+          userId,
+          encrypted,
+        ],
+      )
+
+  const createdAt =
+    updated.rows[0]
+      ?.pending_secret_created_at
+
+  if (!createdAt) {
+    return null
+  }
+
+  const expiresAt =
+    new Date(
+      new Date(
+        createdAt,
+      ).getTime() +
+        RECONFIGURATION_TTL_MS,
+    ).toISOString()
+
+  return {
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+    expiresAt,
+  }
+}
+
+export async function getPendingTwoFactorReconfiguration(
+  userId: string,
+  email: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const expiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  if (
+    !row?.enabled ||
+    !row.pending_secret_encrypted ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  const secret =
+    decryptSecret(
+      userId,
+      row.pending_secret_encrypted,
+    )
+
+  return {
+    manualKey:
+      secret.match(/.{1,4}/g)
+        ?.join(" ") ||
+      secret,
+    otpAuthUrl:
+      otpAuthUrl(
+        email,
+        secret,
+      ),
+    expiresAt:
+      new Date(
+        expiresAt,
+      ).toISOString(),
+  }
+}
+
+export async function confirmTwoFactorReconfiguration(
+  userId: string,
+  newTotpCode: string,
+) {
+  const row =
+    await getMfaRow(userId)
+
+  const expiresAt =
+    pendingReconfigurationExpiresAt(
+      row,
+    )
+
+  if (
+    !row?.enabled ||
+    !row.pending_secret_encrypted ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  const pendingEncrypted =
+    row.pending_secret_encrypted
+
+  const secret =
+    decryptSecret(
+      userId,
+      pendingEncrypted,
+    )
+
+  const step =
+    matchingTotpStep(
+      secret,
+      newTotpCode,
+    )
+
+  if (step === null) {
+    return null
+  }
+
+  const recoveryCodes =
+    createRecoveryCodes()
+
+  const hashes =
+    recoveryCodes.map(
+      hashRecoveryCode,
+    )
+
+  const updated =
+    await getPostgresPool()
+      .query(
+        `
+          UPDATE sf_user_mfa
+          SET
+            secret_encrypted =
+              pending_secret_encrypted,
+            pending_secret_encrypted =
+              NULL,
+            pending_secret_created_at =
+              NULL,
+            verified_at = now(),
+            last_totp_step = $2,
+            recovery_code_hashes =
+              $3::jsonb,
+            updated_at = now()
+          WHERE user_id = $1
+            AND enabled = true
+            AND pending_secret_encrypted = $4
+            AND pending_secret_created_at >=
+              now() - interval '10 minutes'
+          RETURNING user_id
+        `,
+        [
+          userId,
+          step,
+          JSON.stringify(
+            hashes,
+          ),
+          pendingEncrypted,
+        ],
+      )
+
+  if (!updated.rowCount) {
+    return null
+  }
+
+  return {
+    recoveryCodes,
+  }
+}
+
+export async function cancelTwoFactorReconfiguration(
+  userId: string,
+) {
+  await getPostgresPool()
+    .query(
+      `
+        UPDATE sf_user_mfa
+        SET
+          pending_secret_encrypted =
+            NULL,
+          pending_secret_created_at =
+            NULL,
+          updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId],
+    )
+}
+
+export async function markAdminUserLoginCompleted(
+  userId: string,
+) {
+  await getPostgresPool().query(
+    `
+      UPDATE sf_users
+      SET
+        last_login_at = now(),
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [userId],
+  )
+}
+
+================ app/api/admin/audit/route.ts ================
+
+import { NextResponse } from "next/server"
+import { canManageOrganizationSettings } from "@/lib/tenant-permissions"
+import { getVerifiedTenantSession } from "@/lib/tenant-access"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
+import { listTenantAuditEvents } from "@/lib/security/audit-log"
+import {
+  finiteNumber,
+  InputValidationError,
+  optionalText,
+  validationErrorStatus,
+} from "@/lib/security/input-validation"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const FILTER_OPTIONS = {
+  maxLength: 100,
+  allowNewlines: false,
+  pattern: /^[A-Za-z0-9._-]+$/,
+} as const
+
+export async function GET(request: Request) {
+  const session = await getVerifiedTenantSession().catch(() => null)
+
+  if (!session) {
+    return NextResponse.json(
+      { error: "Sessão administrativa inválida." },
+      { status: 401 },
+    )
+  }
+
+  if (!canManageOrganizationSettings(session.role)) {
+    return NextResponse.json(
+      { error: "Seu perfil não pode consultar a trilha de auditoria." },
+      { status: 403 },
+    )
+  }
+
+  try {
+    const url = new URL(request.url)
+    const rawLimit = url.searchParams.get("limit")
+    const limit = rawLimit === null
+      ? 100
+      : finiteNumber(rawLimit, "Limite", {
+          min: 1,
+          max: 200,
+          integer: true,
+        })
+
+    const actionPrefix = optionalText(
+      url.searchParams.get("action"),
+      "Ação",
+      FILTER_OPTIONS,
+    )
+
+    const category = optionalText(
+      url.searchParams.get("category"),
+      "Categoria",
+      FILTER_OPTIONS,
+    )
+
+    const events = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () =>
+        listTenantAuditEvents({
+          organizationId: session.organizationId,
+          limit,
+          actionPrefix,
+          category,
+        }),
+      "tenant-session",
+    )
+
+    return NextResponse.json(
+      { ok: true, events },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      },
+    )
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível consultar a auditoria.",
+      },
+      {
+        status:
+          error instanceof InputValidationError
+            ? validationErrorStatus(error)
+            : 500,
+      },
+    )
+  }
+}
+
+================ app/api/superadmin/health/route.ts ================
+
+import { NextResponse } from "next/server"
+import { getSuperadminAccess } from "@/lib/superadmin-auth"
+import { getPostgresPool } from "@/lib/postgres"
+
+export const dynamic = "force-dynamic"
+
+export async function GET() {
+  const access = await getSuperadminAccess()
+  if (!access) return NextResponse.json({ error: "Não autorizado." }, { status: 403 })
+
+  const result = await getPostgresPool().query<{
+    platform_admins: string
+    support_cases: string
+    commercial_coupons: string
+    admin_actions: string
+    pending_registrations: string
+    finance_entries: string
+  }>(`
+    SELECT
+      (SELECT COUNT(*)::text FROM sf_platform_admins WHERE status = 'active') AS platform_admins,
+      (SELECT COUNT(*)::text FROM sf_support_cases WHERE status IN ('open','pending')) AS support_cases,
+      (SELECT COUNT(*)::text FROM sf_commercial_coupons WHERE active = true) AS commercial_coupons,
+      (SELECT COUNT(*)::text FROM sf_platform_admin_actions) AS admin_actions,
+      (SELECT COUNT(*)::text FROM sf_platform_registration_reviews WHERE status = 'pending') AS pending_registrations,
+      (SELECT COUNT(*)::text FROM sf_platform_finance_entries WHERE status <> 'canceled') AS finance_entries
+  `)
+  const row = result.rows[0]
+
+  return NextResponse.json({
+    ok: true,
+    phase: "18.1-superadmin-operations-finance",
+    schemaReady: true,
+    access: { email: access.email, role: access.role, platformAdminId: access.platformAdminId },
+    controlPlane: {
+      activePlatformAdmins: Number(row?.platform_admins || 0),
+      openSupportCases: Number(row?.support_cases || 0),
+      activeCommercialCoupons: Number(row?.commercial_coupons || 0),
+      auditedAdminActions: Number(row?.admin_actions || 0),
+      pendingRegistrations: Number(row?.pending_registrations || 0),
+      platformFinanceEntries: Number(row?.finance_entries || 0),
+    },
+    boundaries: {
+      tenantAdminIsNotPlatformAdmin: true,
+      legacySessionAllowed: false,
+      browserCannotSelfGrant: true,
+      billingProviderAuthorityPreserved: true,
+      registrationApprovalRequiredToPublish: true,
+      platformFinanceSeparatedFromTenantFinance: true,
+      contractedMrrIsNotRecognizedRevenue: true,
+    },
+  })
+}
+
+================ package.json ================
+
+{
+  "name": "saborflow",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "13.1.2",
+    "@simplewebauthn/server": "13.1.2",
+    "lucide-react": "^1.16.0",
+    "next": "16.3.3",
+    "pg": "^8.23.0",
+    "qrcode": "^1.5.4",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24",
+    "@types/pg": "^8.21.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.7.3"
+  }
+}
+
+================ ALERTAS / EMAIL EXISTENTES ================
+
+
+app\api\admin\database-structure\route.ts:14
+  "sf_memberships",
+  "sf_organization_settings",
+  "sf_audit_log",
+  "sf_schema_migrations",
+]
+
+export async function GET() {
+  const session = await getVerifiedTenantSession().catch(() => null)
+
+app\api\admin\food-operations-health\route.ts:23
+      capabilities: {
+        ingredientLotTraceability: true,
+        expirationAlerts: true,
+        weightedCostOnReceipt: true,
+        lotWasteTracking: true,
+        productionYieldTracking: true,
+        effectiveProductionCost: true,
+        physicalInventoryCounts: true,
+
+app\api\admin\google-link\route.ts:65
+    await getPostgresPool().query(
+      `
+        INSERT INTO sf_audit_log (id, organization_id, user_id, action, entity_type, entity_id, metadata)
+        VALUES (gen_random_uuid(), $1, $2, 'security.google_linked', 'user', $2, $3::jsonb)
+      `,
+      [session.organizationId, session.userId, JSON.stringify({ email: google.email })],
+    ).catch(() => undefined)
+
+
+app\api\admin\integrations-health\route.ts:21
+      ...health,
+      providers: {
+        resendEmail: true,
+        twilioSms: true,
+        metaWhatsApp: true,
+        signedWebhook: true,
+      },
+      capabilities: {
+
+app\api\auth\password-reset\request\route.ts:60
+}) {
+  const apiKey =
+    process.env.AUTH_RESEND_API_KEY?.trim() || ""
+
+  const from =
+    process.env.AUTH_EMAIL_FROM?.trim() || ""
+
+  if (!apiKey || !from) {
+
+app\api\auth\password-reset\request\route.ts:67
+  if (!apiKey || !from) {
+    throw new Error(
+      "AUTH_RESEND_API_KEY e AUTH_EMAIL_FROM precisam estar configuradas.",
+    )
+  }
+
+  const idempotencyKey = createHash("sha256")
+    .update(
+
+app\api\auth\password-reset\request\route.ts:78
+
+  const response = await fetch(
+    "https://api.resend.com/emails",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+
+lib\security\audit-log.ts:82
+        user_agent_hash,
+        created_at
+      FROM sf_audit_log
+      WHERE organization_id = $1
+        AND ($2::text IS NULL OR action LIKE $2)
+        AND ($3::text IS NULL OR event_category = $3)
+      ORDER BY created_at DESC
+      LIMIT $4
+
+lib\security\rate-limit.ts:121
+  await getPostgresPool().query(
+    `
+      DELETE FROM sf_auth_rate_limits
+      WHERE reset_at <= NOW()
+    `,
+  )
+}
+
+
+lib\security\rate-limit.ts:197
+        `
+          SELECT failures, reset_at
+          FROM sf_auth_rate_limits
+          WHERE key_hash = $1
+            AND reset_at > NOW()
+          LIMIT 1
+        `,
+        [key],
+
+lib\security\rate-limit.ts:226
+    await getPostgresPool().query(
+      `
+        INSERT INTO sf_auth_rate_limits (
+          key_hash,
+          failures,
+          reset_at,
+          updated_at
+        )
+
+lib\security\rate-limit.ts:241
+        DO UPDATE SET
+          failures = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN 1
+            ELSE sf_auth_rate_limits.failures + 1
+          END,
+          reset_at = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+
+lib\security\rate-limit.ts:243
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN 1
+            ELSE sf_auth_rate_limits.failures + 1
+          END,
+          reset_at = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN NOW() + (
+                $2::double precision * INTERVAL '1 millisecond'
+
+lib\security\rate-limit.ts:246
+          END,
+          reset_at = CASE
+            WHEN sf_auth_rate_limits.reset_at <= NOW()
+              THEN NOW() + (
+                $2::double precision * INTERVAL '1 millisecond'
+              )
+            ELSE sf_auth_rate_limits.reset_at
+          END,
+
+lib\security\rate-limit.ts:250
+                $2::double precision * INTERVAL '1 millisecond'
+              )
+            ELSE sf_auth_rate_limits.reset_at
+          END,
+          updated_at = NOW()
+      `,
+      [key, windowMs],
+    )
+
+lib\security\rate-limit.ts:272
+    await getPostgresPool().query(
+      `
+        DELETE FROM sf_auth_rate_limits
+        WHERE key_hash = $1
+      `,
+      [key],
+    )
+  } catch (error) {
+
+lib\admin-help.ts:60
+  "inventory.minStock": {
+    title: "Estoque mínimo",
+    text: "É o limite usado para gerar alerta de reposição. Não é uma baixa automática e não altera o saldo disponível.",
+  },
+  "inventory.unitCost": {
+    title: "Custo por unidade",
+    text: "Informe o custo na mesma unidade cadastrada para o ingrediente. Ex.: se a unidade é kg, informe o custo de 1 kg; se é g, informe o custo de 1 g.",
+  },
+
+lib\commercial-onboarding.ts:155
+    await getPostgresPool().query(
+      `
+        INSERT INTO sf_audit_log (
+          id, organization_id, user_id, action, entity_type, entity_id, metadata
+        )
+        VALUES ($1, $2, $3, 'onboarding.step.complete', 'organization', $2::uuid::text, $4::jsonb)
+      `,
+      [
+
+lib\commercial-onboarding.ts:476
+    await client.query(
+      `
+        INSERT INTO sf_audit_log (
+          id, organization_id, user_id, action, entity_type, entity_id, metadata
+        )
+        VALUES ($1, $2, $3, 'onboarding.publish', 'organization', $2::uuid::text, $4::jsonb)
+      `,
+      [
+
+lib\crm-db.ts:320
+  await getPostgresPool().query(
+    `
+      INSERT INTO sf_audit_log (
+        id, organization_id, user_id, action, entity_type, entity_id, metadata, created_at
+      )
+      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::jsonb, now())
+    `,
+    [session.organizationId, session.userId, action, entityType, entityId, JSON.stringify(metadata)],
+
+lib\integration-providers.ts:3
+import { createHmac } from "node:crypto"
+
+export type IntegrationProvider = "resend" | "twilio" | "whatsapp_meta" | "webhook"
+export type IntegrationChannel = "email" | "sms" | "whatsapp" | "webhook"
+
+export type ProviderDispatchInput = {
+  provider: IntegrationProvider
+  channel: IntegrationChannel
+
+lib\integration-providers.ts:67
+}
+
+async function dispatchResend(input: ProviderDispatchInput): Promise<ProviderDispatchResult> {
+  const apiKey = required(input.credentials.apiKey, "Chave da Resend")
+  const from = required(input.settings.from, "Remetente")
+  if (!/^\S+@\S+\.\S+$/.test(input.recipient)) throw new Error("E-mail do destinatário inválido.")
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+
+lib\integration-providers.ts:68
+
+async function dispatchResend(input: ProviderDispatchInput): Promise<ProviderDispatchResult> {
+  const apiKey = required(input.credentials.apiKey, "Chave da Resend")
+  const from = required(input.settings.from, "Remetente")
+  if (!/^\S+@\S+\.\S+$/.test(input.recipient)) throw new Error("E-mail do destinatário inválido.")
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+
+lib\integration-providers.ts:71
+  const from = required(input.settings.from, "Remetente")
+  if (!/^\S+@\S+\.\S+$/.test(input.recipient)) throw new Error("E-mail do destinatário inválido.")
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey.slice(0, 250),
+
+lib\integration-providers.ts:190
+export async function dispatchIntegrationMessage(input: ProviderDispatchInput) {
+  switch (input.provider) {
+    case "resend":
+      if (input.channel !== "email") throw new Error("A conexão Resend só pode enviar e-mail.")
+      return dispatchResend(input)
+    case "twilio":
+      if (input.channel !== "sms") throw new Error("A conexão Twilio configurada nesta fase envia SMS.")
+      return dispatchTwilio(input)
+
+lib\integration-providers.ts:191
+  switch (input.provider) {
+    case "resend":
+      if (input.channel !== "email") throw new Error("A conexão Resend só pode enviar e-mail.")
+      return dispatchResend(input)
+    case "twilio":
+      if (input.channel !== "sms") throw new Error("A conexão Twilio configurada nesta fase envia SMS.")
+      return dispatchTwilio(input)
+    case "whatsapp_meta":
+
+lib\integration-providers.ts:192
+    case "resend":
+      if (input.channel !== "email") throw new Error("A conexão Resend só pode enviar e-mail.")
+      return dispatchResend(input)
+    case "twilio":
+      if (input.channel !== "sms") throw new Error("A conexão Twilio configurada nesta fase envia SMS.")
+      return dispatchTwilio(input)
+    case "whatsapp_meta":
+      if (input.channel !== "whatsapp") throw new Error("A conexão Meta só pode enviar WhatsApp.")
+
+lib\integrations-db.ts:92
+  await getPostgresPool().query(
+    `
+      INSERT INTO sf_audit_log (
+        id, organization_id, user_id, action, entity_type, entity_id, metadata, created_at
+      )
+      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::jsonb, now())
+    `,
+    [session.organizationId, session.userId, action, entityType, entityId, JSON.stringify(metadata)],
+
+lib\integrations-db.ts:102
+
+function providerChannel(provider: IntegrationProvider): IntegrationChannel {
+  if (provider === "resend") return "email"
+  if (provider === "twilio") return "sms"
+  if (provider === "whatsapp_meta") return "whatsapp"
+  return "webhook"
+}
+
+
+lib\integrations-db.ts:109
+
+function sanitizedConnectionSettings(provider: IntegrationProvider, input: Record<string, unknown>) {
+  if (provider === "resend") {
+    const from = cleanText(input.from, 320)
+    if (!from || !from.includes("@")) throw new Error("Informe o remetente de e-mail configurado no provedor.")
+    return { from }
+  }
+  if (provider === "twilio") {
+
+lib\integrations-db.ts:144
+
+function sanitizedCredentials(provider: IntegrationProvider, input: Record<string, unknown>) {
+  if (provider === "resend") {
+    const apiKey = cleanText(input.apiKey, 500)
+    if (!apiKey) throw new Error("Informe a chave da Resend.")
+    return { apiKey }
+  }
+  if (provider === "twilio") {
+
+lib\integrations-db.ts:146
+  if (provider === "resend") {
+    const apiKey = cleanText(input.apiKey, 500)
+    if (!apiKey) throw new Error("Informe a chave da Resend.")
+    return { apiKey }
+  }
+  if (provider === "twilio") {
+    const accountSid = cleanText(input.accountSid, 100)
+    const authToken = cleanText(input.authToken, 500)
+
+lib\integrations-db.ts:318
+
+  const provider = input.provider
+  if (!["resend", "twilio", "whatsapp_meta", "webhook"].includes(provider)) {
+    throw new Error("Provedor de integração inválido.")
+  }
+  const name = cleanText(input.name, 120)
+  if (name.length < 3) throw new Error("Informe um nome para a conexão.")
+  const settings = sanitizedConnectionSettings(provider, jsonObject(input.settings))
+
+lib\legal-db.ts:29
+  await client.query(
+    `
+      INSERT INTO sf_audit_log (
+        id, organization_id, user_id, action, entity_type, entity_id,
+        metadata, ip_address, created_at
+      ) VALUES ($1, $2, $3, $4, 'legal_document', $5, $6::jsonb, $7, now())
+    `,
+    [
+
+lib\legal-db.ts:56
+) {
+  // Cadastros comerciais aceitam os documentos antes da primeira organização
+  // existir. Como sf_audit_log é protegida por FORCE RLS, permitimos bypass
+  // somente dentro da transação já autenticada do backend e apenas para estes
+  // dois INSERTs de auditoria sem organization_id.
+  const needsBootstrapBypass = !input.organizationId
+
+  if (needsBootstrapBypass) {
+
+lib\legal-db.ts:129
+          SELECT
+            EXISTS (
+              SELECT 1 FROM sf_audit_log
+              WHERE organization_id = $1
+                AND user_id = $2
+                AND action = 'legal.terms.accepted'
+                AND metadata->>'documentVersion' = $3
+            ) AS terms_ok,
+
+lib\legal-db.ts:136
+            ) AS terms_ok,
+            EXISTS (
+              SELECT 1 FROM sf_audit_log
+              WHERE organization_id = $1
+                AND user_id = $2
+                AND action = 'legal.privacy.acknowledged'
+                AND metadata->>'documentVersion' = $4
+            ) AS privacy_ok
+
+lib\legal-db.ts:168
+      getPostgresPool().query(
+        `
+          INSERT INTO sf_audit_log (
+            id, organization_id, user_id, action, entity_type, entity_id,
+            metadata, ip_address, created_at
+          ) VALUES ($1, $2, NULL, 'legal.customer_privacy.acknowledged',
+            'customer_account', $3, $4::jsonb, $5, now())
+        `,
+
+lib\organization-onboarding.ts:523
+    await client.query(
+      `
+        INSERT INTO sf_audit_log (
+          id,
+          organization_id,
+          user_id,
+          action,
+          entity_type,

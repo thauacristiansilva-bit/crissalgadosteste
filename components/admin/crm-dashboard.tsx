@@ -72,6 +72,8 @@ type CrmData = {
   loyalty: {
     enabled: boolean
     pointsPerReal: number
+    cashbackEnabled: boolean
+    cashbackPercent: number
     rewardPoints: number
     rewardText: string
     outstandingPoints: number
@@ -137,7 +139,7 @@ export function CrmDashboard({ currentOrganizationName }: { currentOrganizationN
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [profileDraft, setProfileDraft] = useState({ tags: "", notes: "", marketingOptIn: false })
   const [adjustment, setAdjustment] = useState({ points: "", reason: "" })
-  const [loyaltyDraft, setLoyaltyDraft] = useState({ enabled: false, pointsPerReal: "1", rewardPoints: "100", rewardText: "" })
+  const [loyaltyDraft, setLoyaltyDraft] = useState({ enabled: false, pointsPerReal: "1", rewardPoints: "100", rewardText: "", cashbackEnabled: false, cashbackPercent: "0" })
   const [campaignDraft, setCampaignDraft] = useState({
     name: "",
     channel: "whatsapp" as Channel,
@@ -157,6 +159,8 @@ export function CrmDashboard({ currentOrganizationName }: { currentOrganizationN
         pointsPerReal: String(payload.loyalty.pointsPerReal),
         rewardPoints: String(payload.loyalty.rewardPoints),
         rewardText: payload.loyalty.rewardText,
+        cashbackEnabled: payload.loyalty.cashbackEnabled,
+        cashbackPercent: String(payload.loyalty.cashbackPercent),
       })
       setMessage("")
     } catch (error) {
@@ -217,6 +221,8 @@ export function CrmDashboard({ currentOrganizationName }: { currentOrganizationN
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           loyaltyEnabled: loyaltyDraft.enabled,
+          cashbackEnabled: loyaltyDraft.cashbackEnabled,
+          cashbackPercent: Number(loyaltyDraft.cashbackPercent || 0),
           loyaltyPointsPerReal: Math.max(0, Number(loyaltyDraft.pointsPerReal || 0)),
           loyaltyRewardPoints: Math.max(1, Math.trunc(Number(loyaltyDraft.rewardPoints || 1))),
           loyaltyRewardText: loyaltyDraft.rewardText.trim(),
@@ -321,6 +327,7 @@ export function CrmDashboard({ currentOrganizationName }: { currentOrganizationN
               <label className="flex items-center justify-between rounded-xl border border-gray-200 p-3"><span><strong className="block text-sm">Ativar fidelidade</strong><small className="text-gray-500">Somente clientes com conta acumulam saldo.</small></span><input type="checkbox" checked={loyaltyDraft.enabled} onChange={(e) => setLoyaltyDraft({ ...loyaltyDraft, enabled: e.target.checked })} className="h-5 w-5" /></label>
               <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold text-gray-600">Pontos por R$ 1<input type="number" min="0" step="0.1" value={loyaltyDraft.pointsPerReal} onChange={(e) => setLoyaltyDraft({ ...loyaltyDraft, pointsPerReal: e.target.value })} className="mt-1 h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label><label className="text-xs font-bold text-gray-600">Pontos para resgate<input type="number" min="1" value={loyaltyDraft.rewardPoints} onChange={(e) => setLoyaltyDraft({ ...loyaltyDraft, rewardPoints: e.target.value })} className="mt-1 h-10 w-full rounded-xl border border-gray-200 px-3 text-sm" /></label></div>
               <label className="text-xs font-bold text-gray-600">Benefício<textarea rows={3} value={loyaltyDraft.rewardText} onChange={(e) => setLoyaltyDraft({ ...loyaltyDraft, rewardText: e.target.value })} className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Ex.: Troque 100 pontos por um benefício definido pela loja." /></label>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3"><label className="flex items-center gap-2 text-sm font-bold text-emerald-900"><input type="checkbox" checked={loyaltyDraft.cashbackEnabled} onChange={(e) => setLoyaltyDraft({ ...loyaltyDraft, cashbackEnabled: e.target.checked })} /> Cashback para usar na loja</label><label className="mt-3 block text-xs font-bold text-emerald-900">Porcentagem sobre cada pedido concluído (%)<input type="number" min="0" max="100" step="0.01" value={loyaltyDraft.cashbackPercent} onChange={(e) => setLoyaltyDraft({ ...loyaltyDraft, cashbackPercent: e.target.value })} className="mt-1 h-10 w-full rounded-xl border border-emerald-200 bg-white px-3" /></label></div>
               <button onClick={() => void saveLoyalty()} className="h-10 w-full rounded-xl bg-violet-700 text-sm font-black text-white">Salvar fidelidade</button>
             </div>
           </article>

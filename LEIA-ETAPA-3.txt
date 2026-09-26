@@ -1,0 +1,35 @@
+SABOR FLOW — ETAPA 3: GRUPOS REUTILIZAVEIS E COMBOS
+
+Base: branch main, commit 3bbd72b (correcao de complementos).
+
+IMPORTANTE — EXECUTE NO POSTGRES ANTES DE PUBLICAR O CODIGO:
+Abra Railway > servico Postgres > Console e cole a linha inteira:
+
+psql "$DATABASE_URL" -c "ALTER TABLE sf_modifier_groups ADD COLUMN IF NOT EXISTS selection_mode text NOT NULL DEFAULT 'unique'; ALTER TABLE sf_modifier_groups DROP CONSTRAINT IF EXISTS sf_modifier_groups_selection_mode_check; ALTER TABLE sf_modifier_groups ADD CONSTRAINT sf_modifier_groups_selection_mode_check CHECK (selection_mode IN ('unique', 'bundle'));"
+
+O comando preserva grupos existentes. Eles continuam no modo antigo ('unique'). Aguarde terminar sem erro ANTES de fazer o push.
+
+DEPOIS, NO VS CODE:
+1. Extraia este ZIP numa pasta separada.
+2. Copie as pastas components, lib e database da pasta extraida para a pasta ORIGINAL do projeto, ao lado do package.json. Aceite mesclar/substituir os arquivos do ZIP. O ZIP contem apenas arquivos alterados.
+3. Abra a pasta ORIGINAL no VS Code e execute, um comando de cada vez:
+
+npm run typecheck
+npm run build
+git add components/admin/orders-panel.tsx components/admin/pdv-panel.tsx components/admin/product-composition-editor.tsx components/admin/products-panel.tsx components/catalog/product-customizer.tsx components/store/order-tracker.tsx components/store/storefront.tsx lib/food-composition-db.ts lib/product-composition.ts lib/tenant-checkout.ts lib/types.ts database/migrations/040_combo_modifier_quantities.sql
+git commit -m "Reutiliza grupos e configura sabores por combo"
+git push origin main
+
+Railway publica automaticamente a main. Aguarde o deploy concluir.
+
+TESTE RAPIDO:
+- Em Produtos, cadastre um Combo de Salgados e abra Complementos.
+- Clique em 'Criar sabores dos produtos de...' e escolha Salgados; confira os nomes, salve.
+- Em outro produto, escolha 'Usar grupo ja cadastrado...' e selecione o grupo existente.
+- Na loja, 1 combo exige pelo menos 4 sabores; 2 combos aceitam 4 ate 8 (inclusive repetidos).
+- Confira valor, pedido recebido e quantidade de cada sabor no pedido.
+
+DETALHES:
+- Sabores do combo nao podem ter preco extra nesta versao. Use grupo normal para adicionais pagos.
+- Os nomes da categoria sao copiados no momento da criacao; produtos adicionados mais tarde nao entram automaticamente no grupo.
+- Se o SQL do primeiro passo falhar, nao faça o push. Envie a mensagem de erro.

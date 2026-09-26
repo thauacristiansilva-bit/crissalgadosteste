@@ -110,6 +110,7 @@ export function ProductCompositionEditor({
   const [error, setError] = useState("")
   const [selectedExistingGroup, setSelectedExistingGroup] = useState("")
   const [sourceCategory, setSourceCategory] = useState("")
+  const [sourcePricing, setSourcePricing] = useState<"included" | "priced">("included")
 
   useEffect(() => {
     if (!product) return
@@ -206,11 +207,12 @@ export function ProductCompositionEditor({
   function addGroupFromCategory() {
     const available = catalogProducts.filter((item) => item.active && item.id !== product!.id && item.category === sourceCategory).slice(0, 100)
     if (!available.length) return
+    const priced = sourcePricing === "priced"
     setGroups((current) => [...current, {
-      key: key(), name: `Sabores de ${sourceCategory}`, description: "Escolha os sabores do combo.",
-      required: true, minSelect: "4", maxSelect: "4", includedQuantity: "4",
-      selectionMode: "bundle", active: true,
-      options: available.map((item) => ({ key: key(), name: item.name, description: "", priceDelta: "0", includedEligible: true, active: true, ingredients: [] })),
+      key: key(), name: priced ? `Escolha a bebida (${sourceCategory})` : `Sabores de ${sourceCategory}`, description: priced ? "Escolha uma opção para acompanhar o combo." : "Escolha os sabores do combo.",
+      required: true, minSelect: priced ? "1" : "4", maxSelect: priced ? "1" : "4", includedQuantity: priced ? "0" : "4",
+      selectionMode: priced ? "unique" : "bundle", active: true,
+      options: available.map((item) => ({ key: key(), name: item.name, description: "", priceDelta: priced ? numberText(item.price) : "0", includedEligible: !priced, active: true, ingredients: [] })),
     }])
     setSourceCategory("")
   }
@@ -340,7 +342,8 @@ export function ProductCompositionEditor({
               {(reusableGroups.length > 0 || catalogProducts.some((item) => item.active && item.id !== product.id)) && <details className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><summary className="cursor-pointer text-sm font-bold text-blue-800">Já tenho sabores cadastrados <ChevronDown className="ml-1 inline h-4 w-4" /></summary>
               <p className="mt-2 text-xs text-blue-800">Aproveite uma lista pronta ou copie os nomes dos produtos de uma categoria.</p>
               {reusableGroups.length > 0 && <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Lista de sabores já cadastrada" value={selectedExistingGroup} onChange={(event) => setSelectedExistingGroup(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Escolher lista pronta...</option>{reusableGroups.filter((item) => !groups.some((group) => group.sourceGroupId === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.options.length} opções)</option>)}</select><button type="button" disabled={!selectedExistingGroup} onClick={addExistingGroup} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-40">Usar esta lista</button></div>}
-              {catalogProducts.some((item) => item.active && item.id !== product.id) && <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Categoria de produtos para copiar sabores" value={sourceCategory} onChange={(event) => setSourceCategory(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="">Copiar sabores de uma categoria...</option>{[...new Set(catalogProducts.filter((item) => item.active && item.id !== product.id).map((item) => item.category))].map((name) => <option key={name} value={name}>{name}</option>)}</select><button type="button" disabled={!sourceCategory} onClick={addGroupFromCategory} className="rounded-lg border border-gray-300 bg-white px-3 text-sm font-bold text-gray-800 disabled:opacity-40">Copiar</button></div>}
+              {catalogProducts.some((item) => item.active && item.id !== product.id) && <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Categoria de produtos para copiar sabores" value={sourceCategory} onChange={(event) => setSourceCategory(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="">Copiar sabores de uma categoria...</option>{[...new Set(catalogProducts.filter((item) => item.active && item.id !== product.id).map((item) => item.category))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })).map((name) => <option key={name} value={name}>{name}</option>)}</select><select aria-label="Cobrança das opções copiadas" value={sourcePricing} onChange={(event) => setSourcePricing(event.target.value as "priced" | "included")} className="h-10 rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="included">Sem preço extra · sabores do combo</option><option value="priced">Com preço · bebida ou extra</option></select><button type="button" disabled={!sourceCategory} onClick={addGroupFromCategory} className="rounded-lg border border-gray-300 bg-white px-3 text-sm font-bold text-gray-800 disabled:opacity-40">Copiar</button></div>}
+              <p className="mt-2 text-xs text-blue-800">Você pode copiar duas categorias no mesmo combo: salgados sem preço extra e bebidas com preço. Depois, ajuste as escolhas antes de salvar. Os nomes e preços são copiados; o estoque dos produtos de origem não é vinculado automaticamente.</p>
               </details>}
               <div className="mt-4 space-y-4">
 

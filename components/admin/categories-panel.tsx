@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useState } from "react"
-import { FolderPlus, Pencil, Power, Save, X } from "lucide-react"
+import { FolderPlus, Pencil, Power, Save, Trash2, X } from "lucide-react"
 import type { Category } from "@/lib/types"
 import { CATEGORY_SEPARATOR, categoryShortName, parentCategoryName, sortedCategories } from "@/lib/category-hierarchy"
 
@@ -72,6 +72,23 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
     }
   }
 
+  async function remove(category: Category) {
+    if (!window.confirm(`Excluir a categoria ${category.name}? Categorias com produtos ou subcategorias não podem ser excluídas.`)) return
+    setBusy(true)
+    setError("")
+    try {
+      const response = await fetch(`/api/categories/${category.id}`, { method: "DELETE" })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "Não foi possível excluir a categoria.")
+      await refresh()
+      if (editingId === category.id) clear()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Não foi possível excluir a categoria.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
@@ -90,6 +107,7 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
               </div>
               <button onClick={() => edit(category)} className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700"><Pencil className="h-4 w-4" /></button>
               <button disabled={busy} onClick={() => toggle(category)} className={`rounded-lg p-2 ${category.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`}><Power className="h-4 w-4" /></button>
+              <button type="button" disabled={busy} onClick={() => void remove(category)} aria-label={`Excluir ${category.name}`} className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-4 w-4"/></button>
             </div>
           ))}
         </div>

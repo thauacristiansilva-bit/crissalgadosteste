@@ -111,7 +111,28 @@ export function isWithinBusinessHours(
   const parts = zonedParts(date, settings.timeZone)
   const schedule = settings.businessHours.find((item) => item.day === parts.day)
   if (!schedule?.enabled) return false
-  return parts.time >= schedule.open && parts.time <= schedule.close
+  return isWithinBusinessDay(schedule, parts.time)
+}
+
+export function isWithinBusinessDay(schedule: BusinessHour, time: string) {
+  if (!schedule.enabled || time < schedule.open || time > schedule.close) return false
+  if (schedule.pauseStart && schedule.pauseEnd && time >= schedule.pauseStart && time < schedule.pauseEnd) return false
+  return true
+}
+
+export function validateBusinessHours(hours: BusinessHour[]) {
+  if (hours.length !== 7 || new Set(hours.map((hour) => hour.day)).size !== 7) throw new Error("Informe os horários dos sete dias da semana.")
+  const validTime = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+  for (const day of hours) {
+    if (!Number.isInteger(day.day) || day.day < 0 || day.day > 6 || !validTime(day.open) || !validTime(day.close)) throw new Error(`Horário inválido em ${day.label || "um dia"}.`)
+    if (!day.enabled) continue
+    if (day.open >= day.close) throw new Error(`${day.label}: abertura deve ser antes do fechamento.`)
+    if (day.pauseStart || day.pauseEnd) {
+      if (!day.pauseStart || !day.pauseEnd || !validTime(day.pauseStart) || !validTime(day.pauseEnd) || !(day.open < day.pauseStart && day.pauseStart < day.pauseEnd && day.pauseEnd < day.close)) {
+        throw new Error(`${day.label}: a pausa deve ficar entre a abertura e o fechamento.`)
+      }
+    }
+  }
 }
 
 export function isStoreOpenNow(settings: StoreSettings, now = new Date()) {

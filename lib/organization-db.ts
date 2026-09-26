@@ -2,6 +2,7 @@ import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { demoOrganizationIsUsable } from "@/lib/demo-policy"
 import { runWithRlsBypass } from "@/lib/rls-context"
+import { validateBusinessHours } from "@/lib/operations"
 import type {
   StaffEmploymentType,
   StaffMember,
@@ -281,6 +282,10 @@ function normalizedSettings(
   current: StoreSettings,
   patch: Partial<StoreSettings>,
 ): StoreSettings {
+  if (patch.businessHours !== undefined) {
+    if (!Array.isArray(patch.businessHours)) throw new Error("Horários inválidos.")
+    validateBusinessHours(patch.businessHours)
+  }
   const next: StoreSettings = {
     ...current,
     ...patch,
@@ -478,6 +483,8 @@ function normalizedSettings(
             ),
           )
         : current.rememberClientDays,
+    cashbackEnabled: patch.cashbackEnabled !== undefined ? Boolean(patch.cashbackEnabled) : Boolean(current.cashbackEnabled),
+    cashbackPercent: patch.cashbackPercent !== undefined ? Math.max(0, Math.min(100, Number(patch.cashbackPercent) || 0)) : Number(current.cashbackPercent || 0),
     loyaltyPointsPerReal:
       patch.loyaltyPointsPerReal !== undefined
         ? Math.max(0, Number(patch.loyaltyPointsPerReal))

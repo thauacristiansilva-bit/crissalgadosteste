@@ -144,6 +144,8 @@ export function MarketingPanel({
     useState({
       enabled:
         settings.loyaltyEnabled,
+      cashbackEnabled: Boolean(settings.cashbackEnabled),
+      cashbackPercent: Number(settings.cashbackPercent || 0),
       points:
         settings.loyaltyPointsPerReal,
       rewardPoints:
@@ -380,6 +382,8 @@ export function MarketingPanel({
           body: JSON.stringify({
             loyaltyEnabled:
               loyalty.enabled,
+            cashbackEnabled: loyalty.cashbackEnabled,
+            cashbackPercent: loyalty.cashbackPercent,
             loyaltyPointsPerReal:
               loyalty.points,
             loyaltyRewardPoints:
@@ -1430,6 +1434,11 @@ export function MarketingPanel({
               </label>
             </div>
 
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <label className="flex items-center gap-2 font-bold text-emerald-900"><input type="checkbox" checked={loyalty.cashbackEnabled} onChange={(event) => setLoyalty({ ...loyalty, cashbackEnabled: event.target.checked })} /> Ativar cashback para clientes com conta</label>
+              <label className="mt-3 block text-sm text-emerald-900">Porcentagem devolvida em cada pedido concluído (%)<input type="number" min="0" max="100" step="0.01" value={loyalty.cashbackPercent} onChange={(event) => setLoyalty({ ...loyalty, cashbackPercent: Number(event.target.value) })} className="mt-1 h-10 w-full rounded-xl border border-emerald-200 px-3" /></label>
+              <p className="mt-2 text-xs text-emerald-800">O cliente usa o saldo na próxima compra. O crédito acontece quando o pedido é concluído.</p>
+            </div>
             <textarea
               value={loyalty.rewardText}
               onChange={(event) =>

@@ -61,10 +61,12 @@ function Build-Ticket(
 
   if ($order.type -eq 'delivery') {
     $lines.Add("Endereco: $($order.customer.address), $($order.customer.number)")
+    if ($order.customer.complement) { $lines.Add("Complemento: $($order.customer.complement)") }
 
     if ($order.customer.district) {
       $lines.Add("Bairro: $($order.customer.district)")
     }
+    if ($order.customer.city) { $lines.Add("Cidade: $($order.customer.city)") }
 
     if ($order.deliveryZoneName) {
       $lines.Add("Area: $($order.deliveryZoneName)")
@@ -79,6 +81,13 @@ function Build-Ticket(
     } else {
       $lines.Add("$($item.quantity)x $($item.name)")
     }
+    foreach ($modifier in $item.modifiers) {
+      $detail = "  - $($modifier.groupName): $($modifier.optionName)"
+      if ($customerCopy -and -not $modifier.included -and [double]$modifier.priceDelta -gt 0) {
+        $detail += " (+$(Money([double]$modifier.priceDelta)))"
+      }
+      $lines.Add($detail)
+    }
   }
 
   if ($order.notes) {
@@ -88,10 +97,12 @@ function Build-Ticket(
 
   if ($customerCopy) {
     $lines.Add("--------------------------------")
+    $lines.Add("Subtotal: $(Money([double]$order.subtotal))")
 
     if ([double]$order.discount -gt 0) {
       $lines.Add("Desconto: -$(Money([double]$order.discount))")
     }
+    if ([double]$order.cashbackUsed -gt 0) { $lines.Add("Cashback: -$(Money([double]$order.cashbackUsed))") }
 
     if ([double]$order.deliveryFee -gt 0) {
       $lines.Add("Entrega: $(Money([double]$order.deliveryFee))")
@@ -99,6 +110,7 @@ function Build-Ticket(
 
     $lines.Add("TOTAL: $(Money([double]$order.total))")
     $lines.Add("Pagamento: $($order.paymentMethod)")
+    if ($order.changeFor) { $lines.Add("Troco para: $($order.changeFor)") }
   }
 
   $lines.Add("================================")
