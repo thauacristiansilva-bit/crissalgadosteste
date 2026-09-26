@@ -1,0 +1,20 @@
+CORREÇÃO: CONECTAR IMPRESSORA — ERRO DE SEGURANÇA DO BANCO
+
+1. Extraia este ZIP dentro da pasta ORIGINAL do projeto no computador.
+2. Confirme a substituição dos três arquivos quando o Windows perguntar.
+3. Abra essa pasta no VS Code, abra Terminal > Novo Terminal e execute:
+
+   git add .
+   git commit -m "Corrige conexao da impressora"
+   git push origin main
+
+4. Espere o deploy automatico da Railway terminar. Depois, atualize a pagina,
+   clique em Conectar impressora e abra o arquivo .cmd BAIXADO NO WINDOWS
+   do caixa, onde a impressora USB ou Wi-Fi estiver instalada.
+5. Deixe a janela do conector aberta; a impressora instalada aparecera no painel
+   em ate cerca de um minuto. Se nao aparecer, clique em Atualizar lista.
+
+Este pacote corrige somente o erro mostrado na tela. Ele complementa a etapa
+anterior de impressora: ela precisa ter sido instalada e sua migracao executada.
+Nao precisa executar uma nova migracao de banco de dados para esta correcao.
+O arquivo .cmd inclui uma chave privada: guarde-o apenas no computador do caixa.

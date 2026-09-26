@@ -885,13 +885,18 @@ export async function authenticatePrintAgent(
     "privileged-backend",
   )
 
-  await getPostgresPool().query(
-    `
-      UPDATE sf_print_agents
-      SET last_seen_at = now()
-      WHERE id = $1
-    `,
-    [row.id],
+  await runWithTenantRlsScope(
+    [row.organization_id],
+    undefined,
+    () => getPostgresPool().query(
+      `
+        UPDATE sf_print_agents
+        SET last_seen_at = now()
+        WHERE organization_id = $1 AND id = $2 AND active = true
+      `,
+      [row.organization_id, row.id],
+    ),
+    "privileged-backend",
   )
 
   return {

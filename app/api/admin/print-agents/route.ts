@@ -6,6 +6,7 @@ import {
   canManageSecurity,
 } from "@/lib/admin-access"
 import { assertDemoActionAllowed, demoPolicyErrorStatus } from "@/lib/demo-policy"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   createPrintAgent,
   listPrintAgents,
@@ -28,12 +29,13 @@ export async function GET() {
     )
   }
 
-  return NextResponse.json({
-    printAgents:
-      await listPrintAgents(
-        session.organizationId,
-      ),
-  })
+  const printAgents = await runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    () => listPrintAgents(session.organizationId),
+  )
+
+  return NextResponse.json({ printAgents })
 }
 
 export async function POST(
@@ -60,14 +62,17 @@ export async function POST(
 
   try {
     await assertDemoActionAllowed(session.organizationId, "external-print")
-    const agent =
-      await createPrintAgent({
+    const agent = await runWithTenantRlsScope(
+      [session.organizationId],
+      session.userId,
+      () => createPrintAgent({
         organizationId:
           session.organizationId,
         name: body?.name || "",
         createdByUserId:
           session.userId,
-      })
+      }),
+    )
 
     return NextResponse.json(
       {
@@ -112,7 +117,8 @@ export async function DELETE(
     | { id?: string }
     | null
 
-  if (!body?.id) {
+  const agentId = body?.id
+  if (!agentId) {
     return NextResponse.json(
       {
         error:
@@ -131,11 +137,11 @@ export async function DELETE(
     )
   }
 
-  const revoked =
-    await revokePrintAgent(
-      session.organizationId,
-      body.id,
-    )
+  const revoked = await runWithTenantRlsScope(
+    [session.organizationId],
+    session.userId,
+    () => revokePrintAgent(session.organizationId, agentId),
+  )
 
   return NextResponse.json({
     ok: revoked,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { authenticatePrintAgent } from "@/lib/organization-security-db"
 import { getPostgresPool } from "@/lib/postgres"
 import { assertDemoActionAllowed } from "@/lib/demo-policy"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 
 export const runtime = "nodejs"
 
@@ -21,10 +22,15 @@ export async function POST(request: Request) {
     const data = item && typeof item === "object" ? item as { name?: unknown; port?: unknown } : {}
     return { name: String(data.name || "").trim().slice(0, 120), port: String(data.port || "").trim().slice(0, 120) }
   }).filter(item => item.name)
-  await getPostgresPool().query(
-    `UPDATE sf_print_agents SET available_printers = $3::jsonb, last_seen_at = now()
-     WHERE organization_id = $1 AND id = $2 AND active = true`,
-    [agent.organizationId, agent.agentId, JSON.stringify(printers)],
+  await runWithTenantRlsScope(
+    [agent.organizationId],
+    undefined,
+    () => getPostgresPool().query(
+      `UPDATE sf_print_agents SET available_printers = $3::jsonb, last_seen_at = now()
+       WHERE organization_id = $1 AND id = $2 AND active = true`,
+      [agent.organizationId, agent.agentId, JSON.stringify(printers)],
+    ),
+    "privileged-backend",
   )
   return NextResponse.json({ ok: true, count: printers.length })
 }
