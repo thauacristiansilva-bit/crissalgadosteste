@@ -6,6 +6,7 @@ import {
 import { getTenantSettings } from "@/lib/organization-db"
 import { authenticatePrintAgent } from "@/lib/organization-security-db"
 import { assertDemoActionAllowed } from "@/lib/demo-policy"
+import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   finiteNumber,
   InputValidationError,
@@ -111,10 +112,15 @@ export async function GET(request: Request) {
     )
   }
 
-  const [orders, settings] = await Promise.all([
-    getTenantUnprintedOrders(context.organizationId),
-    getTenantSettings(context.organizationId),
-  ])
+  const [orders, settings] = await runWithTenantRlsScope(
+    [context.organizationId],
+    undefined,
+    () => Promise.all([
+      getTenantUnprintedOrders(context.organizationId),
+      getTenantSettings(context.organizationId),
+    ]),
+    "privileged-backend",
+  )
 
   if (!orders || !settings) {
     return NextResponse.json(
@@ -177,9 +183,19 @@ export async function POST(request: Request) {
     )
   }
 
-  const settings = await getTenantSettings(context.organizationId)
+  const { settings, order } = await runWithTenantRlsScope(
+    [context.organizationId],
+    undefined,
+    async () => {
+      const settings = await getTenantSettings(context.organizationId)
+      const order = settings?.printerAgentId && settings.printerAgentId !== context.agentId
+        ? null
+        : await markTenantOrderPrinted(context.organizationId, id)
+      return { settings, order }
+    },
+    "privileged-backend",
+  )
   if (settings?.printerAgentId && settings.printerAgentId !== context.agentId) return NextResponse.json({ error: "Este computador não está selecionado para imprimir." }, { status: 403 })
-  const order = await markTenantOrderPrinted(context.organizationId, id)
   if (!order) {
     return NextResponse.json(
       { error: "Pedido não encontrado na empresa deste agente." },

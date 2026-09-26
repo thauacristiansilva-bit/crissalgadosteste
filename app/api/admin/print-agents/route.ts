@@ -66,11 +66,11 @@ export async function POST(
       [session.organizationId],
       session.userId,
       () => createPrintAgent({
-        organizationId:
-          session.organizationId,
-        name: body?.name || "",
-        createdByUserId:
-          session.userId,
+          organizationId:
+            session.organizationId,
+          name: body?.name || "",
+          createdByUserId:
+            session.userId,
       }),
     )
 
