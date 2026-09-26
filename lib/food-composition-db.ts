@@ -69,6 +69,7 @@ type IngredientLinkRow = {
 }
 
 export type ProductCompositionInput = {
+  price?: number
   modifierGroups?: Array<{
     existingGroupId?: number
     name?: string
@@ -1011,6 +1012,13 @@ export async function replaceProductComposition(
   input: ProductCompositionInput,
 ) {
   const normalized = normalizeComposition(input)
+  if (input.price !== undefined) {
+    const base = Number(input.price)
+    const flavor = normalized.groups.find((group) => group.name === "Escolha o sabor" && group.description === "Escolha um sabor. O preço depende do sabor escolhido.")
+    if (!Number.isFinite(base) || base <= 0 || !flavor || !flavor.active || !flavor.required || flavor.minSelect !== 1 || flavor.maxSelect !== 1 || flavor.selectionMode !== "unique" || !flavor.options.some((option) => option.active && option.priceDelta === 0)) {
+      throw new Error("Informe um preço válido e pelo menos um sabor com esse preço.")
+    }
+  }
   const ingredientIds = [...new Set([
     ...normalized.recipe.map((item) => item.ingredientId),
     ...normalized.groups.flatMap((group) =>
@@ -1154,6 +1162,9 @@ export async function replaceProductComposition(
       )
     }
 
+    if (input.price !== undefined) {
+      await client.query("UPDATE sf_products SET price=$3, updated_at=now() WHERE organization_id=$1 AND id=$2", [organizationId, productId, Number(Number(input.price).toFixed(2))])
+    }
     await refreshFoodStateWithClient(client, organizationId, "composition-save")
     await client.query("COMMIT")
   } catch (error) {

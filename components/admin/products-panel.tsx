@@ -5,6 +5,9 @@ import { CircleDollarSign, PackagePlus, Pencil, Plus, Power, Save, Trash2, Uploa
 import type { Category, Product } from "@/lib/types"
 import { ProductCompositionEditor } from "@/components/admin/product-composition-editor"
 import { HelpTip } from "@/components/admin/help-tip"
+import { categoryIncludes, categoryShortName, parentCategoryName, sortedCategories } from "@/lib/category-hierarchy"
+import { isPricedFlavorGroup, PRICED_FLAVOR_DESCRIPTION } from "@/lib/product-composition"
+import type { ProductComposition, ProductModifierGroup } from "@/lib/types"
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
@@ -21,21 +24,28 @@ type ProductDraft = {
 }
 
 const emptyDraft: ProductDraft = { name: "", description: "", category: "Salgados", price: "", image: "", featured: false, trackStock: false, stock: "0", minStock: "0" }
+type FlavorDraft = { key: string; name: string; price: string; active?: boolean }
+const emptyFlavors = (): FlavorDraft[] => [{ key: crypto.randomUUID(), name: "", price: "" }, { key: crypto.randomUUID(), name: "", price: "" }]
 
 export function ProductsPanel({ products, categories, onProductsChanged, onCategoriesChanged }: { products: Product[]; categories: Category[]; onProductsChanged: (products: Product[]) => void; onCategoriesChanged: (categories: Category[]) => void }) {
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [pendingFlavorProductId, setPendingFlavorProductId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState("")
   const [compositionProduct, setCompositionProduct] = useState<Product | null>(null)
   const [newCategory, setNewCategory] = useState("")
   const [showCategoryForm, setShowCategoryForm] = useState(false)
-  const activeCategories = useMemo(() => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" })), [categories])
+  const [categoryParent, setCategoryParent] = useState("")
+  const [priceByFlavor, setPriceByFlavor] = useState(false)
+  const [flavors, setFlavors] = useState<FlavorDraft[]>(emptyFlavors)
+  const activeCategories = useMemo(() => sortedCategories(categories.filter((category) => category.active)), [categories])
   const [selectedCategory, setSelectedCategory] = useState("")
   const categoryNames = useMemo(() => [...new Set([...activeCategories.map((category) => category.name), ...products.map((product) => product.category)])].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" })), [activeCategories, products])
   const currentCategory = categoryNames.includes(selectedCategory) ? selectedCategory : categoryNames[0] || ""
-  const visibleProducts = useMemo(() => products.filter((product) => product.category === currentCategory).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" }) || a.id - b.id), [products, currentCategory])
+  const visibleProducts = useMemo(() => products.filter((product) => parentCategoryName(currentCategory) ? product.category === currentCategory : categoryIncludes(currentCategory, product.category)).sort((a, b) => a.category.localeCompare(b.category, "pt-BR", { numeric: true, sensitivity: "base" }) || a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" }) || a.id - b.id), [products, currentCategory])
+  const startingPrice = flavors.map((flavor) => Number(flavor.price.replace(",", "."))).filter((price) => Number.isFinite(price) && price > 0).sort((a, b) => a - b)[0]
 
   useEffect(() => {
     if (currentCategory && !selectedCategory && !editingId) {
@@ -57,7 +67,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
       const response = await fetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCategory.trim() }),
+        body: JSON.stringify({ name: newCategory.trim(), parent: categoryParent }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível criar a categoria.")
@@ -65,6 +75,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
       setDraft((current) => ({ ...current, category: data.category.name }))
       setSelectedCategory(data.category.name)
       setNewCategory("")
+      setCategoryParent("")
       setShowCategoryForm(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar categoria.")
@@ -75,13 +86,20 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
 
   function beginEdit(product: Product) {
     setEditingId(product.id)
+    setPendingFlavorProductId(null)
     setDraft({ name: product.name, description: product.description, category: product.category, price: String(product.price).replace(".", ","), image: product.image || "", featured: product.featured, trackStock: product.trackStock, stock: String(product.stock), minStock: String(product.minStock) })
+    const group = product.modifierGroups?.find(isPricedFlavorGroup)
+    setPriceByFlavor(Boolean(group))
+    setFlavors(group ? group.options.map((option) => ({ key: String(option.id), name: option.name, price: String(Number((product.price + option.priceDelta).toFixed(2))).replace(".", ","), active: option.active })) : emptyFlavors())
     setError("")
   }
 
   function clearForm(category = currentCategory) {
     setEditingId(null)
+    setPendingFlavorProductId(null)
     setDraft({ ...emptyDraft, category: category || activeCategories[0]?.name || "Salgados" })
+    setPriceByFlavor(false)
+    setFlavors(emptyFlavors())
     setError("")
   }
 
@@ -112,24 +130,75 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
     }
   }
 
+  async function saveFlavorComposition(productId: number, basePrice: number, entries: { key: string; name: string; price: number; active?: boolean }[]) {
+    const loaded = await fetch(`/api/products/${productId}/composition`, { cache: "no-store" })
+    const loadedData = await loaded.json()
+    if (!loaded.ok) throw new Error(loadedData.error || "Não foi possível carregar os sabores.")
+    const composition = loadedData.composition as ProductComposition
+    const oldFlavors = composition.modifierGroups.find(isPricedFlavorGroup)?.options || []
+    const groups = composition.modifierGroups.filter((group) => !isPricedFlavorGroup(group)).map((group: ProductModifierGroup) =>
+      (group.usedByProducts || 0) > 1 ? { existingGroupId: group.id } : {
+        name: group.name, description: group.description, required: group.required,
+        minSelect: group.minSelect, maxSelect: group.maxSelect, selectionMode: group.selectionMode || "unique",
+        includedQuantity: group.includedQuantity, active: group.active, sortOrder: group.sortOrder,
+        options: group.options.map((option) => ({
+          name: option.name, description: option.description, priceDelta: option.priceDelta,
+          includedEligible: option.includedEligible, active: option.active, sortOrder: option.sortOrder,
+          ingredients: (option.ingredients || []).map((row) => ({ ingredientId: row.ingredientId, quantity: row.quantity })),
+        })),
+      },
+    )
+    const flavorGroup = {
+      name: "Escolha o sabor", description: PRICED_FLAVOR_DESCRIPTION, required: true,
+      minSelect: 1, maxSelect: 1, selectionMode: "unique" as const, includedQuantity: 0,
+      active: true, sortOrder: groups.length,
+      options: entries.map((entry, index) => {
+        const previous = oldFlavors.find((option) => String(option.id) === entry.key)
+        return { name: entry.name, description: previous?.description || "", priceDelta: Number((entry.price - basePrice).toFixed(2)), includedEligible: false, active: entry.active !== false, sortOrder: index,
+          ingredients: (previous?.ingredients || []).map((row) => ({ ingredientId: row.ingredientId, quantity: row.quantity })) }
+      }),
+    }
+    const response = await fetch(`/api/products/${productId}/composition`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price: basePrice, recipe: composition.recipe.map((row) => ({ ingredientId: row.ingredientId, quantity: row.quantity })), modifierGroups: [...groups, flavorGroup] }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || "Não foi possível salvar os sabores.")
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     setBusy(true)
     setError("")
     try {
-      const price = Number(draft.price.replace(",", "."))
+      const priced = priceByFlavor ? flavors.map((flavor) => ({ key: flavor.key, name: flavor.name.trim(), price: Number(flavor.price.replace(",", ".")), active: flavor.active })) : []
+      if (priceByFlavor && (priced.length === 0 || !priced.some((flavor) => flavor.active !== false) || priced.some((flavor, index) => !flavor.name || !/^\d+(?:[,.]\d{1,2})?$/.test(flavors[index].price.trim()) || !Number.isFinite(flavor.price) || flavor.price <= 0) || new Set(priced.map((flavor) => flavor.name.toLocaleLowerCase("pt-BR"))).size !== priced.length)) {
+        throw new Error("Preencha cada sabor com um nome único e um preço em reais (ex.: 12,50).")
+      }
+      const price = priceByFlavor ? Number(Math.min(...priced.map((flavor) => flavor.price)).toFixed(2)) : Number(draft.price.replace(",", "."))
+      if (!Number.isFinite(price) || price <= 0) throw new Error("Informe um preço válido.")
       const response = await fetch(editingId ? `/api/products/${editingId}` : "/api/products", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: draft.name, description: draft.description, category: activeCategories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name, price, image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
+        body: JSON.stringify({ name: draft.name, description: draft.description, category: categories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name, ...(!priceByFlavor || !editingId ? { price } : {}), ...(!editingId && priceByFlavor ? { active: false } : {}), image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível salvar o produto.")
+      if (priceByFlavor) {
+        const productId = Number(data.product.id)
+        if (!editingId) { setEditingId(productId); setPendingFlavorProductId(productId) }
+        await saveFlavorComposition(productId, price, priced)
+        if (!editingId || pendingFlavorProductId === productId) {
+          const activated = await fetch(`/api/products/${productId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true }) })
+          if (!activated.ok) throw new Error("Sabores salvos. Clique em salvar novamente para ativar o produto.")
+          setPendingFlavorProductId(null)
+        }
+      }
       await refreshProducts()
       const savedCategory = data.product?.category || draft.category
       setSelectedCategory(savedCategory)
       clearForm(savedCategory)
-      setCompositionProduct(data.product || products.find((product) => product.id === editingId) || null)
+      setCompositionProduct(priceByFlavor ? null : data.product || products.find((product) => product.id === editingId) || null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao salvar produto.")
     } finally {
@@ -159,7 +228,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,.6fr)]">
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="border-b border-gray-100 px-5 py-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-900">Produtos por categoria</h2><p className="text-sm text-gray-500">Escolha uma categoria para ver e editar seus produtos.</p></div><span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{visibleProducts.length} produtos</span></div><label className="mt-4 block text-xs font-bold text-gray-600">Categoria<select aria-label="Filtrar produtos por categoria" value={currentCategory} onChange={(event) => { const name = event.target.value; setSelectedCategory(name); setCompositionProduct(null); clearForm(name) }} className="mt-1 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 sm:max-w-sm">{categoryNames.map((name) => <option key={name} value={name}>{name} ({products.filter((product) => product.category === name).length})</option>)}</select></label></div>
+        <div className="border-b border-gray-100 px-5 py-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-900">Produtos por categoria</h2><p className="text-sm text-gray-500">Escolha uma categoria para ver e editar seus produtos.</p></div><span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{visibleProducts.length} produtos</span></div><label className="mt-4 block text-xs font-bold text-gray-600">Categoria<select aria-label="Filtrar produtos por categoria" value={currentCategory} onChange={(event) => { const name = event.target.value; setSelectedCategory(name); setCompositionProduct(null); clearForm(name) }} className="mt-1 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 sm:max-w-sm">{categoryNames.map((name) => <option key={name} value={name}>{parentCategoryName(name) ? `↳ ${categoryShortName(name)} (${parentCategoryName(name)})` : name} ({products.filter((product) => parentCategoryName(name) ? product.category === name : categoryIncludes(name, product.category)).length})</option>)}</select></label></div>
         <div className="divide-y divide-gray-100">
           {visibleProducts.map((product) => {
             const outOfStock = product.trackStock && product.stock <= 0
@@ -182,10 +251,13 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
         <div className="space-y-4">
           <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Nome *</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ex.: Coxinha de frango" className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
           <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Descrição</span><textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Descrição curta" rows={3} className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><div><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Categoria *</span><select required value={activeCategories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name || ""} onChange={(e) => setDraft({ ...draft, category: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">{activeCategories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label><button type="button" onClick={() => setShowCategoryForm((current) => !current)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700"><Plus className="h-3.5 w-3.5" /> Nova categoria</button></div><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Preço *</span><div className="relative"><CircleDollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required inputMode="decimal" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} placeholder="1,25" className="h-11 w-full rounded-xl border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></div></label></div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><div><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Categoria *</span><select required value={activeCategories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name || ""} onChange={(e) => setDraft({ ...draft, category: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">{activeCategories.map((category) => <option key={category.id} value={category.name}>{parentCategoryName(category.name) ? `↳ ${categoryShortName(category.name)} (${parentCategoryName(category.name)})` : category.name}</option>)}</select></label><button type="button" onClick={() => setShowCategoryForm((current) => !current)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700"><Plus className="h-3.5 w-3.5" /> Nova categoria</button></div><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">{priceByFlavor ? "A partir de" : "Preço *"}</span><div className="relative"><CircleDollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required={!priceByFlavor} readOnly={priceByFlavor} inputMode="decimal" value={priceByFlavor ? startingPrice ? String(startingPrice).replace(".", ",") : "" : draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} placeholder={priceByFlavor ? "Calculado pelos sabores" : "1,25"} className="h-11 w-full rounded-xl border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></div></label></div>
+
+          <label className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-900"><input type="checkbox" checked={priceByFlavor} disabled={Boolean(editingId && products.find((product) => product.id === editingId)?.modifierGroups?.some(isPricedFlavorGroup))} onChange={(event) => setPriceByFlavor(event.target.checked)} className="h-5 w-5" /> Cada sabor tem seu preço</label>
+          {priceByFlavor && <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-sm font-bold text-blue-900">Sabores de {draft.name || "este produto"}</p><p className="mt-1 text-xs text-blue-800">Ex.: Coca-Cola R$ 12,00; Guaraná R$ 10,00. O cliente escolhe um sabor antes de comprar.</p><div className="mt-3 space-y-2">{flavors.map((flavor) => <div key={flavor.key} className="flex gap-2"><input aria-label="Nome do sabor" value={flavor.name} onChange={(event) => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, name: event.target.value } : item))} placeholder="Sabor" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"/><input aria-label={`Preço de ${flavor.name || "sabor"}`} value={flavor.price} onChange={(event) => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, price: event.target.value } : item))} placeholder="R$ 0,00" inputMode="decimal" className="h-10 w-28 rounded-lg border border-blue-200 bg-white px-2 text-sm"/>{flavor.active === false && <button type="button" onClick={() => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, active: true } : item))} className="text-xs font-bold text-amber-700">Ativar</button>}<button type="button" onClick={() => setFlavors((items) => items.filter((item) => item.key !== flavor.key))} aria-label={`Remover ${flavor.name || "sabor"}`} className="rounded-lg p-2 text-red-600"><X className="h-4 w-4" /></button></div>)}</div><button type="button" onClick={() => setFlavors((items) => [...items, { key: crypto.randomUUID(), name: "", price: "" }])} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-700"><Plus className="h-4 w-4"/> Adicionar sabor</button></div>}
 
           <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-3">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Foto do salgado</span>
+            <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Foto do produto</span>
             {draft.image && <div className="mb-3 flex items-center gap-3 rounded-xl bg-white p-2"><img src={draft.image} alt="Prévia" className="h-20 w-20 rounded-lg object-cover" /><div className="min-w-0"><p className="text-sm font-bold text-gray-800">Imagem selecionada</p><p className="truncate text-xs text-gray-400">{draft.image}</p><button type="button" onClick={() => setDraft({ ...draft, image: "" })} className="mt-1 text-xs font-bold text-red-600">Remover foto</button></div></div>}
             <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-bold text-blue-700 ring-1 ring-gray-200 hover:bg-blue-50"><Upload className="h-4 w-4" />{uploadingImage ? "Enviando imagem..." : "Escolher do celular ou computador"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadImage} disabled={uploadingImage} className="hidden" /></label>
             <p className="mt-2 text-center text-[11px] text-gray-400">JPG, PNG ou WEBP · máximo 5 MB</p>
@@ -199,7 +271,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
         </div>
         <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
       </form>
-      {showCategoryForm && <form onSubmit={addCategory} className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><label htmlFor="quick-category" className="block text-xs font-bold text-blue-900">Nome da nova categoria</label><div className="mt-2 flex gap-2"><input id="quick-category" required maxLength={100} value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Ex.: Bebidas" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-3 text-sm" /><button type="submit" disabled={busy} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-50">Criar</button></div></form>}
+      {showCategoryForm && <form onSubmit={addCategory} className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><label className="block text-xs font-bold text-blue-900">Dentro de<select value={categoryParent} onChange={(event) => setCategoryParent(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Nenhuma: categoria principal</option>{activeCategories.filter((category) => !parentCategoryName(category.name)).map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label><label htmlFor="quick-category" className="mt-3 block text-xs font-bold text-blue-900">Nome da nova categoria</label><div className="mt-2 flex gap-2"><input id="quick-category" required maxLength={100} value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Ex.: Refri 2L" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-3 text-sm" /><button type="submit" disabled={busy} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-50">Criar</button></div></form>}
       </div>
       {compositionProduct && <div className="xl:col-span-2"><ProductCompositionEditor product={compositionProduct} catalogProducts={products} reusableGroups={[...new Map(products.flatMap((item) => item.modifierGroups || []).filter((group) => group.active && group.options.length).map((group) => [group.id, group])).values()]} embedded onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} /></div>}
     </section>

@@ -4,6 +4,18 @@ import type {
   ProductModifierGroup,
 } from "@/lib/types"
 
+export const PRICED_FLAVOR_DESCRIPTION = "Escolha um sabor. O preço depende do sabor escolhido."
+
+export function isPricedFlavorGroup(group: ProductModifierGroup) {
+  return group.name === "Escolha o sabor" && group.description === PRICED_FLAVOR_DESCRIPTION && group.required && group.minSelect === 1 && group.maxSelect === 1 && group.selectionMode !== "bundle"
+}
+
+export function pricedFlavorStartingPrice(product: Pick<Product, "price" | "modifierGroups">) {
+  const group = product.modifierGroups?.find((item) => item.active && isPricedFlavorGroup(item))
+  const prices = group?.options.filter((option) => option.active && option.available).map((option) => product.price + option.priceDelta) || []
+  return prices.length ? Math.min(...prices) : product.price
+}
+
 export function productHasModifiers(product: Product) {
   return Boolean(
     product.modifierGroups?.some(

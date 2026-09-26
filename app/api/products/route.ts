@@ -73,6 +73,7 @@ export async function POST(request: Request) {
     trackStock: Boolean(body.trackStock),
     stock: Number(body.stock || 0),
     minStock: Number(body.minStock || 0),
+    active: body.active !== false,
   }
 
   try {

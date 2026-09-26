@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { name?: string }
+    | { name?: string; parent?: string }
     | null
 
   try {
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const category = await runWithTenantRlsScope(
       [session.organizationId],
       session.userId,
-      () => createTenantCategory(session.organizationId, body?.name || ""),
+    () => createTenantCategory(session.organizationId, body?.name || "", body?.parent || ""),
       "tenant-session",
     )
 

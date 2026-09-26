@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, PackageCheck, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
 import { isStoreOpenNow, zonedDateString, zonedDateTime } from "@/lib/operations"
+import { categoryIncludes, categoryShortName, parentCategoryName, sortedCategories } from "@/lib/category-hierarchy"
+import { isPricedFlavorGroup, pricedFlavorStartingPrice } from "@/lib/product-composition"
 import { IMMEDIATE_DELIVERY_MIN_MINUTES, IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
 import { geocodeGoogleAddress, reverseGeocodeGoogle, type GoogleAddress } from "@/lib/google-maps-client"
 import { DeliveryLocationMap } from "@/components/store/delivery-location-map"
@@ -380,7 +382,7 @@ export function Storefront({
       .filter(
         (p) =>
           category === "Todos" ||
-          p.category === category,
+          (parentCategoryName(category) ? p.category === category : categoryIncludes(category, p.category)),
       )
       .filter(
         (p) =>
@@ -418,11 +420,17 @@ export function Storefront({
           ),
       )
   }, [products, search, category])
+  const activeCategories = useMemo(() => sortedCategories(categories.filter((item) => item.active)), [categories])
+  const currentRoot = parentCategoryName(category) || category
+  const currentChildren = activeCategories.filter((item) => parentCategoryName(item.name) === currentRoot)
   const categoryCounts = useMemo(() => {
     const activeProducts = products.filter((product) => product.active)
     const counts = new Map<string, number>()
     counts.set("Todos", activeProducts.length)
     for (const product of activeProducts) counts.set(product.category, (counts.get(product.category) || 0) + 1)
+    for (const root of categories.filter((item) => !parentCategoryName(item.name))) {
+      counts.set(root.name, activeProducts.filter((product) => categoryIncludes(root.name, product.category)).length)
+    }
     return counts
   }, [products])
   const selectedDate = checkout.timing === "scheduled" ? checkout.scheduleDate : ""
@@ -1142,16 +1150,19 @@ export function Storefront({
         <section className="sticky top-14 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
             <label className="relative min-w-[190px] max-w-xs flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="O que você procura?" className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-orange-100"/></label>
-            <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={category === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`flex h-11 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm font-black ${category === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}><span>{item}</span><span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{categoryCounts.get(item) || 0}</span></button>)}</div>
+            <div className="flex gap-1">{["Todos", ...activeCategories.filter((item) => !parentCategoryName(item.name)).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={currentRoot === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`flex h-11 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm font-black ${currentRoot === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}><span>{item}</span><span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{categoryCounts.get(item) || 0}</span></button>)}</div>
           </div>
         </section>
 
+        {currentChildren.length > 0 && <nav aria-label={`Subcategorias de ${currentRoot}`} className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => setCategory(currentRoot)} className={`rounded-full px-4 py-2 text-sm font-bold ${category === currentRoot ? "bg-gray-950 text-white" : "bg-white text-gray-700 ring-1 ring-gray-200"}`}>Todos de {currentRoot}</button>{currentChildren.map((child) => <button type="button" key={child.id} onClick={() => setCategory(child.name)} className={`rounded-full px-4 py-2 text-sm font-bold ${category === child.name ? "bg-gray-950 text-white" : "bg-white text-gray-700 ring-1 ring-gray-200"}`}>{categoryShortName(child.name)}</button>)}</nav>}
+
         <section className="mt-5">
-          <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : category}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
+          <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : categoryShortName(category)}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {filtered.map((product) => {
               const quantity = quantityFor(product.id)
               const hasModifiers = productHasModifiers(product)
+              const pricedFlavors = product.modifierGroups?.some(isPricedFlavorGroup)
               const unavailable =
                 (product.trackStock && product.stock <= 0) ||
                 product.ingredientStockAvailable === false
@@ -1172,7 +1183,7 @@ export function Storefront({
                         style={{ backgroundColor: settings.primaryColor }}
                         className="absolute bottom-2 right-2 flex h-10 items-center justify-center gap-1 rounded-xl px-3 text-xs font-black text-white shadow-lg"
                       >
-                        <Plus className="h-4 w-4" /> Montar
+                        <Plus className="h-4 w-4" /> {pricedFlavors ? "Escolher sabor" : "Montar"}
                       </button>
                     )}
 
@@ -1213,12 +1224,12 @@ export function Storefront({
                         {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"} · hoje</span>}
                       </span>
                     ) : (
-                      <strong className="text-base">{money(product.price)}</strong>
+                      <strong className="text-base">{pricedFlavors ? "A partir de " : ""}{money(pricedFlavors ? pricedFlavorStartingPrice(product) : product.price)}</strong>
                     )}
-                    {hasModifiers && <span className="ml-1 text-[10px] font-bold text-gray-400">+ adicionais</span>}
+                    {hasModifiers && !pricedFlavors && <span className="ml-1 text-[10px] font-bold text-gray-400">+ adicionais</span>}
                     <h3 className="mt-1 line-clamp-2 text-sm font-bold leading-snug">{product.name}</h3>
                     {product.description && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{product.description}</p>}
-                    {!unavailable && <span className="mt-1.5 inline-block text-[11px] font-black" style={{ color: settings.primaryColor }}>{hasModifiers ? "Ver opções" : "Ver detalhes"}</span>}
+                    {!unavailable && <span className="mt-1.5 inline-block text-[11px] font-black" style={{ color: settings.primaryColor }}>{pricedFlavors ? "Escolher sabor" : hasModifiers ? "Ver opções" : "Ver detalhes"}</span>}
                   </button>
                 </article>
               )

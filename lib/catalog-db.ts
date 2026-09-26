@@ -2,6 +2,7 @@ import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import type { Category, Product } from "@/lib/types"
+import { CATEGORY_SEPARATOR, parentCategoryName } from "@/lib/category-hierarchy"
 import {
   getProductIngredientAvailability,
   getProductModifierGroupsForProducts,
@@ -120,8 +121,22 @@ async function createCategoryWithClient(
   client: PoolClient,
   organizationId: string,
   name: string,
+  parentName = "",
 ) {
-  const value = name.trim()
+  const label = name.trim()
+  if (!parentName && label.includes(CATEGORY_SEPARATOR)) {
+    const existingChild = await findCategoryByName(client, organizationId, label)
+    if (existingChild) return { category: mapCategory(existingChild), created: false }
+    throw new Error("Cadastre a subcategoria antes de adicionar produtos nela.")
+  }
+  if (!label || label.includes(CATEGORY_SEPARATOR) || label.includes("/")) throw new Error("Informe um nome sem barras para a categoria.")
+  const parent = parentName.trim()
+  if (parent) {
+    if (parent.includes("/")) throw new Error("Escolha uma categoria principal.")
+    const existingParent = await findCategoryByName(client, organizationId, parent)
+    if (!existingParent || !existingParent.active) throw new Error("Categoria principal não encontrada ou inativa.")
+  }
+  const value = parent ? `${parent}${CATEGORY_SEPARATOR}${label}` : label
   if (!value) throw new Error("Informe o nome da categoria.")
 
   const existing = await findCategoryByName(client, organizationId, value)
@@ -280,6 +295,7 @@ export async function getTenantProducts(
 export async function createTenantCategory(
   organizationId: string,
   name: string,
+  parentName = "",
 ) {
   const client = await getPostgresPool().connect()
 
@@ -291,6 +307,7 @@ export async function createTenantCategory(
       client,
       organizationId,
       name,
+      parentName,
     )
 
     if (!result.created) {
@@ -339,6 +356,16 @@ export async function updateTenantCategory(
       patch.name !== undefined
         ? patch.name.trim() || current.name
         : current.name
+    const categoryParts = nextName.split(CATEGORY_SEPARATOR)
+    if (categoryParts.length > 2 || categoryParts.some((part) => !part.trim() || part.includes("/"))) throw new Error("A categoria pode ter apenas uma subcategoria e não pode conter barras no nome.")
+    const parent = parentCategoryName(nextName)
+    if (parent) {
+      const foundParent = await findCategoryByName(client, organizationId, parent)
+      if (!foundParent || !foundParent.active || foundParent.id === id) throw new Error("Escolha uma categoria principal válida.")
+    }
+    if (!parentCategoryName(current.name) && parent && (await client.query("SELECT 1 FROM sf_categories WHERE organization_id=$1 AND left(name,length($2))=$2 LIMIT 1", [organizationId, current.name + CATEGORY_SEPARATOR])).rowCount) {
+      throw new Error("Mova ou exclua as subcategorias antes de mudar esta categoria de lugar.")
+    }
     const nextActive =
       patch.active !== undefined ? Boolean(patch.active) : current.active
     const nextSortOrder =
@@ -359,6 +386,14 @@ export async function updateTenantCategory(
       `,
       [organizationId, id, nextName, nextActive, nextSortOrder],
     )
+
+    if (!parentCategoryName(current.name) && nextName !== current.name) {
+      await client.query(
+        `UPDATE sf_categories SET name = $3 || ' / ' || substring(name from length($4) + 1), updated_at = now()
+         WHERE organization_id = $1 AND id <> $2 AND left(name, length($4)) = $4`,
+        [organizationId, id, nextName, current.name + CATEGORY_SEPARATOR],
+      )
+    }
 
     await client.query("COMMIT")
 
@@ -386,6 +421,7 @@ export async function createTenantProduct(
     trackStock?: boolean
     stock?: number
     minStock?: number
+    active?: boolean
   },
 ) {
   const client = await getPostgresPool().connect()
@@ -426,13 +462,13 @@ export async function createTenantProduct(
         )
         VALUES (
           $1, $2, $3, $4, $5, $6,
-          true, $7, $8, $9, $10, $11
+          $7, $8, $9, $10, $11, $12
         )
         RETURNING
           id,
           name,
           description,
-          $12::text AS category,
+          $13::text AS category,
           price,
           active,
           featured,
@@ -450,6 +486,7 @@ export async function createTenantProduct(
         name,
         input.description.trim(),
         price,
+        input.active !== false,
         Boolean(input.featured),
         input.image?.trim() || "",
         Boolean(input.trackStock),
