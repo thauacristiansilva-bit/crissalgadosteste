@@ -1,32 +1,31 @@
-SABORFLOW — ATUALIZACAO DE HORARIOS, CASHBACK E COMBOS
+SABORFLOW — IA AMPLIADA + AJUSTE DE BEBIDA NO COMBO
 
-1) No computador, abra no VS Code a pasta ORIGINAL do projeto (a que tem package.json).
-   Extraia este ZIP DENTRO dessa pasta. Aceite substituir os arquivos quando o Windows pedir.
-   Nao crie uma pasta extra para o conteudo do ZIP.
-
-2) No VS Code: Terminal > Novo Terminal. Cole UM COMANDO POR VEZ:
+1. Abra a pasta ORIGINAL do projeto no VS Code (a que contem package.json).
+2. Extraia o ZIP DENTRO dessa pasta e aceite substituir os arquivos.
+3. No Terminal do VS Code, execute UM COMANDO POR VEZ:
 
 git add .
-git commit -m "Horarios com pausa, cashback e combos"
+git commit -m "Amplia assistente de IA e corrige escolha da bebida"
 git push origin main
 
-3) Aguarde o Railway mostrar o servico "sabor flow" online. Abra o Shell desse servico
-   (o servico do site, NAO o servico Postgres) e cole:
+4. Aguarde o deploy do servico sabor flow no Railway. Atualize a pagina do admin.
+   Nesta atualizacao NAO ha migracao de banco.
 
-node scripts/migrate-multiempresa.mjs
+PARA TESTAR A IA:
+No painel > Montar loja com IA, peça por texto ou voz:
+"Reorganize a landing page. Melhore o titulo e a descricao, sugira cores da logo
+ja cadastrada, destaque o combo existente e sugira tres legendas para Instagram."
+Veja a previa. Toque em "Aprovar e publicar as alteracoes" para salvar a loja.
+A IA agora trabalha com conteudo da loja, configuracoes de atendimento e horarios,
+produtos novos e existentes, grupos/sabores e sugestoes de produtos. A logo deve
+estar cadastrada em Configuracoes; se nao for possivel le-la, a previa informa.
+Pedidos que nao sao suportados aparecem em "Pedidos que precisam de outro passo".
+As legendas sao para copiar: nao sao postadas no Instagram automaticamente.
 
-   Esse comando cria as colunas e o registro do cashback no banco. Execute uma unica vez;
-   se repetir, as migracoes ja executadas serao ignoradas.
+PARA A BEBIDA NO COMBO:
+No grupo de bebidas, marque obrigatorio, minimo 1 e maximo 1. Em "Mais opcoes",
+"Quantidade incluida no preco" = 1 se ja faz parte do preco do combo;
+= 0 se for cobrada a parte. Ao reduzir maximo, esse campo agora se ajusta sozinho.
 
-4) Atualize a pagina do administrador. Em Fidelidade, ative o cashback e escolha a %.
-   O cashback e creditado quando o pedido e marcado como concluido. Clientes com conta
-   podem usar o saldo na proxima compra pelo site ou no PDV.
-
-   Horarios: Configuracoes > Funcionamento > ativar Pausa entre turnos.
-   Combo: produto > Composicao > copiar categoria de salgados sem preco extra,
-   depois copiar categoria de bebidas com preco. Salve o produto.
-   Impressora: Configuracoes > Impressora > Conectar impressora no Windows.
-   Excluir categoria: remova primeiro os produtos e subcategorias dela.
-
-Verificacao feita: npm run typecheck e npm run build executados com sucesso.
-A integracao real com sua base de dados e impressora depende dos passos 3 e 4.
+Verificacao local: npm run typecheck e npm run build passaram.
+A geracao com Gemini e o salvamento no banco precisam ser conferidos no Railway.

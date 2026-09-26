@@ -633,7 +633,14 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
-          {section === "ai_setup" && <AiStoreSetupPanel publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}/pedir`} />}
+          {section === "ai_setup" && <AiStoreSetupPanel availableProducts={products.map((product) => ({ id: product.id, name: product.name }))} publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}`} onApplied={async () => {
+            const response = await fetch("/api/dashboard", { cache: "no-store" })
+            if (!response.ok) return
+            const data = (await response.json()) as DashboardRefreshPayload
+            if (data.settings) setSettings(data.settings)
+            if (data.categories) setCategories(data.categories)
+            if (data.products) setProducts(data.products)
+          }} />}
           {section === "help" && <HelpCenterPanel />}
           {section === "security" && <SecurityPanel canManageSecurity={permissionListHas(operationalPermissions, "security.manage")} />}
           {section === "billing" && <BillingPanel />}

@@ -973,7 +973,7 @@ function normalizeComposition(input: ProductCompositionInput) {
       throw new Error(`${name}: sabores do combo devem ter preço adicional zero. Use outro grupo para adicionais pagos.`)
     }
     if (includedQuantity > maxSelect) {
-      throw new Error(`${name}: a quantidade incluída não pode ser maior que o máximo.`)
+      throw new Error(`${name}: em Mais opções, reduza a quantidade incluída no preço para ${maxSelect} ou menos.`)
     }
 
     const names = new Set<string>()
