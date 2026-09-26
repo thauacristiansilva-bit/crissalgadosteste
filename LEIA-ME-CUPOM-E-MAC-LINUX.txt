@@ -1,0 +1,25 @@
+SABORFLOW - CUPOM GRANDE E CONECTOR WINDOWS, MAC, LINUX
+
+1. Extraia este ZIP DENTRO da pasta original do projeto; substitua os arquivos.
+2. Abra essa pasta no VS Code. No terminal execute:
+   git add .
+   git commit -m "Melhora cupom e conecta impressoras no Mac e Linux"
+   git push origin main
+3. Espere o deploy da Railway acabar e recarregue a pagina.
+4. No WINDOWS, feche a janela do conector antigo e ABRA DE NOVO o mesmo
+   arquivo CONECTAR-IMPRESSORA-SABORFLOW.cmd que ja foi baixado.
+   Ele busca o novo layout no servidor. Confirme em Impressoras e scanners
+   se o papel do driver esta configurado para rolo de 80 ou 58 mm.
+5. No MAC/LINUX: cadastre um computador no painel, selecione Mac ou Linux,
+   baixe o arquivo .sh no computador que imprime. Instale a impressora
+   no sistema. Execute no Terminal:
+   sh ~/Downloads/CONECTAR-IMPRESSORA-SABORFLOW.sh
+   Precisa de Python 3 e do servico de impressao CUPS (lp e lpstat).
+   Mantenha o Terminal aberto. Escolha a impressora no painel.
+
+A impressora e instalada/pareada uma vez por computador. Para receber
+pedidos, o computador deve ficar ligado com o conector executando.
+A confirmacao de impressao so e enviada depois que o trabalho e aceito
+pelo sistema operacional; faca um pedido de teste apos o deploy.
+Nao precisa de nova migracao de banco. Arquivos de conexao contem um token
+privado da loja; nao compartilhe nem publique o arquivo.

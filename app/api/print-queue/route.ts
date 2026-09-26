@@ -72,7 +72,7 @@ function publicPrintSettings(settings: {
   }
 }
 
-function printOrdersWithLocalTime<T extends { requestedFor: string }>(
+function printOrdersWithLocalTime<T extends { requestedFor: string; createdAt: string }>(
   orders: T[],
   timeZone: string,
 ) {
@@ -86,6 +86,14 @@ function printOrdersWithLocalTime<T extends { requestedFor: string }>(
       hour: "2-digit",
       minute: "2-digit",
     }).format(new Date(order.requestedFor)),
+    createdAtLocal: new Intl.DateTimeFormat("pt-BR", {
+      timeZone,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(order.createdAt)),
   }))
 }
 
