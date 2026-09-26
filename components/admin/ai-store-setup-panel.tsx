@@ -3,11 +3,20 @@
 import { useEffect, useRef, useState } from "react"
 import { Mic, Square, WandSparkles } from "lucide-react"
 import type { SetupPlan } from "@/lib/ai/store-setup"
+import type { Product, StoreSettings } from "@/lib/types"
+
+const settingLabels: Record<keyof SetupPlan["store"], string> = {
+  name: "Nome da loja", slogan: "Slogan / bio", welcomeTitle: "Título da capa",
+  welcomeText: "Texto da capa", aboutTitle: "Título Sobre nós", aboutText: "Texto Sobre nós",
+  primaryColor: "Cor principal", secondaryColor: "Cor secundária", phone: "Telefone",
+  whatsapp: "WhatsApp", instagramUrl: "Instagram", openingHours: "Horário em texto",
+  clientAccountsEnabled: "Área do cliente",
+}
 
 type VoiceResult = { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }
 type VoiceRecognition = { lang: string; continuous: boolean; interimResults: boolean; onresult: ((event: VoiceResult) => void) | null; onerror: ((event: { error: string }) => void) | null; onend: (() => void) | null; start: () => void; stop: () => void }
 
-export function AiStoreSetupPanel({ publicStorePath, onApplied, availableProducts }: { publicStorePath: string; onApplied?: () => Promise<void>; availableProducts: Array<{ id: number; name: string }> }) {
+export function AiStoreSetupPanel({ publicStorePath, onApplied, availableProducts, currentSettings }: { publicStorePath: string; onApplied?: () => Promise<void>; availableProducts: Product[]; currentSettings: StoreSettings }) {
   const [prompt, setPrompt] = useState("")
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const [previewToken, setPreviewToken] = useState("")
@@ -17,6 +26,8 @@ export function AiStoreSetupPanel({ publicStorePath, onApplied, availableProduct
   const [saved, setSaved] = useState(false)
   const [savedCaptions, setSavedCaptions] = useState<string[]>([])
   const [logoAnalyzed, setLogoAnalyzed] = useState(false)
+  const [previewWidth, setPreviewWidth] = useState<"phone" | "desktop">("desktop")
+  const previewRef = useRef<HTMLIFrameElement | null>(null)
   const recognitionRef = useRef<VoiceRecognition | null>(null)
   const shouldListenRef = useRef(false)
   const baseTextRef = useRef("")
@@ -29,6 +40,17 @@ export function AiStoreSetupPanel({ publicStorePath, onApplied, availableProduct
     if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
     recognitionRef.current?.stop()
   }, [])
+
+  useEffect(() => {
+    if (!plan) return
+    const postPreview = () => previewRef.current?.contentWindow?.postMessage({ type: "saborflow:ai-landing-preview", settings: currentSettings, products: availableProducts, plan, basePath: publicStorePath }, window.location.origin)
+    const ready = (event: MessageEvent<{ type?: string }>) => {
+      if (event.origin === window.location.origin && event.source === previewRef.current?.contentWindow && event.data?.type === "saborflow:ai-landing-ready") postPreview()
+    }
+    window.addEventListener("message", ready)
+    postPreview()
+    return () => window.removeEventListener("message", ready)
+  }, [plan, currentSettings, availableProducts, publicStorePath])
 
   function startListening() {
     if (shouldListenRef.current) return
@@ -117,6 +139,12 @@ export function AiStoreSetupPanel({ publicStorePath, onApplied, availableProduct
       {saved && savedCaptions.length > 0 && <div className="mt-4 space-y-2"><strong className="text-sm">Legendas sugeridas para copiar</strong>{savedCaptions.map((caption, index) => <div key={index} className="rounded-lg bg-gray-50 p-3 text-sm"><p>{caption}</p><button type="button" className="mt-1 text-xs font-bold text-orange-700" onClick={() => navigator.clipboard.writeText(caption)}>Copiar</button></div>)}</div>}
     </section>
     {plan && <div className="space-y-5">
+      <section className="rounded-3xl border border-orange-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-black">Como o cliente verá a página</h3><p className="text-xs text-gray-500">A página inicial real da loja com as alterações propostas. Nada foi publicado ainda.</p></div><div className="flex gap-2"><button type="button" onClick={() => setPreviewWidth("phone")} className={`rounded-lg px-3 py-2 text-xs font-bold ${previewWidth === "phone" ? "bg-orange-600 text-white" : "bg-gray-100 text-gray-700"}`}>Celular</button><button type="button" onClick={() => setPreviewWidth("desktop")} className={`rounded-lg px-3 py-2 text-xs font-bold ${previewWidth === "desktop" ? "bg-orange-600 text-white" : "bg-gray-100 text-gray-700"}`}>Computador</button></div></div>
+        <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-gray-100 p-2 sm:p-4"><iframe ref={previewRef} title="Prévia visual da página inicial da loja" src="/admin/ai-preview" onLoad={() => previewRef.current?.contentWindow?.postMessage({ type: "saborflow:ai-landing-preview", settings: currentSettings, products: availableProducts, plan, basePath: publicStorePath }, window.location.origin)} className={`mx-auto block h-[640px] rounded-xl border border-gray-200 bg-white shadow-lg transition-[width] ${previewWidth === "phone" ? "w-full max-w-[390px]" : "w-full"}`} /></div>
+        <p className="mt-2 text-xs text-gray-500">Role dentro da página para ver o restante. Os links estão desativados nesta visualização.</p>
+      </section>
+      <section className="rounded-3xl border bg-white p-5"><h3 className="font-black">O que muda e onde editar manualmente</h3><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[550px] text-left text-xs"><thead><tr className="border-b text-gray-500"><th className="py-2">Área no admin</th><th>Antes</th><th>Depois da aprovação</th></tr></thead><tbody>{Object.entries(plan.store).filter(([, value]) => value !== "" && value !== null).map(([key, value]) => { const settingKey = key === "name" ? "storeName" : key; const oldValue = currentSettings[settingKey as keyof StoreSettings]; const area = key === "instagramUrl" ? "Links › Instagram" : key.toLowerCase().includes("color") ? "Configurações › Cores" : "Configurações › Página inicial"; return <tr key={key} className="border-b align-top"><td className="py-2 pr-3 font-bold">{area} · {settingLabels[key as keyof SetupPlan["store"]]}</td><td className="max-w-48 break-words pr-3 text-gray-500">{String(oldValue || "—")}</td><td className="max-w-56 break-words font-semibold">{String(value)}</td></tr> })}{plan.operations.businessHours && <tr className="border-b"><td className="py-2 font-bold">Configurações › Funcionamento</td><td>Horários atuais</td><td>Turnos mostrados abaixo</td></tr>}{plan.productEdits.length > 0 && <tr className="border-b"><td className="py-2 font-bold">Produtos e sabores</td><td>Produtos atuais</td><td>{plan.productEdits.length} produto(s) ajustado(s)</td></tr>}{plan.products.length > 0 && <tr><td className="py-2 font-bold">Produtos e sabores</td><td>Catálogo atual</td><td>{plan.products.length} produto(s) da prévia</td></tr>}</tbody></table></div></section>
       <section className="rounded-3xl border bg-white p-5"><h3 className="font-black">Página inicial e perfil da loja</h3><p className="mb-4 text-xs text-gray-500">{logoAnalyzed ? "A logo cadastrada foi analisada para sugerir cores." : "A logo não pôde ser analisada. Para usar suas cores, cadastre uma imagem em Configurações e gere a prévia novamente."} Campos vazios permanecem como estão. As fotos você adiciona nas Configurações.</p><div className="grid gap-3 sm:grid-cols-2">
         {([ ["name","Nome da loja"], ["slogan","Slogan ou bio curta"], ["welcomeTitle","Título principal"], ["welcomeText","Texto principal"], ["aboutTitle","Título Sobre"], ["aboutText","Texto Sobre"], ["primaryColor","Cor principal (#RRGGBB)"], ["secondaryColor","Cor secundária (#RRGGBB)"], ["phone","Telefone"], ["whatsapp","WhatsApp"], ["instagramUrl","Link do Instagram"], ["openingHours","Horário em texto"] ] as Array<[Exclude<keyof SetupPlan["store"], "clientAccountsEnabled">,string]>).map(([key,label]) => <label key={key} className="block text-xs font-bold">{label}<input className={`${input} mt-1`} value={plan.store[key]} onChange={(e) => editStore(key,e.target.value)} /></label>)}
         <label className="block text-xs font-bold">Área do cliente<select className={`${input} mt-1`} value={plan.store.clientAccountsEnabled === null ? "keep" : plan.store.clientAccountsEnabled ? "on" : "off"} onChange={(e) => setPlan((old) => old ? { ...old, store: { ...old.store, clientAccountsEnabled: e.target.value === "keep" ? null : e.target.value === "on" } } : old)}><option value="keep">Manter como está</option><option value="on">Ativar cadastro dos clientes</option><option value="off">Desativar cadastro dos clientes</option></select></label>

@@ -633,7 +633,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
-          {section === "ai_setup" && <AiStoreSetupPanel availableProducts={products.map((product) => ({ id: product.id, name: product.name }))} publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}`} onApplied={async () => {
+          {section === "ai_setup" && <AiStoreSetupPanel availableProducts={products} currentSettings={settings} publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}`} onApplied={async () => {
             const response = await fetch("/api/dashboard", { cache: "no-store" })
             if (!response.ok) return
             const data = (await response.json()) as DashboardRefreshPayload

@@ -200,6 +200,15 @@ const nextConfig = {
         source: "/admin/:path*",
         headers: privateNoStoreHeaders,
       },
+      // Somente esta página autenticada pode aparecer no painel como prévia.
+      {
+        source: "/admin/ai-preview",
+        headers: [
+          { key: "Content-Security-Policy", value: contentSecurityPolicy.replace("frame-ancestors 'none'", "frame-ancestors 'self'") },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          ...privateNoStoreHeaders,
+        ],
+      },
       {
         source: "/superadmin/:path*",
         headers: privateNoStoreHeaders,

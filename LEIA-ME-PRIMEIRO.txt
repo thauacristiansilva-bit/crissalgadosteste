@@ -1,31 +1,27 @@
-SABORFLOW — IA AMPLIADA + AJUSTE DE BEBIDA NO COMBO
+SABORFLOW — PRÉVIA VISUAL ANTES DE PUBLICAR
 
-1. Abra a pasta ORIGINAL do projeto no VS Code (a que contem package.json).
-2. Extraia o ZIP DENTRO dessa pasta e aceite substituir os arquivos.
-3. No Terminal do VS Code, execute UM COMANDO POR VEZ:
+1. Abra no VS Code a pasta ORIGINAL do projeto, onde está package.json.
+2. Extraia este ZIP dentro dessa pasta e aceite substituir os arquivos.
+3. No terminal do VS Code, rode um comando por vez:
 
 git add .
-git commit -m "Amplia assistente de IA e corrige escolha da bebida"
+git commit -m "Mostra previa visual da loja na IA"
 git push origin main
 
-4. Aguarde o deploy do servico sabor flow no Railway. Atualize a pagina do admin.
-   Nesta atualizacao NAO ha migracao de banco.
+4. Aguarde o deploy no Railway e atualize o admin. Não há migração de banco nesta etapa.
 
-PARA TESTAR A IA:
-No painel > Montar loja com IA, peça por texto ou voz:
-"Reorganize a landing page. Melhore o titulo e a descricao, sugira cores da logo
-ja cadastrada, destaque o combo existente e sugira tres legendas para Instagram."
-Veja a previa. Toque em "Aprovar e publicar as alteracoes" para salvar a loja.
-A IA agora trabalha com conteudo da loja, configuracoes de atendimento e horarios,
-produtos novos e existentes, grupos/sabores e sugestoes de produtos. A logo deve
-estar cadastrada em Configuracoes; se nao for possivel le-la, a previa informa.
-Pedidos que nao sao suportados aparecem em "Pedidos que precisam de outro passo".
-As legendas sao para copiar: nao sao postadas no Instagram automaticamente.
+TESTE:
+- Admin > Montar loja com IA > escreva "Organize a página inicial da loja e
+  sugira um título e cores da logo" > Gerar prévia.
+- Acima dos campos, aparece "Como o cliente verá a página". Alterne entre
+  Celular e Computador e role dentro da página.
+- Logo abaixo, a tabela mostra onde o campo fica no admin, o valor antigo e
+  o novo. Edite um título ou cor: a visualização deve mudar imediatamente.
+- Nada é publicado até tocar em "Aprovar e publicar as alterações".
 
-PARA A BEBIDA NO COMBO:
-No grupo de bebidas, marque obrigatorio, minimo 1 e maximo 1. Em "Mais opcoes",
-"Quantidade incluida no preco" = 1 se ja faz parte do preco do combo;
-= 0 se for cobrada a parte. Ao reduzir maximo, esse campo agora se ajusta sozinho.
+Esta visualização reutiliza o componente da landing page pública, mas os links
+estão desativados na prévia. Produtos novos sem preço continuam invisíveis até
+que você informe o preço e aprove o plano.
 
-Verificacao local: npm run typecheck e npm run build passaram.
-A geracao com Gemini e o salvamento no banco precisam ser conferidos no Railway.
+Verificações: npm run typecheck, npm run build e regras de enquadramento da rota
+verificadas. O teste interativo com sessão autenticada exige conferir no Railway.
