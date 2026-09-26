@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { processIntegrationQueue } from "@/lib/integrations-db"
 import { integrationWorkerRequestIsAuthorized } from "@/lib/integrations-request"
 import { runWithRlsBypass } from "@/lib/rls-context"
+import { processWhatsAppAutoReplies } from "@/lib/whatsapp-inbox"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -14,7 +15,10 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json({
       ok: true,
-      ...(await runWithRlsBypass(() => processIntegrationQueue({ limit: body.limit }))),
+      ...(await runWithRlsBypass(async () => ({
+        autoReplies: await processWhatsAppAutoReplies(),
+        ...await processIntegrationQueue({ limit: body.limit }),
+      }))),
     })
   } catch (error) {
     return NextResponse.json(

@@ -6,6 +6,7 @@ import {
   deleteIntegrationConnection,
   enqueueCrmCampaign,
   setIntegrationConnectionStatus,
+  setWhatsAppOrderNotifications,
   upsertIntegrationConnection,
 } from "@/lib/integrations-db"
 import type { IntegrationProvider } from "@/lib/integration-providers"
@@ -32,6 +33,7 @@ type ActionBody =
   | { action: "delete_connection"; connectionId: string }
   | { action: "enqueue_campaign"; campaignId: string; connectionId: string }
   | { action: "cancel_job"; jobId: string }
+  | { action: "set_order_notifications"; connectionId: string; enabled: boolean }
 
 export async function POST(request: Request) {
   if (!integrationsRequestIsSameOrigin(request)) {
@@ -67,6 +69,9 @@ export async function POST(request: Request) {
             break
           case "cancel_job":
             result = await cancelIntegrationJob(session, body.jobId)
+            break
+          case "set_order_notifications":
+            result = await setWhatsAppOrderNotifications(session, body.connectionId, body.enabled)
             break
           default:
             return NextResponse.json(

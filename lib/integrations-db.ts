@@ -126,7 +126,7 @@ function sanitizedConnectionSettings(provider: IntegrationProvider, input: Recor
     const languageCode = cleanText(input.languageCode, 20) || "pt_BR"
     if (!/^v\d+\.\d+$/.test(apiVersion)) throw new Error("Informe a versão da Graph API no formato vNN.N.")
     if (!defaultCountryCode) throw new Error("Informe o código do país para os destinatários.")
-    return { apiVersion, defaultCountryCode, templateName, languageCode }
+    return { apiVersion, defaultCountryCode, templateName, languageCode, orderNotificationsEnabled: input.orderNotificationsEnabled === true }
   }
   const endpointUrl = cleanText(input.endpointUrl, 1000)
   if (!endpointUrl) throw new Error("Informe o endpoint HTTPS do webhook.")
@@ -594,6 +594,19 @@ export async function cancelIntegrationJob(session: TenantAdminSession, jobId: s
   await audit(session, "integration.outbox.cancelled", "integration_outbox", jobId, {})
 }
 
+export async function setWhatsAppOrderNotifications(session: TenantAdminSession, connectionId: string, enabled: boolean) {
+  await assertIntegrationsAvailable(session)
+  const result = await getPostgresPool().query(
+    `UPDATE sf_integration_connections SET settings = jsonb_set(settings, '{orderNotificationsEnabled}', to_jsonb($3::boolean)), updated_at = now()
+     WHERE organization_id = $1 AND id = $2 AND provider = 'whatsapp_meta'
+       AND (NOT $3::boolean OR COALESCE(settings->>'templateName', '') <> '')`,
+    [session.organizationId, connectionId, enabled],
+  )
+  if (!result.rowCount) throw new Error("Conexão não encontrada ou template aprovado não informado.")
+  await audit(session, "integration.whatsapp.order_notifications", "integration_connection", connectionId, { enabled })
+  return { enabled }
+}
+
 function retryDelayMinutes(attempt: number) {
   const delays = [1, 5, 15, 60, 180]
   return delays[Math.max(0, Math.min(delays.length - 1, attempt - 1))]
@@ -797,6 +810,20 @@ export async function processIntegrationQueue(input?: { limit?: number }) {
       )
       const connection = connectionResult.rows[0]
       if (!connection || connection.status !== "active") throw new Error("Conexão externa está desativada ou indisponível.")
+      if (job.payload?.whatsappReply === true) {
+        const latest = await getPostgresPool().query<{ inbound_at: Date }>(
+          `SELECT to_timestamp(NULLIF(payload->'message'->>'timestamp','')::double precision) AS inbound_at
+           FROM sf_integration_webhook_events WHERE organization_id = $1 AND connection_id = $2
+             AND event_type LIKE 'whatsapp.message.%' AND payload->'message'->>'from' = $3
+           ORDER BY inbound_at DESC NULLS LAST LIMIT 1`,
+          [job.organization_id, job.connection_id, job.recipient.replace(/\D/g, "")],
+        )
+        if (!latest.rows[0]?.inbound_at || Date.now() - new Date(latest.rows[0].inbound_at).getTime() >= 23 * 3600_000) {
+          await cancelClaimedJob(job, "Janela de atendimento encerrada. Use um template aprovado.")
+          cancelled += 1
+          continue
+        }
+      }
       const credentials = decryptIntegrationCredentials(connection.encrypted_credentials)
       const result = await dispatchIntegrationMessage({
         provider: connection.provider,

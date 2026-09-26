@@ -15,6 +15,7 @@ import {
   Smartphone,
   Trash2,
 } from "lucide-react"
+import { WhatsAppInbox } from "@/components/admin/whatsapp-inbox"
 
 type Provider = "resend" | "twilio" | "whatsapp_meta" | "webhook"
 type Channel = "email" | "sms" | "whatsapp" | "webhook"
@@ -138,6 +139,7 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
   const [verifyToken, setVerifyToken] = useState("")
   const [apiVersion, setApiVersion] = useState("")
   const [templateName, setTemplateName] = useState("")
+  const [orderNotificationsEnabled, setOrderNotificationsEnabled] = useState(false)
   const [languageCode, setLanguageCode] = useState("pt_BR")
   const [defaultCountryCode, setDefaultCountryCode] = useState("55")
   const [endpointUrl, setEndpointUrl] = useState("")
@@ -209,6 +211,7 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
       settings.apiVersion = apiVersion
       settings.defaultCountryCode = defaultCountryCode
       settings.templateName = templateName
+      settings.orderNotificationsEnabled = orderNotificationsEnabled
       settings.languageCode = languageCode
       credentials.accessToken = accessToken
       credentials.phoneNumberId = phoneNumberId
@@ -295,6 +298,8 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
               ].map(([label, value]) => <article key={String(label)} className="rounded-2xl border border-amber-100 bg-white p-4 shadow-sm"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-2xl font-black">{value}</p></article>)}
             </section>
 
+            <WhatsAppInbox />
+
             <section className="grid gap-3 lg:grid-cols-3">
               <div className={`rounded-2xl border p-4 ${data.runtime.encryptionKeyConfigured ? "border-emerald-200 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
                 <p className="flex items-center gap-2 font-black"><ShieldCheck className="h-4 w-4" />Criptografia de credenciais</p>
@@ -347,9 +352,10 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
                           value={templateName}
                           onChange={(e) => setTemplateName(e.target.value)}
                           className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
-                          placeholder="Opcional nesta etapa"
+                          placeholder="Ex.: confirmacao_pedido"
                         />
                       </label>
+                      <label className="flex items-center gap-2 text-sm font-bold sm:col-span-2"><input type="checkbox" checked={orderNotificationsEnabled} onChange={(e) => setOrderNotificationsEnabled(e.target.checked)} />Enviar confirmação ao cliente após finalizar o pedido</label>
                       <label className="text-sm font-bold">
                         Idioma do template
                         <input
@@ -431,7 +437,8 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
                         </p>
                       </div>
                     )}
-                    <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy} onClick={() => void action({ action: "set_connection_status", connectionId: item.id, enabled: item.status !== "active" })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black">{item.status === "active" ? "Desativar" : "Ativar"}</button><button disabled={busy} onClick={() => { if (window.confirm("Excluir esta conexão?")) void action({ action: "delete_connection", connectionId: item.id }) }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-black text-red-700"><Trash2 className="h-3.5 w-3.5" />Excluir</button></div>
+                    {item.provider === "whatsapp_meta" && <p className="mt-2 text-xs text-slate-600">Aviso automático: {item.settings.orderNotificationsEnabled ? "ativado" : "desativado"}. Template com uma variável de texto no corpo.</p>}
+                    <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy} onClick={() => void action({ action: "set_connection_status", connectionId: item.id, enabled: item.status !== "active" })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black">{item.status === "active" ? "Desativar" : "Ativar"}</button>{item.provider === "whatsapp_meta" && <button disabled={busy} onClick={() => void action({ action: "set_order_notifications", connectionId: item.id, enabled: !item.settings.orderNotificationsEnabled })} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-black text-emerald-800">{item.settings.orderNotificationsEnabled ? "Pausar avisos de pedidos" : "Ativar avisos de pedidos"}</button>}<button disabled={busy} onClick={() => { if (window.confirm("Excluir esta conexão?")) void action({ action: "delete_connection", connectionId: item.id }) }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-black text-red-700"><Trash2 className="h-3.5 w-3.5" />Excluir</button></div>
                   </article>)}
                 </div>
               </div>

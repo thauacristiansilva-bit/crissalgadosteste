@@ -708,7 +708,7 @@ export function ChatbotPanel({
         </div>
 
         <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-          Esses controles já ficarão salvos por empresa. A conexão com a API do WhatsApp será feita na etapa própria.
+          Para usar o atendimento automático, configure a conexão Meta em Integrações, o webhook de mensagens e a chave GEMINI_API_KEY no Railway. O robô responde apenas mensagens de texto recebidas recentemente; pedidos e pagamentos continuam pelo checkout da loja.
         </p>
       </section>
 

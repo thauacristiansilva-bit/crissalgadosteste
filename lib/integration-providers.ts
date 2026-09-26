@@ -121,9 +121,11 @@ async function dispatchWhatsApp(input: ProviderDispatchInput): Promise<ProviderD
   const apiVersion = required(input.settings.apiVersion, "Versão da Graph API")
   if (!/^v\d+\.\d+$/.test(apiVersion)) throw new Error("Versão da Graph API inválida.")
   const countryCode = text(input.settings.defaultCountryCode)
-  const templateName = required(input.settings.templateName, "Template aprovado do WhatsApp")
-  const languageCode = required(input.settings.languageCode, "Idioma do template do WhatsApp")
   const to = e164(input.recipient, countryCode).replace(/^\+/, "")
+  const isReply = input.payload?.whatsappReply === true
+  if (isReply && !input.payload?.inboundMessageId) throw new Error("Resposta sem mensagem recebida de referência.")
+  const templateName = isReply ? "" : required(input.settings.templateName, "Template aprovado do WhatsApp")
+  const languageCode = isReply ? "" : required(input.settings.languageCode, "Idioma do template do WhatsApp")
   const response = await fetch(`https://graph.facebook.com/${apiVersion}/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: "POST",
     headers: {
@@ -134,8 +136,7 @@ async function dispatchWhatsApp(input: ProviderDispatchInput): Promise<ProviderD
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to,
-      type: "template",
-      template: {
+      ...(isReply ? { type: "text", text: { preview_url: false, body: input.message } } : { type: "template", template: {
         name: templateName,
         language: { code: languageCode },
         components: [
@@ -144,7 +145,7 @@ async function dispatchWhatsApp(input: ProviderDispatchInput): Promise<ProviderD
             parameters: [{ type: "text", text: input.message }],
           },
         ],
-      },
+      } }),
     }),
     signal: AbortSignal.timeout(15_000),
   })

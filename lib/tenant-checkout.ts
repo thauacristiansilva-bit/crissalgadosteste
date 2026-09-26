@@ -1102,6 +1102,16 @@ async function createTenantCheckoutOrderInScope(
       )
     }
 
+    // A notificação acompanha a transação do pedido; falha da integração não impede a compra.
+    await client.query("SAVEPOINT whatsapp_confirmation")
+    try {
+      const { queueWhatsAppOrder } = await import("@/lib/whatsapp-inbox")
+      await queueWhatsAppOrder(client, organizationId, order, settings.storeName)
+      await client.query("RELEASE SAVEPOINT whatsapp_confirmation")
+    } catch (notificationError) {
+      await client.query("ROLLBACK TO SAVEPOINT whatsapp_confirmation")
+      console.error("[whatsapp:order-confirmation]", notificationError)
+    }
     await client.query("COMMIT")
 
     return {

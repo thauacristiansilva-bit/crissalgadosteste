@@ -1,0 +1,25 @@
+ETAPA WHATSAPP + IA — SaborFlow
+
+INSTALAR NO VS CODE
+1. Extraia este ZIP na pasta ORIGINAL do projeto. Se perguntar, aceite substituir os arquivos.
+2. Abra essa pasta no VS Code. No Terminal, rode um comando por vez:
+   git add .
+   git commit -m "Adicionar atendimento WhatsApp e avisos de pedidos"
+   git push origin main
+3. O Railway conectado à branch main faz o deploy automaticamente. Esta etapa não exige migration nova se a Fase 23 (integrações) já foi instalada.
+
+ATIVAR NO PAINEL
+1. Entre em Admin > Integrações > Nova conexão > Meta WhatsApp Cloud API.
+2. Informe o Access Token, Phone Number ID, App Secret e Verify Token da sua aplicação Meta, versão Graph API, código 55 e o nome de um TEMPLATE APROVADO de confirmação de pedido em pt_BR. O template precisa ter exatamente UMA variável de texto no corpo: {{1}}. Exemplo de corpo: "Recebemos seu pedido: {{1}}".
+3. Marque "Enviar confirmação ao cliente após finalizar o pedido" e ative a conexão. Se ela já existia, use o botão "Ativar avisos de pedidos" (ela precisa ter template configurado).
+4. Copie a Callback URL apresentada nessa conexão para as configurações de Webhooks da Meta; inscreva o campo messages. Use o mesmo Verify Token do cadastro.
+5. No Railway, verifique as variáveis INTEGRATION_ENCRYPTION_KEY, INTEGRATION_WORKER_TOKEN, GEMINI_API_KEY e APP_BASE_URL=https://appsaborflow.com.br. Nunca cole segredos em chats ou no código.
+6. O envio depende de executar periodicamente o worker já existente: node scripts/process-integrations-worker.mjs. Configure-o como tarefa recorrente/cron em um serviço Railway com essas variáveis. Sem worker, a caixa recebe mensagens, mas as respostas e confirmações ficam na fila.
+7. Admin > Chatbot: ligue "IA WhatsApp"; ligue "Atendimento automático" somente se quiser que o robô responda. A opção "Sugerir com IA" da caixa mostra texto para você revisar mesmo com atendimento automático desligado.
+8. Teste com seu próprio número: faça um pedido, confira Admin > Integrações > Fila e Atendimento WhatsApp e envie uma mensagem de volta.
+
+ATENÇÃO AO NÚMERO ATUAL
+A caixa do painel usa a API oficial da Meta; ela mostra as conversas recebidas pelo webhook e enviadas pelo SaborFlow, sem copiar o WhatsApp Web nem importar todas as conversas antigas. A Meta informa que, na conexão de um número existente do WhatsApp Business à Cloud API, dispositivos vinculados podem ser desconectados. Antes de conectar seu número principal, confirme a disponibilidade do modo de coexistência da Meta e teste com um número separado se quiser preservar seu uso atual do WhatsApp Web.
+
+ATENDIMENTO
+Respostas livres exigem mensagem recente do cliente (janela de 24 horas); fora dela, um template aprovado é obrigatório. Imagens/áudios aparecem como tipo de mensagem, mas esta etapa responde automaticamente apenas a textos. O robô não finaliza pedidos nem confirma pagamentos por chat; encaminhe a compra pelo site.
