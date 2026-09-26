@@ -453,6 +453,8 @@ export interface StoreSettings {
   whatsappOrdersEnabled?: boolean
   whatsappConfirmationsEnabled?: boolean
   whatsappHumanHandoffEnabled?: boolean
+  /** Número informado pela loja; não ativa a conexão Meta sozinho. */
+  whatsappConnectionPhone?: string
 
   cashRegisterEnabled: boolean
   fiscalEnabled: boolean

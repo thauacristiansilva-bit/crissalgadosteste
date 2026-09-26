@@ -63,6 +63,7 @@ import { MarketingPanel } from "@/components/admin/marketing-panel"
 import { ReviewsPanel } from "@/components/admin/reviews-panel"
 import { LinksPanel } from "@/components/admin/links-panel"
 import { ChatbotPanel } from "@/components/admin/chatbot-panel"
+import { SimpleConnectionsPanel } from "@/components/admin/simple-connections-panel"
 import { TeamPanel } from "@/components/admin/team-panel"
 import { isStoreOpenNow, zonedDateString } from "@/lib/operations"
 import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
@@ -126,6 +127,7 @@ const navItems: NavItem[] = [
   { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
   { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
   { key: "chatbot", label: "Atendimento automático", icon: Bot, group: "gestao" },
+  { key: "connections", label: "Conectar serviços", icon: Link2, group: "gestao" },
   { key: "ai_setup", label: "Montar loja com IA", icon: Bot, group: "inicio" },
   { key: "help", label: "Central de Ajuda", icon: CircleHelp, group: "gestao" },
   { key: "security", label: "Segurança da conta", icon: ShieldCheck, group: "gestao" },
@@ -192,7 +194,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
   const visibleNavItems = useMemo(
     () => navItems.filter((item) =>
       allowedSections.has(item.key) &&
-      !(demoEnvironment && item.key === "billing"),
+      !(demoEnvironment && (item.key === "billing" || item.key === "connections")),
     ),
     [allowedSections, demoEnvironment],
   )
@@ -469,9 +471,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           const showFoodOperations = group === "catalogo" && permissionListHas(operationalPermissions, "food_operations.manage")
           const showCrm = group === "clientes" && permissionListHas(operationalPermissions, "crm.manage")
           const showReports = group === "gestao" && permissionListHas(operationalPermissions, "reports.view")
-          const showIntegrations = group === "gestao" && !demoEnvironment && permissionListHas(operationalPermissions, "integrations.manage")
           const showCorporate = group === "gestao" && !demoEnvironment && ["owner", "admin", "manager"].includes(adminRole)
-          const hasExternalItems = showFoodOperations || showCrm || showReports || showIntegrations || showCorporate
+          const hasExternalItems = showFoodOperations || showCrm || showReports || showCorporate
 
           if (!groupItems.length && !hasExternalItems) return null
 
@@ -516,12 +517,6 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
                   <a href="/admin/relatorios" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
                     <ReceiptText className="h-4 w-4 text-[#ffd39f]" />
                     <span className="truncate">Relatórios</span>
-                  </a>
-                )}
-                {showIntegrations && (
-                  <a href="/admin/integracoes" className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-semibold text-[#fff7ee] transition hover:bg-white/10">
-                    <Link2 className="h-4 w-4 text-[#ffd39f]" />
-                    <span className="truncate">Integrações</span>
                   </a>
                 )}
                 {showCorporate && (
@@ -633,6 +628,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
+          {section === "connections" && <SimpleConnectionsPanel settings={settings} organizationSlug={organizationSlug || ""} onSettingsChanged={setSettings} />}
           {section === "ai_setup" && <AiStoreSetupPanel availableProducts={products} currentSettings={settings} publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}`} onApplied={async () => {
             const response = await fetch("/api/dashboard", { cache: "no-store" })
             if (!response.ok) return

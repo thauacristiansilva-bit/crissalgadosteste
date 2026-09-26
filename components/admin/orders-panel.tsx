@@ -336,14 +336,14 @@ export function OrdersPanel({
                     <Download className="h-4 w-4" /> Baixar ticket PDF
                   </a>
 
-                  {settings.fiscalEnabled && settings.fiscalProviderUrl && (
+                  {settings.fiscalEnabled && settings.fiscalProviderUrl?.startsWith("https://") && (
                     <a
                       href={settings.fiscalProviderUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700"
                     >
-                      <FileText className="h-4 w-4" /> Emitir nota fiscal
+                      <FileText className="h-4 w-4" /> Abrir emissor de notas
                     </a>
                   )}
 

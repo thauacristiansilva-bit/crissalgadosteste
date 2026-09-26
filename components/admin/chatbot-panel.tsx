@@ -13,7 +13,6 @@ import {
   Save,
   ShoppingCart,
   Sparkles,
-  Users,
 } from "lucide-react"
 
 import type {
@@ -637,78 +636,10 @@ export function ChatbotPanel({
             }
           />
 
-          <SettingRow
-            title="Receber pedidos"
-            description="Permite transformar a conversa do WhatsApp em pedido."
-            checked={
-              draft.whatsappOrdersEnabled
-            }
-            disabled={
-              masterDisabled ||
-              !draft.whatsappAiEnabled
-            }
-            icon={
-              <ShoppingCart className="h-5 w-5" />
-            }
-            onChange={(
-              value,
-            ) =>
-              patch({
-                whatsappOrdersEnabled:
-                  value,
-              })
-            }
-          />
-
-          <SettingRow
-            title="Confirmação automática"
-            description="Envia o resumo para o cliente confirmar antes de finalizar."
-            checked={
-              draft.whatsappConfirmationsEnabled
-            }
-            disabled={
-              masterDisabled ||
-              !draft.whatsappAiEnabled
-            }
-            icon={
-              <MessageCircle className="h-5 w-5" />
-            }
-            onChange={(
-              value,
-            ) =>
-              patch({
-                whatsappConfirmationsEnabled:
-                  value,
-              })
-            }
-          />
-
-          <SettingRow
-            title="Transferir para humano"
-            description="Permite interromper a IA e passar a conversa para uma pessoa."
-            checked={
-              draft.whatsappHumanHandoffEnabled
-            }
-            disabled={
-              masterDisabled ||
-              !draft.whatsappAiEnabled
-            }
-            icon={
-              <Users className="h-5 w-5" />
-            }
-            onChange={(
-              value,
-            ) =>
-              patch({
-                whatsappHumanHandoffEnabled:
-                  value,
-              })
-            }
-          />
         </div>
 
         <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-          Para usar o atendimento automático, configure a conexão Meta em Integrações, o webhook de mensagens e a chave GEMINI_API_KEY no Railway. O robô responde apenas mensagens de texto recebidas recentemente; pedidos e pagamentos continuam pelo checkout da loja.
+          O cliente configura o WhatsApp em “Conectar serviços”. O robô atende dúvidas em texto; a compra e o pagamento continuam no site. Para pedir uma pessoa, o cliente pode escrever “atendente”.
         </p>
       </section>
 

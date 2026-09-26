@@ -120,7 +120,7 @@ function IconForChannel({ channel }: { channel: Channel }) {
   return <Link2 className="h-4 w-4" />
 }
 
-export function IntegrationsDashboard({ currentOrganizationName }: { currentOrganizationName: string }) {
+export function IntegrationsDashboard({ currentOrganizationName, embedded = false }: { currentOrganizationName: string; embedded?: boolean }) {
   const [data, setData] = useState<Overview | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -272,11 +272,11 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
   }
 
   return (
-    <main className="min-h-screen bg-[#fff8ef] px-4 py-6 text-slate-950 sm:px-6">
+    <main className={embedded ? "mt-4 text-slate-950" : "min-h-screen bg-[#fff8ef] px-4 py-6 text-slate-950 sm:px-6"}>
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <a href="/admin" className="inline-flex items-center gap-2 text-sm font-bold text-amber-800"><ArrowLeft className="h-4 w-4" />Voltar ao painel</a>
+            {!embedded && <a href="/admin" className="inline-flex items-center gap-2 text-sm font-bold text-amber-800"><ArrowLeft className="h-4 w-4" />Voltar ao painel</a>}
             <h1 className="mt-2 text-3xl font-black">Integrações</h1>
             <p className="mt-1 text-sm text-slate-600">{currentOrganizationName} · conexões externas, fila e webhooks controlados pelo servidor.</p>
           </div>
@@ -298,7 +298,7 @@ export function IntegrationsDashboard({ currentOrganizationName }: { currentOrga
               ].map(([label, value]) => <article key={String(label)} className="rounded-2xl border border-amber-100 bg-white p-4 shadow-sm"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-2xl font-black">{value}</p></article>)}
             </section>
 
-            <WhatsAppInbox />
+            {!embedded && <WhatsAppInbox />}
 
             <section className="grid gap-3 lg:grid-cols-3">
               <div className={`rounded-2xl border p-4 ${data.runtime.encryptionKeyConfigured ? "border-emerald-200 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>

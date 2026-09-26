@@ -1,0 +1,27 @@
+ETAPA: PAINEL SIMPLES + WHATSAPP
+
+COMO INSTALAR
+1. Extraia este ZIP na pasta original do SaborFlow. Aceite substituir os arquivos.
+2. No terminal do VS Code, dentro dessa pasta, execute um comando por vez:
+   git add .
+   git commit -m "Simplificar conexoes WhatsApp totem e notas"
+   git push origin main
+3. Aguarde o deploy automático no Railway. Este ZIP também inclui a etapa anterior de atendimento WhatsApp; se ainda não instalou o outro ZIP, não precisa instalar os dois.
+4. Não há migration nova nesta etapa se a Fase 23 de integrações já foi aplicada.
+
+COMO O CLIENTE USA
+- Admin > Conectar serviços: WhatsApp, IA, totem e acesso ao emissor de notas ficam juntos na mesma tela.
+- O cliente informa o número que deseja conectar. A tela mostra "aguardando conexão" até o responsável técnico concluir a conexão oficial com a Meta; apenas salvar o número NÃO ativa mensagens.
+- Depois da conexão Meta ativa, o cliente pode ligar/desligar o aviso de pedidos, sugestões com IA e o robô automático.
+- Totem: um botão para ativar e outro para abrir. Ele usa a loja atual.
+- Notas: o cliente pode guardar o endereço HTTPS do seu emissor e abri-lo pelo pedido. Isso NÃO emite nota diretamente pelo SaborFlow.
+- Os campos técnicos de conexão ficam em "Configuração técnica (responsável pela plataforma)".
+
+TRABALHO DE QUEM ADMINISTRA A PLATAFORMA
+- Para cada empresa, configurar a conexão oficial Meta WhatsApp Cloud API com token, Phone Number ID, App Secret, Verify Token, webhook de messages e modelo aprovado com exatamente uma variável no corpo {{1}}. O cadastro sem copiar tokens pelo cliente exigirá implantar o fluxo Embedded Signup da Meta com credenciais e aprovação da plataforma; esta etapa não realiza esse cadastro automático.
+- No Railway, manter GEMINI_API_KEY, INTEGRATION_ENCRYPTION_KEY, INTEGRATION_WORKER_TOKEN e APP_BASE_URL configurados. A tarefa recorrente executa: node scripts/process-integrations-worker.mjs
+- Para emissão fiscal dentro do SaborFlow, ainda será preciso escolher e conectar um provedor fiscal; o link disponível hoje apenas abre o emissor externo.
+- Teste conexão, recebimento pelo webhook, resposta do painel, pedido de teste, envio pela fila e totem com a loja de demonstração antes de ativar clientes reais.
+
+OBSERVAÇÃO
+A Meta pode desvincular dispositivos associados ao ligar um número existente do WhatsApp Business à Cloud API. Antes de usar o número principal, verifique a elegibilidade do modo de coexistência. O painel mostra mensagens que passaram pelo webhook e envios do SaborFlow; não é cópia de todo o histórico do WhatsApp Web.

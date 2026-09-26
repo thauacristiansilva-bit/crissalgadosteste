@@ -23,6 +23,7 @@ export type AdminSection =
   | "ai_setup"
   | "team"
   | "settings"
+  | "connections"
   | "help"
   | "security"
   | "billing"
@@ -45,6 +46,7 @@ const sectionPermission: Record<AdminSection, OperationalPermission> = {
   ai_setup: "catalog.manage",
   team: "team.view",
   settings: "settings.view",
+  connections: "integrations.manage",
   help: "dashboard.view",
   security: "security.view",
   billing: "billing.view",

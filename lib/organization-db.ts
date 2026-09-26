@@ -431,6 +431,11 @@ function normalizedSettings(
         ? Boolean(patch.whatsappHumanHandoffEnabled)
         : current.whatsappHumanHandoffEnabled,
 
+    whatsappConnectionPhone:
+      patch.whatsappConnectionPhone !== undefined
+        ? String(patch.whatsappConnectionPhone).trim().slice(0, 20)
+        : current.whatsappConnectionPhone,
+
     deliveryPricingMode: [
       "free",
       "fixed",
