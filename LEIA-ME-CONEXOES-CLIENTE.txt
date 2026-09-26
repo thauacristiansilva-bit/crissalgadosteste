@@ -12,7 +12,7 @@ INSTALAR (este ZIP inclui as duas etapas anteriores de WhatsApp e painel simples
 
 IMPRESSORA: O QUE O CLIENTE FAZ
 - No Windows, instale a impressora USB ou Wi-Fi em Configurações > Impressoras e scanners. O Windows deve conseguir imprimi-la primeiro.
-- No SaborFlow, Admin > Conectar serviços > Impressora: dê nome ao computador, toque em Preparar computador e baixe o conector.
+- No SaborFlow, Admin > Conectar serviços > Impressora: no computador da loja, toque em Conectar impressora. O arquivo é baixado automaticamente.
 - No MESMO computador que tem a impressora, abra CONECTAR-IMPRESSORA-SABORFLOW.cmd. Mantenha a janela aberta (o PC precisa permanecer ligado).
 - A lista de impressoras instaladas no Windows aparece no painel; escolha a impressora. Ela será salva e a impressão automática de pedidos será ativada.
 - O arquivo .cmd contém a chave da conexão dessa empresa. Não compartilhe, não publique e revogue a conexão se o computador for perdido.
