@@ -55,6 +55,7 @@ function publicPrintSettings(settings: {
   address: string
   printerName: string
   printCopies: number
+  printerPaperWidthMm?: 50 | 58 | 80
   autoPrintNewOrders: boolean
   printKitchenTicket: boolean
   printCustomerTicket: boolean
@@ -65,6 +66,7 @@ function publicPrintSettings(settings: {
     address: settings.address,
     printerName: settings.printerName,
     printCopies: settings.printCopies,
+    printerPaperWidthMm: [50, 58, 80].includes(Number(settings.printerPaperWidthMm)) ? settings.printerPaperWidthMm : 80,
     autoPrintNewOrders: settings.autoPrintNewOrders,
     printKitchenTicket: settings.printKitchenTicket,
     printCustomerTicket: settings.printCustomerTicket,
@@ -103,6 +105,13 @@ export async function GET(request: Request) {
     return NextResponse.json(
       { error: "Agente de impressão não autorizado." },
       { status: 401 },
+    )
+  }
+
+  if (request.headers.get("x-saborflow-print-version") !== "2") {
+    return NextResponse.json(
+      { error: "Conector antigo. Feche todas as janelas do agente e abra novamente o arquivo CONECTAR-IMPRESSORA-SABORFLOW.cmd para usar o novo cupom." },
+      { status: 426 },
     )
   }
 

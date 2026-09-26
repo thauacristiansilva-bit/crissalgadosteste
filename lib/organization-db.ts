@@ -301,6 +301,14 @@ function normalizedSettings(
     printerAgentId: patch.printerAgentId !== undefined
       ? (/^[a-f0-9-]{36}$/i.test(patch.printerAgentId) ? patch.printerAgentId : "")
       : current.printerAgentId,
+    printerModel: patch.printerModel !== undefined
+      ? String(patch.printerModel).trim().slice(0, 100)
+      : current.printerModel || "",
+    printerPaperWidthMm: patch.printerPaperWidthMm !== undefined
+      ? ([50, 58, 80].includes(Number(patch.printerPaperWidthMm))
+          ? Number(patch.printerPaperWidthMm) as 50 | 58 | 80
+          : 80)
+      : current.printerPaperWidthMm || 80,
     systemName: "SaborFlow",
     deliveryFee: 0,
     deliveryTrackingEnabled:

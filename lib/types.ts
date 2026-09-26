@@ -430,6 +430,8 @@ export interface StoreSettings {
   autoPrintNewOrders: boolean
   printerName: string
   printerAgentId?: string
+  printerModel?: string
+  printerPaperWidthMm?: 50 | 58 | 80
   printCopies: number
   printKitchenTicket: boolean
   printCustomerTicket: boolean

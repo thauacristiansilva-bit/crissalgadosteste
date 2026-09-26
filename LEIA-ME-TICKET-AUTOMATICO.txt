@@ -1,0 +1,22 @@
+SABORFLOW - TICKET AUTOMATICO DESTACADO + LARGURA DO PAPEL
+
+1. EXTRAIA este ZIP dentro da pasta ORIGINAL do projeto. Substitua arquivos.
+2. Abra a pasta no VS Code e execute no terminal:
+   git add .
+   git commit -m "Corrige cupom automatico e configura largura do papel"
+   git push origin main
+3. Espere o deploy da Railway terminar. No painel Conectar servicos >
+   Impressora, selecione a largura REAL do papel (50, 58 ou 80 mm).
+   O modelo da impressora pode ser preenchido para identificacao.
+4. NO COMPUTADOR DA IMPRESSORA: feche TODAS as janelas antigas do
+   SaborFlow Agente de Impressao. Abra novamente o arquivo .cmd da loja.
+   A janela NOVA deve mostrar "Conector SaborFlow versao 2".
+   Se aparecer erro HTTP 426, a janela antiga ainda esta aberta ou o
+   servidor nao recebeu a atualizacao. Feche-a e abra o .cmd novamente.
+5. Faca um NOVO pedido de teste. Cupom antigo ja impresso nao volta para
+   fila automaticamente.
+
+Sem nova migracao. No Mac/Linux o script .sh tambem envia a versao 2.
+Configure no driver do computador a mesma largura do papel escolhida
+no painel. A recepcao do trabalho pela fila do Windows nao garante que
+houve corte/saida fisica; confirme o teste na impressora.

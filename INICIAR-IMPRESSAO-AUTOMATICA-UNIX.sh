@@ -9,7 +9,7 @@ import urllib.request
 
 SERVER = __SABORFLOW_URL__
 TOKEN = __SABORFLOW_TOKEN__
-HEADERS = {"x-print-token": TOKEN}
+HEADERS = {"x-print-token": TOKEN, "x-saborflow-print-version": "2"}
 
 
 def request(path, payload=None):

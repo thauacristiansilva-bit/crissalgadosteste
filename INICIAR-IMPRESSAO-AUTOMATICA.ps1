@@ -23,7 +23,9 @@ if (-not $PrinterName) { Write-Host "Escolha a impressora no painel do SaborFlow
 $ServerUrl = $ServerUrl.TrimEnd('/')
 $headers = @{
   "x-print-token" = $Token
+  "x-saborflow-print-version" = "2"
 }
+Write-Host "Conector SaborFlow versao 2 - cupom destacado." -ForegroundColor Green
 
 # Desenha o cupom na largura do rolo. Out-Printer aplica o layout da pagina
 # padrao do Windows e reduz o texto a uma coluna no centro do papel termico.
@@ -45,12 +47,11 @@ public sealed class SaborFlowReceiptPrinter {
   private readonly int width;
   public SaborFlowReceiptPrinter(List<SaborFlowReceiptLine> lines, int width) { this.lines = lines; this.width = width; }
 
-  public static void Print(List<SaborFlowReceiptLine> lines, string name) {
+  public static void Print(List<SaborFlowReceiptLine> lines, string name, int widthMm) {
     using (var doc = new PrintDocument()) {
       if (!String.IsNullOrWhiteSpace(name)) doc.PrinterSettings.PrinterName = name;
       if (!doc.PrinterSettings.IsValid) throw new Exception("Impressora nao encontrada no Windows: " + name);
-      int installedWidth = doc.DefaultPageSettings.PaperSize.Width;
-      int rollWidth = installedWidth > 150 && installedWidth < 260 ? 228 : 315; // 58 ou 80 mm
+      int rollWidth = (int)Math.Round(widthMm * 100.0 / 25.4);
       doc.DefaultPageSettings.PaperSize = new PaperSize("SaborFlow recibo", rollWidth, 1100);
       doc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
       doc.PrintController = new StandardPrintController();
@@ -171,8 +172,8 @@ function Build-Ticket(
   return ,$lines
 }
 
-function Send-Print($ticket, [string]$effectivePrinter) {
-  [SaborFlowReceiptPrinter]::Print($ticket, $effectivePrinter)
+function Send-Print($ticket, [string]$effectivePrinter, [int]$paperWidthMm) {
+  [SaborFlowReceiptPrinter]::Print($ticket, $effectivePrinter, $paperWidthMm)
 }
 
 Write-Host "`nAgente ativo. O token define qual empresa pode ser consultada." -ForegroundColor Green
@@ -224,6 +225,8 @@ while ($true) {
 
     foreach ($order in @($queue.orders)) {
       Write-Host "Novo pedido: $($order.code)" -ForegroundColor Yellow
+      $paperWidthMm = [int]$queue.settings.printerPaperWidthMm
+      if ($paperWidthMm -notin @(50, 58, 80)) { $paperWidthMm = 80 }
 
       $copies = [Math]::Max(
         1,
@@ -234,13 +237,13 @@ while ($true) {
         $ticket = Build-Ticket $order $queue.settings $false
 
         1..$copies | ForEach-Object {
-          Send-Print $ticket $effectivePrinter
+          Send-Print $ticket $effectivePrinter $paperWidthMm
         }
       }
 
       if ($queue.settings.printCustomerTicket) {
         $ticketCustomer = Build-Ticket $order $queue.settings $true
-        Send-Print $ticketCustomer $effectivePrinter
+        Send-Print $ticketCustomer $effectivePrinter $paperWidthMm
       }
 
       Invoke-RestMethod `
