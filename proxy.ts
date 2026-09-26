@@ -20,6 +20,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 const CROSS_ORIGIN_API_EXCEPTIONS = [
   "/api/billing/webhooks/mercado-pago",
   "/api/integrations/webhooks/",
+  "/api/integrations/whatsapp/",
   "/api/internal/integrations/process",
 ]
 

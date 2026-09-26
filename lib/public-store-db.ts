@@ -162,6 +162,9 @@ async function loadPublicStoreSnapshot(organization: PublicOrganization) {
         acceptingOrders:
           settings.acceptingOrders && organization.publicOrderingEnabled,
       }
+      delete publicSettings.aiServiceInstructions
+      delete publicSettings.whatsappConnectionPhone
+      delete publicSettings.printerAgentId
 
       return {
         catalogRevision: await currentCatalogRevision(organization.id),

@@ -1,0 +1,37 @@
+ETAPA: CONEXÃO META, IMPRESSORA E ATENDIMENTO PERSONALIZADO
+
+INSTALAR (este ZIP inclui as duas etapas anteriores de WhatsApp e painel simples)
+1. Extraia o ZIP na pasta ORIGINAL do projeto e aceite substituir os arquivos.
+2. No terminal do VS Code nessa pasta, rode um comando por vez:
+   git add .
+   git commit -m "Conectar Meta impressora e personalizar atendimento"
+   git push origin main
+3. Aguarde o deploy no Railway. No terminal do serviço da aplicação no Railway, rode UMA VEZ:
+   node scripts/apply-printer-discovery-migration.mjs
+   O comando usa o DATABASE_URL do Railway e pode ser repetido sem apagar dados.
+
+IMPRESSORA: O QUE O CLIENTE FAZ
+- No Windows, instale a impressora USB ou Wi-Fi em Configurações > Impressoras e scanners. O Windows deve conseguir imprimi-la primeiro.
+- No SaborFlow, Admin > Conectar serviços > Impressora: dê nome ao computador, toque em Preparar computador e baixe o conector.
+- No MESMO computador que tem a impressora, abra CONECTAR-IMPRESSORA-SABORFLOW.cmd. Mantenha a janela aberta (o PC precisa permanecer ligado).
+- A lista de impressoras instaladas no Windows aparece no painel; escolha a impressora. Ela será salva e a impressão automática de pedidos será ativada.
+- O arquivo .cmd contém a chave da conexão dessa empresa. Não compartilhe, não publique e revogue a conexão se o computador for perdido.
+- Tickets de pedido são enviados automaticamente. Relatórios que tenham opção Imprimir continuam usando a impressão normal do navegador/Windows; esta etapa não agenda relatórios automaticamente.
+
+META: O QUE VOCÊ PREPARA UMA VEZ COMO PROGRAMADOR
+- Crie/configure uma aplicação Meta com WhatsApp Business Platform e Facebook Login for Business / Embedded Signup. Configure o domínio HTTPS da aplicação, permissões e acesso da sua empresa conforme o painel da Meta.
+- No serviço Railway do SaborFlow configure: META_APP_ID, META_APP_SECRET, META_EMBEDDED_SIGNUP_CONFIG_ID, META_GRAPH_API_VERSION (ex.: v25.0, conforme a versão liberada no seu app), INTEGRATION_ENCRYPTION_KEY, INTEGRATION_WORKER_TOKEN, GEMINI_API_KEY e APP_BASE_URL=https://appsaborflow.com.br.
+- No painel de Webhooks da aplicação Meta inscreva o campo messages. O cadastro do cliente usa um callback individual da empresa, criado automaticamente após a autorização.
+- Garanta que o worker existente rode periodicamente no Railway: node scripts/process-integrations-worker.mjs. Sem o worker, mensagens saem apenas para a fila e não são entregues.
+- Para avisos de pedidos iniciados pela loja, você ainda precisa de um modelo de mensagem aprovado pela Meta com UMA variável de texto no corpo {{1}}, configurado na seção técnica da conexão. Resposta livre de atendimento depende de mensagem recente do cliente.
+- Teste com número autorizado na Meta antes de liberar clientes. O botão é exibido apenas se todas as variáveis estiverem configuradas; a conexão só é ativada quando o número aparece como CONNECTED na Meta e o webhook é aceito.
+- Números existentes no WhatsApp Business podem perder dispositivos vinculados no processo: confirme a modalidade de coexistência antes de testar o número principal.
+
+CHATBOT: O QUE O CLIENTE FAZ
+- Admin > Atendimento automático > Como a IA deve atender?: descreva o negócio, escolha o tom, escreva regras e informe somente links HTTPS próprios e válidos de catálogo, pedido ou pagamento. Depois clique em Salvar IA e automações.
+- Admin > Conectar serviços: ative sugestões com IA e, se quiser, Robô responde sozinho.
+- A IA responde com os dados que o cliente informou; não cria pedido nem confirma pagamento na conversa. Pedidos seguem o site e a mensagem de pagamento não representa quitação.
+
+TESTES FEITOS NESTA ENTREGA
+- TypeScript: npm run typecheck passou.
+- Não houve teste real com contas Meta, chave Gemini, impressora Windows nem Railway deste cliente, pois esses acessos não estão neste workspace.

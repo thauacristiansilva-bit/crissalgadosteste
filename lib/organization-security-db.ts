@@ -704,6 +704,7 @@ export type PrintAgentSummary = {
   active: boolean
   lastSeenAt: string | null
   createdAt: string
+  printers: Array<{ name: string; port: string }>
 }
 
 function printTokenHash(
@@ -722,6 +723,7 @@ export async function listPrintAgents(
       active: boolean
       last_seen_at: Date | string | null
       created_at: Date | string
+      available_printers: Array<{ name: string; port: string }>
     }>(
       `
         SELECT
@@ -730,6 +732,7 @@ export async function listPrintAgents(
           active,
           last_seen_at,
           created_at
+          , available_printers
         FROM sf_print_agents
         WHERE organization_id = $1
         ORDER BY created_at DESC
@@ -753,6 +756,7 @@ export async function listPrintAgents(
         new Date(
           row.created_at,
         ).toISOString(),
+      printers: Array.isArray(row.available_printers) ? row.available_printers : [],
     }),
   )
 }

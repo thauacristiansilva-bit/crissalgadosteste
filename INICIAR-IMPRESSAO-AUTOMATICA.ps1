@@ -18,21 +18,7 @@ if (-not $Token) {
   $Token = Read-Host "Token do agente criado em Conta e seguranca"
 }
 
-if (-not $PrinterName) {
-  Write-Host "`nImpressoras encontradas:" -ForegroundColor Yellow
-
-  try {
-    Get-Printer |
-      Select-Object -ExpandProperty Name |
-      ForEach-Object {
-        Write-Host " - $_"
-      }
-  } catch {
-    Write-Host "Nao foi possivel listar impressoras automaticamente."
-  }
-
-  $PrinterName = Read-Host "Nome exato da impressora (vazio = usar configuracao/impresso padrao)"
-}
+if (-not $PrinterName) { Write-Host "Escolha a impressora no painel do SaborFlow. Ate la, sera usada a padrao do Windows." -ForegroundColor Yellow }
 
 $ServerUrl = $ServerUrl.TrimEnd('/')
 $headers = @{
@@ -131,9 +117,21 @@ Write-Host "`nAgente ativo. O token define qual empresa pode ser consultada." -F
 Write-Host "Consultando novos pedidos a cada 3 segundos...`n" -ForegroundColor Gray
 
 $shownOrganization = ""
+$lastPrinterReport = [datetime]::MinValue
 
 while ($true) {
   try {
+    if (((Get-Date) - $lastPrinterReport).TotalSeconds -ge 30) {
+      try {
+        $printers = @(Get-Printer | ForEach-Object { @{ name = [string]$_.Name; port = [string]$_.PortName } })
+        $body = @{ printers = $printers } | ConvertTo-Json -Depth 4 -Compress
+        Invoke-RestMethod -Uri "$ServerUrl/api/print-queue/printers" -Headers $headers -Method Post -ContentType "application/json" -Body $body -TimeoutSec 15 | Out-Null
+        $lastPrinterReport = Get-Date
+      } catch {
+        Write-Host "Nao foi possivel atualizar lista de impressoras: $($_.Exception.Message)" -ForegroundColor Yellow
+        $lastPrinterReport = Get-Date
+      }
+    }
     $queue = Invoke-RestMethod `
       -Uri "$ServerUrl/api/print-queue" `
       -Headers $headers `

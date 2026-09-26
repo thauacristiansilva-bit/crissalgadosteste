@@ -14,6 +14,7 @@ import {
 } from "@/lib/security/input-validation"
 
 type PrintContext = {
+  agentId: string
   organizationId: string
   organizationName: string
   organizationSlug: string
@@ -40,6 +41,7 @@ async function resolvePrintContext(
   if (!tenantAgent) return null
 
   return {
+    agentId: tenantAgent.agentId,
     organizationId: tenantAgent.organizationId,
     organizationName: tenantAgent.organizationName,
     organizationSlug: tenantAgent.organizationSlug,
@@ -128,7 +130,7 @@ export async function GET(request: Request) {
       slug: context.organizationSlug,
     },
     agent: { name: context.agentName },
-    orders: printOrdersWithLocalTime(
+    orders: settings.printerAgentId && settings.printerAgentId !== context.agentId ? [] : printOrdersWithLocalTime(
       orders,
       settings.timeZone || "America/Sao_Paulo",
     ),
@@ -175,6 +177,8 @@ export async function POST(request: Request) {
     )
   }
 
+  const settings = await getTenantSettings(context.organizationId)
+  if (settings?.printerAgentId && settings.printerAgentId !== context.agentId) return NextResponse.json({ error: "Este computador não está selecionado para imprimir." }, { status: 403 })
   const order = await markTenantOrderPrinted(context.organizationId, id)
   if (!order) {
     return NextResponse.json(

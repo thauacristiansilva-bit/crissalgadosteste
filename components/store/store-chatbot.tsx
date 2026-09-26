@@ -128,6 +128,10 @@ export function StoreChatbot({
             <div className="rounded-2xl rounded-tl-sm bg-gray-100 p-3 text-sm leading-relaxed text-gray-700">
               {answer}
             </div>
+            {settings.aiBusinessDescription && <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-950">{settings.aiBusinessDescription}</p>}
+            {(settings.aiMenuUrl || settings.aiCheckoutUrl || settings.aiPaymentUrl) && <div className="mt-3 flex flex-wrap gap-2">{([
+              [settings.aiMenuUrl, "Ver catálogo"], [settings.aiCheckoutUrl, "Fazer pedido"], [settings.aiPaymentUrl, "Abrir pagamento"],
+            ] as const).filter(([url]) => url?.startsWith("https://")).map(([url, label]) => <a key={label} href={url} target="_blank" rel="noreferrer" className="rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-900">{label}</a>)}</div>}
 
             {orderAssistantEnabled && (
               <AiOrderAssistant

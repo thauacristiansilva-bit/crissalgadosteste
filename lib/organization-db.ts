@@ -68,6 +68,15 @@ function normalizeHost(value: string) {
     .replace(/\.$/, "")
 }
 
+function safeAiLink(value: unknown) {
+  const text = String(value || "").trim().slice(0, 500)
+  if (!text) return ""
+  let url: URL
+  try { url = new URL(text) } catch { throw new Error("Use um link HTTPS completo nas instruções da IA.") }
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("Use um link HTTPS sem usuário ou senha.")
+  return url.toString()
+}
+
 export function normalizePublicDomain(value: string) {
   return normalizeHost(value)
 }
@@ -289,6 +298,9 @@ function normalizedSettings(
   const next: StoreSettings = {
     ...current,
     ...patch,
+    printerAgentId: patch.printerAgentId !== undefined
+      ? (/^[a-f0-9-]{36}$/i.test(patch.printerAgentId) ? patch.printerAgentId : "")
+      : current.printerAgentId,
     systemName: "SaborFlow",
     deliveryFee: 0,
     deliveryTrackingEnabled:
@@ -370,6 +382,19 @@ function normalizedSettings(
             .trim()
             .slice(0, 500)
         : current.chatbotGreeting,
+
+    aiBusinessDescription: patch.aiBusinessDescription !== undefined
+      ? String(patch.aiBusinessDescription).trim().slice(0, 2400)
+      : current.aiBusinessDescription,
+    aiServiceInstructions: patch.aiServiceInstructions !== undefined
+      ? String(patch.aiServiceInstructions).trim().slice(0, 2400)
+      : current.aiServiceInstructions,
+    aiServiceTone: patch.aiServiceTone !== undefined
+      ? (["friendly", "formal", "informal"].includes(patch.aiServiceTone) ? patch.aiServiceTone : "friendly")
+      : current.aiServiceTone,
+    aiMenuUrl: patch.aiMenuUrl !== undefined ? safeAiLink(patch.aiMenuUrl) : current.aiMenuUrl,
+    aiCheckoutUrl: patch.aiCheckoutUrl !== undefined ? safeAiLink(patch.aiCheckoutUrl) : current.aiCheckoutUrl,
+    aiPaymentUrl: patch.aiPaymentUrl !== undefined ? safeAiLink(patch.aiPaymentUrl) : current.aiPaymentUrl,
 
     aiStorefrontChatEnabled:
       patch.aiStorefrontChatEnabled !== undefined

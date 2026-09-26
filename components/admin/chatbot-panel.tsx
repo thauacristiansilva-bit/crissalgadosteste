@@ -38,6 +38,12 @@ type Draft = {
   whatsappHumanHandoffEnabled: boolean
 
   chatbotGreeting: string
+  aiBusinessDescription: string
+  aiServiceInstructions: string
+  aiServiceTone: "friendly" | "formal" | "informal"
+  aiMenuUrl: string
+  aiCheckoutUrl: string
+  aiPaymentUrl: string
 }
 
 function draftFromSettings(
@@ -105,6 +111,12 @@ function draftFromSettings(
     chatbotGreeting:
       settings.chatbotGreeting ||
       "Olá! Como posso ajudar com seu pedido?",
+    aiBusinessDescription: settings.aiBusinessDescription || "",
+    aiServiceInstructions: settings.aiServiceInstructions || "",
+    aiServiceTone: settings.aiServiceTone || "friendly",
+    aiMenuUrl: settings.aiMenuUrl || "",
+    aiCheckoutUrl: settings.aiCheckoutUrl || "",
+    aiPaymentUrl: settings.aiPaymentUrl || "",
   }
 }
 
@@ -346,6 +358,20 @@ export function ChatbotPanel({
               }
             />
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-violet-200 bg-white p-5 shadow-sm sm:p-6">
+        <h3 className="text-lg font-black">Como a IA deve atender?</h3>
+        <p className="mt-1 text-sm text-gray-600">Descreva seu negócio e o que a equipe costuma responder. Serve para loja, curso ou consultoria.</p>
+        <div className="mt-4 grid gap-4">
+          <label className="text-sm font-bold">Sobre a empresa<textarea rows={3} maxLength={2400} value={draft.aiBusinessDescription} onChange={event => patch({ aiBusinessDescription: event.target.value })} placeholder="Ex.: Vendemos salgados para festas, aceitamos encomendas e fazemos entregas..." className="mt-1 w-full rounded-xl border p-3 font-normal" /></label>
+          <label className="text-sm font-bold">Jeito de falar<select value={draft.aiServiceTone} onChange={event => patch({ aiServiceTone: event.target.value as Draft["aiServiceTone"] })} className="mt-1 w-full rounded-xl border p-3 font-normal"><option value="friendly">Gentil e direto</option><option value="informal">Mais informal</option><option value="formal">Mais formal</option></select></label>
+          <label className="text-sm font-bold">Regras de atendimento<textarea rows={3} maxLength={2400} value={draft.aiServiceInstructions} onChange={event => patch({ aiServiceInstructions: event.target.value })} placeholder="Ex.: Sempre explique o prazo antes de sugerir encomendas. Para dúvidas de pagamento, chame uma pessoa." className="mt-1 w-full rounded-xl border p-3 font-normal" /></label>
+          <div className="grid gap-3 md:grid-cols-3">{([
+            ["aiMenuUrl", "Link do catálogo/cardápio"], ["aiCheckoutUrl", "Link para fazer pedido"], ["aiPaymentUrl", "Link oficial de pagamento"],
+          ] as const).map(([field, label]) => <label key={field} className="text-sm font-bold">{label}<input type="url" value={draft[field]} onChange={event => patch({ [field]: event.target.value })} placeholder="https://..." className="mt-1 w-full rounded-xl border p-3 font-normal" /></label>)}</div>
+          <p className="text-xs text-amber-800">Informe apenas links reais da sua empresa. A IA pode compartilhá-los; ela não cria pedidos nem confirma pagamentos pela conversa.</p>
         </div>
       </section>
 

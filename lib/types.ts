@@ -429,12 +429,19 @@ export interface StoreSettings {
   loyaltyRewardPoints: number
   autoPrintNewOrders: boolean
   printerName: string
+  printerAgentId?: string
   printCopies: number
   printKitchenTicket: boolean
   printCustomerTicket: boolean
   whatsappBulkEnabled: boolean
   chatbotEnabled: boolean
   chatbotGreeting: string
+  aiBusinessDescription?: string
+  aiServiceInstructions?: string
+  aiServiceTone?: "friendly" | "formal" | "informal"
+  aiMenuUrl?: string
+  aiCheckoutUrl?: string
+  aiPaymentUrl?: string
 
   /** Central de IA e automacoes. */
   aiStorefrontChatEnabled?: boolean
