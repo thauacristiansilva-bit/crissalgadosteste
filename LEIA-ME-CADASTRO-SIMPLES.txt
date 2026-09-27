@@ -1,0 +1,19 @@
+SABORFLOW - CADASTRO SIMPLES: CATEGORIA, PRODUTO E OPCOES
+
+1. Extraia este ZIP dentro da pasta ORIGINAL do projeto e aceite substituir
+   o arquivo components/admin/products-panel.tsx.
+2. Abra essa pasta no VS Code, abra Terminal > Novo Terminal e execute:
+   git add .
+   git commit -m "Simplifica cadastro de produto e complementos"
+   git push origin main
+3. Espere o deploy automatico da Railway.
+4. No painel da loja abra Produtos. Escolha ou crie a categoria, preencha
+   nome e preco do produto e marque "Adicionar sabores ou complementos agora".
+   Digite a pergunta, obrigatoriedade, minimo, maximo e as opcoes. Para combo,
+   selecione "Sabores de um combo". Salve pelo botao unico.
+
+Um combo com maximo 4 por produto permite ate 8 ao pedir 2 unidades.
+O minimo continua configurado por pedido, como no sistema atual.
+Para produtos ja cadastrados, opcoes reutilizaveis, segundo grupo de bebidas,
+estoque ou regras mais avancadas, use o botao Sabores e extras do produto.
+Nenhuma migracao de banco e necessaria.

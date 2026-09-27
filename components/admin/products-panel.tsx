@@ -26,6 +26,8 @@ type ProductDraft = {
 const emptyDraft: ProductDraft = { name: "", description: "", category: "Salgados", price: "", image: "", featured: false, trackStock: false, stock: "0", minStock: "0" }
 type FlavorDraft = { key: string; name: string; price: string; active?: boolean }
 const emptyFlavors = (): FlavorDraft[] => [{ key: crypto.randomUUID(), name: "", price: "" }, { key: crypto.randomUUID(), name: "", price: "" }]
+type QuickChoice = { key: string; name: string; extra: string }
+const emptyQuickChoices = (): QuickChoice[] => [{ key: crypto.randomUUID(), name: "", extra: "" }, { key: crypto.randomUUID(), name: "", extra: "" }]
 
 export function ProductsPanel({ products, categories, onProductsChanged, onCategoriesChanged }: { products: Product[]; categories: Category[]; onProductsChanged: (products: Product[]) => void; onCategoriesChanged: (categories: Category[]) => void }) {
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft)
@@ -40,6 +42,13 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
   const [categoryParent, setCategoryParent] = useState("")
   const [priceByFlavor, setPriceByFlavor] = useState(false)
   const [flavors, setFlavors] = useState<FlavorDraft[]>(emptyFlavors)
+  const [quickGroup, setQuickGroup] = useState(false)
+  const [quickGroupName, setQuickGroupName] = useState("Escolha os sabores")
+  const [quickChoices, setQuickChoices] = useState<QuickChoice[]>(emptyQuickChoices)
+  const [quickRequired, setQuickRequired] = useState(true)
+  const [quickMode, setQuickMode] = useState<"unique" | "bundle">("unique")
+  const [quickMin, setQuickMin] = useState("1")
+  const [quickMax, setQuickMax] = useState("1")
   const activeCategories = useMemo(() => sortedCategories(categories.filter((category) => category.active)), [categories])
   const [selectedCategory, setSelectedCategory] = useState("")
   const categoryNames = useMemo(() => [...new Set([...activeCategories.map((category) => category.name), ...products.map((product) => product.category)])].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" })), [activeCategories, products])
@@ -100,6 +109,13 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
     setDraft({ ...emptyDraft, category: category || activeCategories[0]?.name || "Salgados" })
     setPriceByFlavor(false)
     setFlavors(emptyFlavors())
+    setQuickGroup(false)
+    setQuickGroupName("Escolha os sabores")
+    setQuickChoices(emptyQuickChoices())
+    setQuickRequired(true)
+    setQuickMode("unique")
+    setQuickMin("1")
+    setQuickMax("1")
     setError("")
   }
 
@@ -166,10 +182,33 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
     if (!response.ok) throw new Error(data.error || "Não foi possível salvar os sabores.")
   }
 
+  async function saveQuickComposition(productId: number, choices: Array<{ name: string; extra: number }>) {
+    const response = await fetch(`/api/products/${productId}/composition`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipe: [],
+        modifierGroups: [{
+          name: quickGroupName.trim(), description: "", required: quickRequired,
+          minSelect: Number(quickMin), maxSelect: Number(quickMax),
+          selectionMode: quickMode, includedQuantity: quickMode === "bundle" ? Number(quickMax) : 0,
+          active: true, sortOrder: 0,
+          options: choices.map((choice, index) => ({
+            name: choice.name, description: "", priceDelta: choice.extra,
+            includedEligible: false, active: true, sortOrder: index, ingredients: [],
+          })),
+        }],
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || "Produto criado, mas as escolhas não foram salvas. Edite os sabores antes de ativar o produto.")
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     setBusy(true)
     setError("")
+    let createdProductForRecovery: Product | null = null
     try {
       const priced = priceByFlavor ? flavors.map((flavor) => ({ key: flavor.key, name: flavor.name.trim(), price: Number(flavor.price.replace(",", ".")), active: flavor.active })) : []
       if (priceByFlavor && (priced.length === 0 || !priced.some((flavor) => flavor.active !== false) || priced.some((flavor, index) => !flavor.name || !/^\d+(?:[,.]\d{1,2})?$/.test(flavors[index].price.trim()) || !Number.isFinite(flavor.price) || flavor.price <= 0) || new Set(priced.map((flavor) => flavor.name.toLocaleLowerCase("pt-BR"))).size !== priced.length)) {
@@ -177,13 +216,24 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
       }
       const price = priceByFlavor ? Number(Math.min(...priced.map((flavor) => flavor.price)).toFixed(2)) : Number(draft.price.replace(",", "."))
       if (!Number.isFinite(price) || price <= 0) throw new Error("Informe um preço válido.")
+      const choices = quickGroup && !editingId && !priceByFlavor ? quickChoices.map((choice) => ({ name: choice.name.trim(), extra: Number(choice.extra.trim().replace(",", ".") || 0) })) : []
+      if (quickGroup && !editingId && !priceByFlavor) {
+        const minimum = Number(quickMin), maximum = Number(quickMax)
+        if (!quickGroupName.trim() || choices.length < 1 || choices.some((choice) => !choice.name || !Number.isFinite(choice.extra) || choice.extra < 0) ||
+            new Set(choices.map((choice) => choice.name.toLocaleLowerCase("pt-BR"))).size !== choices.length ||
+            !Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < (quickRequired ? 1 : 0) || maximum < 1 || minimum > maximum ||
+            (quickMode === "unique" && maximum > choices.length) || (quickMode === "bundle" && choices.some((choice) => choice.extra !== 0))) {
+          throw new Error("Confira as opções, os preços e o mínimo/máximo. Em combos, os sabores não têm preço adicional.")
+        }
+      }
       const response = await fetch(editingId ? `/api/products/${editingId}` : "/api/products", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: draft.name, description: draft.description, category: categories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name, ...(!priceByFlavor || !editingId ? { price } : {}), ...(!editingId && priceByFlavor ? { active: false } : {}), image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
+        body: JSON.stringify({ name: draft.name, description: draft.description, category: categories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name, ...(!priceByFlavor || !editingId ? { price } : {}), ...(!editingId && (priceByFlavor || choices.length) ? { active: false } : {}), image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível salvar o produto.")
+      if (!editingId && choices.length) createdProductForRecovery = data.product as Product
       if (priceByFlavor) {
         const productId = Number(data.product.id)
         if (!editingId) { setEditingId(productId); setPendingFlavorProductId(productId) }
@@ -194,12 +244,22 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
           setPendingFlavorProductId(null)
         }
       }
+      if (choices.length && !editingId) {
+        const productId = Number(data.product.id)
+        await saveQuickComposition(productId, choices)
+        const activated = await fetch(`/api/products/${productId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true }) })
+        if (!activated.ok) throw new Error("As escolhas foram salvas. Ative o produto na lista para publicá-lo.")
+      }
       await refreshProducts()
       const savedCategory = data.product?.category || draft.category
       setSelectedCategory(savedCategory)
       clearForm(savedCategory)
-      setCompositionProduct(priceByFlavor ? null : data.product || products.find((product) => product.id === editingId) || null)
+      setCompositionProduct(priceByFlavor || choices.length ? null : data.product || products.find((product) => product.id === editingId) || null)
     } catch (err) {
+      if (createdProductForRecovery) {
+        setCompositionProduct(createdProductForRecovery)
+        await refreshProducts().catch(() => undefined)
+      }
       setError(err instanceof Error ? err.message : "Erro ao salvar produto.")
     } finally {
       setBusy(false)
@@ -256,6 +316,16 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
           <label className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-900"><input type="checkbox" checked={priceByFlavor} disabled={Boolean(editingId && products.find((product) => product.id === editingId)?.modifierGroups?.some(isPricedFlavorGroup))} onChange={(event) => setPriceByFlavor(event.target.checked)} className="h-5 w-5" /> Cada sabor tem seu preço</label>
           {priceByFlavor && <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-sm font-bold text-blue-900">Sabores de {draft.name || "este produto"}</p><p className="mt-1 text-xs text-blue-800">Ex.: Coca-Cola R$ 12,00; Guaraná R$ 10,00. O cliente escolhe um sabor antes de comprar.</p><div className="mt-3 space-y-2">{flavors.map((flavor) => <div key={flavor.key} className="flex gap-2"><input aria-label="Nome do sabor" value={flavor.name} onChange={(event) => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, name: event.target.value } : item))} placeholder="Sabor" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"/><input aria-label={`Preço de ${flavor.name || "sabor"}`} value={flavor.price} onChange={(event) => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, price: event.target.value } : item))} placeholder="R$ 0,00" inputMode="decimal" className="h-10 w-28 rounded-lg border border-blue-200 bg-white px-2 text-sm"/>{flavor.active === false && <button type="button" onClick={() => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, active: true } : item))} className="text-xs font-bold text-amber-700">Ativar</button>}<button type="button" onClick={() => setFlavors((items) => items.filter((item) => item.key !== flavor.key))} aria-label={`Remover ${flavor.name || "sabor"}`} className="rounded-lg p-2 text-red-600"><X className="h-4 w-4" /></button></div>)}</div><button type="button" onClick={() => setFlavors((items) => [...items, { key: crypto.randomUUID(), name: "", price: "" }])} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-700"><Plus className="h-4 w-4"/> Adicionar sabor</button></div>}
 
+          {!editingId && !priceByFlavor && <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <label className="flex items-center gap-2 font-bold text-blue-950"><input type="checkbox" checked={quickGroup} onChange={(event) => setQuickGroup(event.target.checked)} className="h-5 w-5" />Adicionar sabores ou complementos agora</label>
+            {quickGroup && <div className="mt-4 space-y-3"><label className="block text-sm font-bold text-blue-900">Pergunta para o cliente<input value={quickGroupName} onChange={(event) => setQuickGroupName(event.target.value)} placeholder="Ex.: Escolha os sabores" className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-3 font-normal" /></label>
+              <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm font-bold text-blue-900">Tipo de escolha<select value={quickMode} onChange={(event) => { const next = event.target.value as "unique" | "bundle"; setQuickMode(next); if (next === "bundle") setQuickChoices((items) => items.map((item) => ({ ...item, extra: "" }))) }} className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-2"><option value="unique">Extras ou opções</option><option value="bundle">Sabores de um combo</option></select></label><label className="flex items-center gap-2 self-end rounded-xl bg-white p-3 text-sm font-bold text-blue-900"><input type="checkbox" checked={quickRequired} onChange={(event) => { setQuickRequired(event.target.checked); if (!event.target.checked) setQuickMin("0"); else if (Number(quickMin) < 1) setQuickMin("1") }} />Escolha obrigatória</label></div>
+              <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm font-bold text-blue-900">Mínimo<input type="number" min={quickRequired ? 1 : 0} value={quickMin} onChange={(event) => setQuickMin(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-3" /></label><label className="text-sm font-bold text-blue-900">Máximo por produto<input type="number" min={1} value={quickMax} onChange={(event) => setQuickMax(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-3" /></label></div>
+              {quickMode === "bundle" && <p className="text-xs text-blue-800">Se comprar 2 unidades, o máximo dobra. O mesmo sabor pode ser repetido.</p>}
+              <p className="text-sm font-bold text-blue-950">Opções que aparecerão no produto</p>{quickChoices.map((choice, index) => <div key={choice.key} className="flex gap-2"><input aria-label={`Opção ${index + 1}`} value={choice.name} onChange={(event) => setQuickChoices((items) => items.map((item) => item.key === choice.key ? { ...item, name: event.target.value } : item))} placeholder="Ex.: Frango" className="h-10 min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-sm" />{quickMode === "unique" && <input aria-label={`Preço extra da opção ${index + 1}`} value={choice.extra} onChange={(event) => setQuickChoices((items) => items.map((item) => item.key === choice.key ? { ...item, extra: event.target.value } : item))} placeholder="+ R$ 0,00" inputMode="decimal" className="h-10 w-28 rounded-xl border border-blue-200 bg-white px-2 text-sm" />}<button type="button" onClick={() => setQuickChoices((items) => items.filter((item) => item.key !== choice.key))} aria-label={`Remover opção ${index + 1}`} className="rounded-lg px-2 text-red-700"><X className="h-4 w-4" /></button></div>)}<button type="button" onClick={() => setQuickChoices((items) => [...items, { key: crypto.randomUUID(), name: "", extra: "" }])} className="text-sm font-bold text-blue-800">+ Adicionar opção</button>
+            </div>}
+          </div>}
+
           <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-3">
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Foto do produto</span>
             {draft.image && <div className="mb-3 flex items-center gap-3 rounded-xl bg-white p-2"><img src={draft.image} alt="Prévia" className="h-20 w-20 rounded-lg object-cover" /><div className="min-w-0"><p className="text-sm font-bold text-gray-800">Imagem selecionada</p><p className="truncate text-xs text-gray-400">{draft.image}</p><button type="button" onClick={() => setDraft({ ...draft, image: "" })} className="mt-1 text-xs font-bold text-red-600">Remover foto</button></div></div>}
@@ -269,7 +339,7 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
           {draft.trackStock && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Quantidade em estoque</span><input type="number" min="0" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Estoque mínimo / alerta</span><input type="number" min="0" value={draft.minStock} onChange={(e) => setDraft({ ...draft, minStock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label></div>}
           </div></details>
         </div>
-        <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
+        <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : quickGroup && !priceByFlavor ? "Salvar produto e opções" : "Adicionar produto"}</button>
       </form>
       {showCategoryForm && <form onSubmit={addCategory} className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><label className="block text-xs font-bold text-blue-900">Dentro de<select value={categoryParent} onChange={(event) => setCategoryParent(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Nenhuma: categoria principal</option>{activeCategories.filter((category) => !parentCategoryName(category.name)).map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label><label htmlFor="quick-category" className="mt-3 block text-xs font-bold text-blue-900">Nome da nova categoria</label><div className="mt-2 flex gap-2"><input id="quick-category" required maxLength={100} value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Ex.: Refri 2L" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-3 text-sm" /><button type="submit" disabled={busy} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-50">Criar</button></div></form>}
       </div>
