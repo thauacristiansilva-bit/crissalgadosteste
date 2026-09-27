@@ -1,0 +1,20 @@
+SABORFLOW - CONTADOR DE ACESSOS, PLANOS E DEMO
+
+1. Extraia este ZIP dentro da pasta original do projeto. Aceite substituir arquivos.
+2. No VS Code, abra Terminal > Novo Terminal e execute:
+   git add .
+   git commit -m "Adiciona contador de visitas aos planos e demo"
+   git push origin main
+3. Espere o deploy da Railway terminar.
+4. No terminal do SERVICO DO SITE na Railway (com DATABASE_URL configurada),
+   execute uma vez:
+   node scripts/apply-marketing-visits-migration.mjs
+5. Abra /superadmin -> Visao geral -> Interesse no SaborFlow.
+
+A contagem comeca depois da migracao e da publicacao do codigo.
+Visitas anteriores nao podem ser recuperadas deste contador.
+Os numeros sao sessoes aproximadas por aba de navegador, e nao pessoas
+identificadas. As paginas contadas sao inicial da plataforma, /planos e /demo.
+A loja individual dos clientes nao entra nesses numeros.
+Nenhum IP, telefone, email ou nome dos visitantes e armazenado.
+Somente o Superadmin pode visualizar as contagens.

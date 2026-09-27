@@ -329,10 +329,24 @@ function FinancePanel({ accessRole }: { accessRole: string }) {
 
 export function SuperadminDashboard({ access, initialData }: { access: { email: string; role: string }; initialData: SuperadminSnapshot }) {
   const [data, setData] = useState(initialData)
+  const [marketingVisits, setMarketingVisits] = useState<{ total: number; inicio: number; planos: number; demo: number } | null>(null)
+  const [marketingVisitsError, setMarketingVisitsError] = useState("")
   const [tab, setTab] = useState<Tab>("Visão geral")
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const plans = useMemo(() => data.plans.filter((plan) => plan.active && !plan.internal), [data.plans])
+
+  useEffect(() => {
+    let active = true
+    void fetch("/api/superadmin/marketing-visits", { cache: "no-store" })
+      .then(async response => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || "Não foi possível carregar as visitas.")
+        if (active) setMarketingVisits(result)
+      })
+      .catch(error => { if (active) setMarketingVisitsError(error instanceof Error ? error.message : "Visitas indisponíveis.") })
+    return () => { active = false }
+  }, [])
 
   async function action(payload: Record<string, unknown>) {
     setBusy(true)
@@ -426,6 +440,16 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
 
         {tab === "Visão geral" && (
           <div className="space-y-5">
+            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+              <h2 className="text-lg font-black">Interesse no SaborFlow · últimos 30 dias</h2>
+              <p className="mt-1 text-xs text-stone-400">Sessões aproximadas por navegador; começa a contar após a instalação. Cada aba conta uma sessão, repetida apenas uma vez por dia em cada página.</p>
+              {marketingVisits ? <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{([
+                ["Visitaram a plataforma", marketingVisits.total],
+                ["Página inicial", marketingVisits.inicio],
+                ["Olharam os planos", marketingVisits.planos],
+                ["Olharam a demo", marketingVisits.demo],
+              ] as const).map(([label, value]) => <div key={label} className="rounded-xl border border-white/10 bg-black/20 p-4"><strong className="text-2xl text-orange-300">{value}</strong><p className="mt-1 text-sm text-stone-300">{label}</p></div>)}</div> : <p className="mt-3 text-sm text-stone-400">{marketingVisitsError || "Carregando visitas..."}</p>}
+            </section>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {metrics.map(([label, value, Icon]) => (
                 <article key={label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">

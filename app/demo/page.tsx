@@ -1,4 +1,5 @@
 import { DemoLauncher } from "@/components/demo/demo-launcher"
+import { MarketingVisitTracker } from "@/components/marketing/marketing-visit-tracker"
 
 export const dynamic = "force-dynamic"
 
@@ -8,5 +9,5 @@ export default async function DemoPage({
   searchParams: Promise<{ expired?: string }>
 }) {
   const params = await searchParams
-  return <DemoLauncher expired={params.expired === "1"} />
+  return <><MarketingVisitTracker page="demo" /><DemoLauncher expired={params.expired === "1"} /></>
 }

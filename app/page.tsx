@@ -1,5 +1,6 @@
 import { headers } from "next/headers"
 import { MarketingHome } from "@/components/marketing/marketing-home"
+import { MarketingVisitTracker } from "@/components/marketing/marketing-visit-tracker"
 import { StoreLandingPage } from "@/components/store/store-landing-page"
 import { getPublicStoreForOrganization } from "@/lib/public-store-db"
 import { getPublicOrganizationForHost } from "@/lib/organization-db"
@@ -28,5 +29,5 @@ export default async function HomePage() {
     }
   }
 
-  return <MarketingHome />
+  return <><MarketingVisitTracker page="inicio" /><MarketingHome /></>
 }
