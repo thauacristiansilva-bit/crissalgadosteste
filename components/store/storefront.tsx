@@ -69,7 +69,7 @@ function externalUrl(value: string) { const clean = value.trim(); if (!clean) re
 export function Storefront({
   products,
   categories,
-  settings,
+  settings: originalSettings,
   deliveryZones,
   openNow,
   organization,
@@ -90,6 +90,8 @@ export function Storefront({
     publicOrderingEnabled?: boolean
   }
 }) {
+  const settings = { ...originalSettings, primaryColor: originalSettings.menuPrimaryColor || originalSettings.primaryColor, secondaryColor: originalSettings.menuSecondaryColor || originalSettings.secondaryColor, backgroundColor: originalSettings.menuBackgroundColor || originalSettings.backgroundColor }
+  const menuLayout = ["grid", "cards", "list"].includes(settings.menuLayout || "") ? settings.menuLayout : "grid"
   const router = useRouter()
   const cartStorageKey = organization?.slug
     ? `saborflow_cart_v2:${organization.slug}`
@@ -1158,7 +1160,7 @@ export function Storefront({
 
         <section className="mt-5">
           <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : categoryShortName(category)}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className={menuLayout === "list" ? "grid grid-cols-1 gap-4 sm:grid-cols-2" : menuLayout === "cards" ? "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4" : "grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}>
             {filtered.map((product) => {
               const quantity = quantityFor(product.id)
               const hasModifiers = productHasModifiers(product)
@@ -1168,8 +1170,8 @@ export function Storefront({
                 product.ingredientStockAvailable === false
 
               return (
-                <article key={product.id} className="group min-w-0">
-                  <div className="relative aspect-square overflow-hidden rounded-2xl bg-gray-50 ring-1 ring-black/5">
+                <article key={product.id} className={`group min-w-0 ${menuLayout === "cards" ? "rounded-2xl border border-gray-100 bg-white p-2 shadow-sm" : menuLayout === "list" ? "flex items-center gap-4 rounded-2xl border border-gray-100 bg-white p-3 shadow-sm" : ""}`}>
+                  <div className={`relative aspect-square overflow-hidden rounded-2xl bg-gray-50 ring-1 ring-black/5 ${menuLayout === "list" ? "w-28 shrink-0 sm:w-36" : ""}`}>
                     {product.image ? (
                       <img src={product.image} alt={product.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                     ) : (

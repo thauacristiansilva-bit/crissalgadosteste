@@ -287,6 +287,11 @@ export async function getTenantSettings(
   }
 }
 
+function validThemeColor(value: unknown): string {
+  if (typeof value !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value)) throw new Error("Use uma cor no formato #RRGGBB.")
+  return value
+}
+
 function normalizedSettings(
   current: StoreSettings,
   patch: Partial<StoreSettings>,
@@ -298,6 +303,15 @@ function normalizedSettings(
   const next: StoreSettings = {
     ...current,
     ...patch,
+    landingLayout: patch.landingLayout !== undefined
+      ? (["classic", "editorial", "minimal"].includes(patch.landingLayout) ? patch.landingLayout : (() => { throw new Error("Modelo da página inicial inválido.") })())
+      : current.landingLayout,
+    menuLayout: patch.menuLayout !== undefined
+      ? (["grid", "cards", "list"].includes(patch.menuLayout) ? patch.menuLayout : (() => { throw new Error("Modelo do cardápio inválido.") })())
+      : current.menuLayout,
+    menuPrimaryColor: patch.menuPrimaryColor !== undefined ? validThemeColor(patch.menuPrimaryColor) : current.menuPrimaryColor,
+    menuSecondaryColor: patch.menuSecondaryColor !== undefined ? validThemeColor(patch.menuSecondaryColor) : current.menuSecondaryColor,
+    menuBackgroundColor: patch.menuBackgroundColor !== undefined ? validThemeColor(patch.menuBackgroundColor) : current.menuBackgroundColor,
     printerAgentId: patch.printerAgentId !== undefined
       ? (/^[a-f0-9-]{36}$/i.test(patch.printerAgentId) ? patch.printerAgentId : "")
       : current.printerAgentId,

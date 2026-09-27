@@ -405,6 +405,11 @@ export interface StoreSettings {
   primaryColor: string
   secondaryColor: string
   backgroundColor: string
+  landingLayout?: "classic" | "editorial" | "minimal"
+  menuLayout?: "grid" | "cards" | "list"
+  menuPrimaryColor?: string
+  menuSecondaryColor?: string
+  menuBackgroundColor?: string
   logoImage: string
   /** SABORFLOW_BRANDING_CATEGORIES_V1 */
   storeTitleMode?: "text" | "logo"

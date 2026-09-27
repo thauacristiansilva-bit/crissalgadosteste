@@ -6,7 +6,7 @@ import { validateBusinessHours } from "@/lib/operations"
 import type { BusinessHour } from "@/lib/types"
 
 export type SetupPlan = {
-  store: { name: string; slogan: string; welcomeTitle: string; welcomeText: string; aboutTitle: string; aboutText: string; primaryColor: string; secondaryColor: string; phone: string; whatsapp: string; instagramUrl: string; openingHours: string; clientAccountsEnabled: boolean | null }
+  store: { name: string; slogan: string; welcomeTitle: string; welcomeText: string; aboutTitle: string; aboutText: string; primaryColor: string; secondaryColor: string; landingLayout: string; menuLayout: string; menuPrimaryColor: string; menuSecondaryColor: string; menuBackgroundColor: string; phone: string; whatsapp: string; instagramUrl: string; openingHours: string; clientAccountsEnabled: boolean | null }
   categories: string[]
   groups: Array<{ name: string; description: string; required: boolean; minSelect: number; maxSelect: number; selectionMode: "unique" | "bundle"; options: Array<{ name: string; priceDelta: number }> }>
   products: Array<{ name: string; description: string; category: string; price: number; featured: boolean; groups: string[]; suggestions: string[] }>
@@ -20,6 +20,7 @@ function clean(value: unknown, max: number) { return typeof value === "string" ?
 function unique(values: string[]) { return [...new Set(values.map((value) => value.toLocaleLowerCase("pt-BR")))].length === values.length }
 function integer(value: unknown, max: number) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > max) throw new Error("Quantidade inválida no plano."); return n }
 function money(value: unknown) { const n = Number(value); if (!Number.isFinite(n) || n < 0 || n > 100000) throw new Error("Preço inválido no plano."); return Number(n.toFixed(2)) }
+function layout(value: unknown, choices: string[]) { if (value == null || value === "") return ""; if (typeof value !== "string" || !choices.includes(value)) throw new Error("Escolha um modelo de layout válido."); return value }
 function color(value: unknown) { const candidate = clean(value, 7); if (candidate && !/^#[0-9a-fA-F]{6}$/.test(candidate)) throw new Error("A cor deve estar no formato #RRGGBB."); return candidate }
 
 export function validateSetupPlan(raw: unknown): SetupPlan {
@@ -85,7 +86,7 @@ export function validateSetupPlan(raw: unknown): SetupPlan {
     validateBusinessHours(businessHours)
   }
   return {
-    store: { name: clean(store.name, 120), slogan: clean(store.slogan, 200), welcomeTitle: clean(store.welcomeTitle, 150), welcomeText: clean(store.welcomeText, 500), aboutTitle: clean(store.aboutTitle, 150), aboutText: clean(store.aboutText, 1500), primaryColor: color(store.primaryColor), secondaryColor: color(store.secondaryColor), phone: clean(store.phone, 30), whatsapp: clean(store.whatsapp, 30), instagramUrl: clean(store.instagramUrl, 300), openingHours: clean(store.openingHours, 200), clientAccountsEnabled: typeof store.clientAccountsEnabled === "boolean" ? store.clientAccountsEnabled : null },
+    store: { name: clean(store.name, 120), slogan: clean(store.slogan, 200), welcomeTitle: clean(store.welcomeTitle, 150), welcomeText: clean(store.welcomeText, 500), aboutTitle: clean(store.aboutTitle, 150), aboutText: clean(store.aboutText, 1500), primaryColor: color(store.primaryColor), secondaryColor: color(store.secondaryColor), landingLayout: layout(store.landingLayout, ["classic", "editorial", "minimal"]), menuLayout: layout(store.menuLayout, ["grid", "cards", "list"]), menuPrimaryColor: color(store.menuPrimaryColor), menuSecondaryColor: color(store.menuSecondaryColor), menuBackgroundColor: color(store.menuBackgroundColor), phone: clean(store.phone, 30), whatsapp: clean(store.whatsapp, 30), instagramUrl: clean(store.instagramUrl, 300), openingHours: clean(store.openingHours, 200), clientAccountsEnabled: typeof store.clientAccountsEnabled === "boolean" ? store.clientAccountsEnabled : null },
     categories, groups, products, productEdits,
     operations: { acceptingOrders: flag("acceptingOrders"), pickupEnabled: flag("pickupEnabled"), deliveryEnabled: flag("deliveryEnabled"), businessHours },
     captions: suggestions(input.captions, "Legendas"), unsupported: suggestions(input.unsupported, "Ações não disponíveis"),

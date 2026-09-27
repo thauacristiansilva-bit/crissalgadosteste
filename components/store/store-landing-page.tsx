@@ -90,6 +90,7 @@ export function StoreLandingPage({
   const directionsUrl = mapQuery
     ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapQuery)}`
     : ""
+  const landingLayout = ["classic", "editorial", "minimal"].includes(settings.landingLayout || "") ? settings.landingLayout : "classic"
   const heroTitle = settings.welcomeTitle?.trim() || `Bem-vindo à ${settings.storeName}`
   const heroText =
     settings.welcomeText?.trim() ||
@@ -148,7 +149,7 @@ export function StoreLandingPage({
       <main>
         <section className="mx-auto max-w-7xl px-4 pt-4 sm:px-6 sm:pt-6">
           <div
-            className="relative min-h-[470px] overflow-hidden rounded-[30px] bg-gray-950 sm:min-h-[540px] lg:min-h-[600px]"
+            className={`relative overflow-hidden bg-gray-950 ${landingLayout === "minimal" ? "min-h-[370px] rounded-2xl sm:min-h-[420px]" : landingLayout === "editorial" ? "min-h-[520px] rounded-[36px] sm:min-h-[600px]" : "min-h-[470px] rounded-[30px] sm:min-h-[540px] lg:min-h-[600px]"}`}
             style={{
               background: settings.coverImage
                 ? undefined
@@ -163,7 +164,7 @@ export function StoreLandingPage({
               />
             )}
             <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/55 to-black/20" />
-            <div className="relative z-10 flex min-h-[470px] max-w-3xl flex-col justify-end p-6 text-white sm:min-h-[540px] sm:p-10 lg:min-h-[600px] lg:p-14">
+            <div className={`relative z-10 flex flex-col p-6 text-white sm:p-10 lg:p-14 ${landingLayout === "minimal" ? "min-h-[370px] justify-center sm:min-h-[420px]" : landingLayout === "editorial" ? "mx-auto min-h-[520px] max-w-4xl items-center justify-center text-center sm:min-h-[600px]" : "min-h-[470px] max-w-3xl justify-end sm:min-h-[540px] lg:min-h-[600px]"}`}>
               <div className="mb-5 flex flex-wrap items-center gap-2">
                 <span
                   className={`rounded-full border px-3 py-1.5 text-xs font-black backdrop-blur ${

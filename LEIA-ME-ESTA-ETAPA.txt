@@ -1,0 +1,17 @@
+ETAPA: MODELOS DO SITE E IMPORTACAO DE CARDAPIO POR FOTO
+
+1. Extraia o ZIP, copie as pastas app, components e lib para sua pasta ORIGINAL do projeto e aceite substituir os arquivos. NAO apague as pastas existentes.
+2. No VS Code, abra o terminal dentro da pasta original e execute um comando por vez:
+   npm run typecheck
+   git add .
+   git commit -m "Adiciona layouts e importacao de cardapio por imagem"
+   git push origin main
+3. Aguarde o deploy automatico no Railway.
+
+Onde usar:
+- Admin > Configuracoes: escolha o modelo da pagina inicial, o modelo do cardapio e as cores do cardapio; clique Salvar configuracoes. O dashboard mantem o mesmo visual.
+- Admin > Montar minha loja com IA: use os botoes de exemplos ou escreva o pedido. Anexe ate 3 imagens JPG/PNG/WebP de ate 4 MB cada (cardapio fisico e referencias visuais). Clique Gerar previa, veja as abas Pagina inicial e Cardapio, revise nomes e precos, e confirme a publicacao. Imagens sao enviadas ao provedor de IA apenas na geracao da previa; nao sao salvas como fotos dos produtos.
+- A IA depende de AI_SETUP_ENABLED, GEMINI_API_KEY e da liberacao da conta no superadmin, conforme a etapa anterior.
+
+O codigo por e-mail/SMS NAO foi incluido neste ZIP: para SMS e preciso confirmar o telefone do titular e configurar um servico de envio. O login atual ja oferece Passkey/Windows Hello como alternativa ao aplicativo autenticador apos o cadastro da chave.
+Nenhuma migracao SQL nova nesta etapa.
