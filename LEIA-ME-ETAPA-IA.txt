@@ -1,0 +1,13 @@
+ETAPA: IA DE CONFIGURACAO POR CLIENTE
+
+1. Extraia este ZIP e COPIE as pastas app, components e lib para a pasta original do projeto. Aceite substituir os arquivos. Nao apague as pastas existentes.
+2. Abra a pasta original no VS Code e abra o terminal.
+3. Execute, um comando por vez:
+   npm run typecheck
+   git add .
+   git commit -m "Controla acesso a IA por cliente"
+   git push origin main
+4. Aguarde o deploy automatico no Railway.
+5. No SaborFlow, entre como superadmin > Contas > localize a conta > Ligar IA. Verifique se AI_SETUP_ENABLED=true e GEMINI_API_KEY estao configurados no servico Railway (sem mostrar a chave a ninguem). Abra o painel admin > IA, descreva a alteracao, confira a previa e confirme.
+
+A liberacao por conta nao faz cobranca automatica: combine e configure o preco separadamente antes de oferecer o recurso pago. Ao instalar, a IA comeca desligada para cada conta ate a liberacao no superadmin. Nao e necessario rodar migracao SQL nesta etapa.

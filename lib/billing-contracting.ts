@@ -33,6 +33,7 @@ const emptyEntitlements: PlanEntitlements = {
   inventory: false,
   advancedReports: false,
   integrations: false,
+  aiSetup: false,
 }
 
 function normalizeEmail(value: string) {
@@ -62,6 +63,7 @@ function mergePlanEntitlements(rows: Array<{ entitlement_key: PlanEntitlementKey
     inventory: raw.inventory === true,
     advancedReports: raw.advancedReports === true,
     integrations: raw.integrations === true,
+    aiSetup: raw.aiSetup === true,
   }
 }
 

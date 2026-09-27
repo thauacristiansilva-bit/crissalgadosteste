@@ -26,6 +26,7 @@ export async function POST(request: Request) {
   const org = session.organizationId
   const account = await runWithTenantRlsScope([org], session.userId, () => getBillingSnapshotForOrganization(org), "tenant-session")
   if (!account.account || !account.subscription || !["active", "trialing"].includes(account.subscription.status)) return json({ error: "É preciso ter uma assinatura ativa para usar o assistente." }, 403)
+  if (!account.entitlements.aiSetup) return json({ error: "A IA de configuração não está liberada nesta conta. Peça ao responsável pelo SaborFlow para ativar o recurso." }, 403)
 
   const raw = await request.text()
   if (Buffer.byteLength(raw) > 64_000) return json({ error: "Pedido grande demais." }, 413)

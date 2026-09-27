@@ -374,6 +374,7 @@ export async function changeSubscriptionPlan(access: SuperadminAccess, subscript
 
 export async function setEntitlementOverride(access: SuperadminAccess, accountId: string, key: PlanEntitlementKey, value: unknown, ipAddress: string | null) {
   if (!PLAN_ENTITLEMENT_KEYS.includes(key)) throw new Error("Entitlement inválido.")
+  if (key === "aiSetup" && typeof value !== "boolean") throw new Error("A permissão da IA deve ser ligada ou desligada.")
   const updated = await getPostgresPool().query(
     `UPDATE sf_billing_accounts
      SET entitlement_overrides = jsonb_set(COALESCE(entitlement_overrides, '{}'::jsonb), ARRAY[$2]::text[], $3::jsonb, true), updated_at = now()

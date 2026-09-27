@@ -11,6 +11,7 @@ export const PLAN_ENTITLEMENT_KEYS = [
   "inventory",
   "advancedReports",
   "integrations",
+  "aiSetup",
 ] as const
 
 export type PlanEntitlementKey =
@@ -39,6 +40,7 @@ export type PlanEntitlements = {
   inventory: boolean
   advancedReports: boolean
   integrations: boolean
+  aiSetup: boolean
 }
 
 export type BillingUsage = {

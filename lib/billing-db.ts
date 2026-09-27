@@ -21,6 +21,7 @@ const defaultEntitlements: PlanEntitlements = {
   inventory: false,
   advancedReports: false,
   integrations: false,
+  aiSetup: false,
 }
 
 export class BillingAccessError extends Error {
@@ -90,6 +91,7 @@ function mergeEntitlements(
     inventory: boolValue(raw.inventory),
     advancedReports: boolValue(raw.advancedReports),
     integrations: boolValue(raw.integrations),
+    aiSetup: boolValue(raw.aiSetup),
   }
 }
 
