@@ -962,13 +962,27 @@ export async function processBillingWebhook(input: {
     if (input.provider === "asaas") {
       const payload = input.payload && typeof input.payload === "object" ? input.payload as {
         event?: string
-        subscription?: { id?: string; status?: string; externalReference?: string | null; nextDueDate?: string | null }
-        payment?: { id?: string; status?: string; externalReference?: string | null; subscription?: string | null; dueDate?: string | null }
+        subscription?: {
+          id?: string
+          status?: string
+          externalReference?: string | null
+          nextDueDate?: string | null
+          paymentLink?: string | null
+        }
+        payment?: {
+          id?: string
+          status?: string
+          externalReference?: string | null
+          subscription?: string | null
+          paymentLink?: string | null
+          dueDate?: string | null
+        }
       } : {}
       const subscriptionPayload = payload.subscription
       const paymentPayload = payload.payment
       const externalReference = subscriptionPayload?.externalReference || paymentPayload?.externalReference || null
       const providerSubscriptionId = subscriptionPayload?.id || paymentPayload?.subscription || null
+      const paymentLinkId = subscriptionPayload?.paymentLink || paymentPayload?.paymentLink || null
 
       let local = externalReference ? await pool.query<{ id: string; billing_cycle: BillingCycle | null; metadata: Record<string, unknown> | null }>(`
         SELECT id, billing_cycle, metadata FROM sf_subscriptions WHERE id::text = $1 LIMIT 1
@@ -982,6 +996,22 @@ export async function processBillingWebhook(input: {
         `, [providerSubscriptionId])
       }
 
+      // Links de pagamento do Asaas criam o cliente/assinatura somente quando o
+      // pagador conclui o formulário. Nesses eventos o vínculo mais confiável pode
+      // ser payment.paymentLink/subscription.paymentLink. O SaborFlow guarda esse
+      // ID em sf_checkout_sessions.provider_checkout_id desde a criação do checkout.
+      if (!local.rowCount && paymentLinkId) {
+        local = await pool.query<{ id: string; billing_cycle: BillingCycle | null; metadata: Record<string, unknown> | null }>(`
+          SELECT s.id, s.billing_cycle, s.metadata
+          FROM sf_checkout_sessions cs
+          INNER JOIN sf_subscriptions s ON s.id = cs.subscription_id
+          WHERE cs.provider = 'asaas'
+            AND (cs.provider_checkout_id = $1 OR cs.provider_subscription_id = $1)
+          ORDER BY cs.created_at DESC
+          LIMIT 1
+        `, [paymentLinkId])
+      }
+
       if (!local.rowCount) {
         await pool.query(`UPDATE sf_billing_webhook_events SET processing_status = 'ignored', processed_at = now(), updated_at = now() WHERE id = $1`, [rowId])
         return { duplicate: false, processed: false }
@@ -991,9 +1021,28 @@ export async function processBillingWebhook(input: {
       if (providerSubscriptionId) {
         await pool.query(`
           UPDATE sf_subscriptions
-          SET provider_subscription_id = $2, provider_status = COALESCE($3, provider_status), last_provider_sync_at = now(), updated_at = now()
+          SET provider_subscription_id = $2,
+              provider_status = COALESCE($3, provider_status),
+              metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
+              last_provider_sync_at = now(), updated_at = now()
           WHERE id = $1
-        `, [localSubscriptionId, providerSubscriptionId, subscriptionPayload?.status || null])
+        `, [
+          localSubscriptionId,
+          providerSubscriptionId,
+          subscriptionPayload?.status || null,
+          JSON.stringify({ ...(paymentLinkId ? { asaasPaymentLinkId: paymentLinkId } : {}) }),
+        ])
+        await pool.query(`
+          UPDATE sf_checkout_sessions
+          SET provider_subscription_id = $2,
+              metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+              updated_at = now()
+          WHERE subscription_id = $1
+        `, [
+          localSubscriptionId,
+          providerSubscriptionId,
+          JSON.stringify({ ...(paymentLinkId ? { asaasPaymentLinkId: paymentLinkId } : {}) }),
+        ])
       }
 
       if (input.eventType === "SUBSCRIPTION_CREATED" && providerSubscriptionId) {

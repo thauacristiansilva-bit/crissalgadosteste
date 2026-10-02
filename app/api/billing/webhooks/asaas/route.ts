@@ -24,8 +24,8 @@ export async function POST(request: Request) {
       return rawBody ? JSON.parse(rawBody) as {
         id?: string
         event?: string
-        payment?: { id?: string; subscription?: string | null }
-        subscription?: { id?: string }
+        payment?: { id?: string; subscription?: string | null; paymentLink?: string | null }
+        subscription?: { id?: string; paymentLink?: string | null }
       } : {}
     } catch {
       return null
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   })()
   if (!payload) return NextResponse.json({ error: "Payload inválido." }, { status: 400 })
 
-  const resourceId = payload.subscription?.id || payload.payment?.subscription || payload.payment?.id || null
+  const resourceId = payload.subscription?.id || payload.payment?.subscription || payload.subscription?.paymentLink || payload.payment?.paymentLink || payload.payment?.id || null
   try {
     const result = await processBillingWebhook({
       provider: "asaas",

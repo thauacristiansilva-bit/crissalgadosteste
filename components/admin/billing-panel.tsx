@@ -18,6 +18,26 @@ function money(cents: number | null, currency: string) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(cents / 100)
 }
 
+
+type GatewayHealth = {
+  checkout?: {
+    provider?: string | null
+    providerConfigured?: boolean
+    webhookConfigured?: boolean
+    appBaseUrlConfigured?: boolean
+    saleReady?: boolean
+    asaas?: {
+      environment?: "sandbox" | "production"
+      apiReachable?: boolean
+      keyMatchesEnvironment?: boolean
+      webhookTokenConfigured?: boolean
+      accountStatus?: { general?: string } | null
+      webhook?: { enabled?: boolean; interrupted?: boolean; missingEvents?: string[] } | null
+      error?: string | null
+    } | null
+  }
+}
+
 const featureLabels: Array<[keyof PlanEntitlements, string]> = [
   ["customDomain", "Domínio personalizado"],
   ["delivery", "Delivery"],
@@ -35,20 +55,23 @@ export function BillingPanel() {
   const [trial, setTrial] = useState<{ active: boolean; startedAt: string; expiresAt: string; totalDays: number; daysRemaining: number } | null>(null)
   const [accountEmail, setAccountEmail] = useState("")
   const [commercialStatus, setCommercialStatus] = useState<CommercialBillingStatus | null>(null)
+  const [gatewayHealth, setGatewayHealth] = useState<GatewayHealth | null>(null)
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
   const [busyPlan, setBusyPlan] = useState("")
   const [error, setError] = useState("")
 
   async function load() {
     try {
-      const [billingResponse, plansResponse, statusResponse] = await Promise.all([
+      const [billingResponse, plansResponse, statusResponse, healthResponse] = await Promise.all([
         fetch("/api/admin/billing", { cache: "no-store" }),
         fetch("/api/billing/plans", { cache: "no-store" }),
         fetch("/api/billing/status", { cache: "no-store" }),
+        fetch("/api/admin/billing-health", { cache: "no-store" }),
       ])
       const billingPayload = await billingResponse.json()
       const plansPayload = await plansResponse.json()
       const statusPayload = await statusResponse.json().catch(() => null)
+      const healthPayload = await healthResponse.json().catch(() => null)
       if (!billingResponse.ok) throw new Error(billingPayload.error || "Não foi possível carregar o plano.")
       if (!plansResponse.ok) throw new Error(plansPayload.error || "Não foi possível carregar os planos comerciais.")
       setBilling(billingPayload.billing)
@@ -56,6 +79,7 @@ export function BillingPanel() {
       setAccountEmail(billingPayload.email || "")
       setPlans(plansPayload.plans || [])
       if (statusResponse.ok && statusPayload) setCommercialStatus(statusPayload)
+      if (healthResponse.ok && healthPayload) setGatewayHealth(healthPayload)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Erro ao carregar cobrança.")
     }
@@ -174,6 +198,27 @@ export function BillingPanel() {
           )
         })}
       </section>
+
+      {gatewayHealth?.checkout?.provider === "asaas" && (
+        <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-700">Pagamento integrado</p>
+              <h3 className="mt-1 text-lg font-black text-gray-950">Asaas · {gatewayHealth.checkout.asaas?.environment === "production" ? "Produção" : "Sandbox"}</h3>
+              <p className="mt-1 text-sm text-gray-500">Pix, cartão e boleto são processados fora do SaborFlow; o plano só é ativado após confirmação do provedor.</p>
+            </div>
+            <span className={`inline-flex self-start rounded-full px-3 py-2 text-xs font-black ${gatewayHealth.checkout.saleReady && gatewayHealth.checkout.asaas?.apiReachable && gatewayHealth.checkout.asaas?.webhook?.enabled && !gatewayHealth.checkout.asaas?.webhook?.interrupted ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
+              {gatewayHealth.checkout.saleReady && gatewayHealth.checkout.asaas?.apiReachable && gatewayHealth.checkout.asaas?.webhook?.enabled && !gatewayHealth.checkout.asaas?.webhook?.interrupted ? "Asaas conectado" : "Configuração pendente"}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-2 text-xs font-bold text-gray-600 sm:grid-cols-3">
+            <div className="rounded-xl bg-gray-50 px-3 py-3">API: <strong>{gatewayHealth.checkout.asaas?.apiReachable ? "conectada" : "não validada"}</strong></div>
+            <div className="rounded-xl bg-gray-50 px-3 py-3">Conta: <strong>{gatewayHealth.checkout.asaas?.accountStatus?.general || "não consultada"}</strong></div>
+            <div className="rounded-xl bg-gray-50 px-3 py-3">Webhook: <strong>{gatewayHealth.checkout.asaas?.webhook?.enabled && !gatewayHealth.checkout.asaas?.webhook?.interrupted ? "ativo" : "pendente"}</strong></div>
+          </div>
+          {gatewayHealth.checkout.asaas?.error && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">{gatewayHealth.checkout.asaas.error}</p>}
+        </section>
+      )}
 
       <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-2"><CreditCard className="h-5 w-5 text-amber-700" /><h3 className="font-black text-gray-950">Recursos incluídos</h3></div>

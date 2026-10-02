@@ -3,6 +3,7 @@ import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getPostgresPool } from "@/lib/postgres"
 import { getBillingSnapshotForOrganization } from "@/lib/billing-db"
 import { billingProviderConfiguration } from "@/lib/billing-provider"
+import { getAsaasIntegrationHealth } from "@/lib/billing-providers/asaas"
 
 export const dynamic = "force-dynamic"
 
@@ -60,6 +61,10 @@ export async function GET() {
     : Boolean(process.env.MERCADO_PAGO_WEBHOOK_SECRET?.trim())
   const appBaseUrlConfigured = Boolean(process.env.APP_BASE_URL?.trim())
   const publicPlans = Number(plans.rows[0]?.count || 0)
+  const appBaseUrl = (process.env.APP_BASE_URL || "").trim().replace(/\/$/, "")
+  const asaas = provider.provider === "asaas" && appBaseUrl
+    ? await getAsaasIntegrationHealth(appBaseUrl)
+    : null
 
   return NextResponse.json({
     ok: Boolean(billing.ready && link.rows[0]?.billing_account_id),
@@ -90,6 +95,7 @@ export async function GET() {
       saleReady: Boolean(publicPlans > 0 && provider.configured && webhookConfigured && appBaseUrlConfigured),
       webhookEndpoint: provider.provider === "asaas" ? "/api/billing/webhooks/asaas" : "/api/billing/webhooks/mercado-pago",
       authority: "provider-confirmed-backend-only",
+      asaas,
     },
   })
 }

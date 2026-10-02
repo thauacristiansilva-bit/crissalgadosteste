@@ -1,0 +1,105 @@
+ETAPA 4 — ASAAS / PAGAMENTO ATIVO
+
+OBJETIVO
+Deixar a integração do SaborFlow preparada para receber pagamentos reais por:
+- Pix
+- cartão de crédito
+- boleto
+
+A cobrança é criada no Asaas e o cliente conclui o pagamento em página hospedada pelo próprio Asaas.
+O SaborFlow NÃO recebe dados do cartão.
+O plano somente é confirmado/ativado depois do webhook do Asaas.
+
+ARQUIVOS ALTERADOS
+- lib/billing-providers/asaas.ts
+- lib/billing-contracting.ts
+- app/api/billing/webhooks/asaas/route.ts
+- app/api/admin/billing-health/route.ts
+- components/admin/billing-panel.tsx
+- scripts/configure-asaas-webhook.mjs
+
+NOVOS SCRIPTS
+- scripts/test-asaas-integration.mjs
+- scripts/generate-asaas-webhook-token.mjs
+
+MELHORIAS DESTA ETAPA
+1. Validação do ambiente da chave: Sandbox x Produção.
+2. Reconciliação por paymentLink nos webhooks do Asaas.
+3. Atualização automática do ID real da assinatura sub_*.
+4. Webhook idempotente já existente mantido.
+5. Script de configuração do webhook agora cria OU atualiza, evitando duplicação.
+6. Script de teste para validar API, situação da conta e webhook.
+7. Painel mostra Asaas conectado, ambiente, situação da conta e webhook.
+
+VARIÁVEIS NO RAILWAY
+BILLING_PROVIDER=asaas
+ASAAS_ENV=sandbox
+ASAAS_API_KEY=$aact_hmlg_...
+ASAAS_WEBHOOK_TOKEN=whsec_...
+ASAAS_WEBHOOK_EMAIL=seu-email@dominio.com
+APP_BASE_URL=https://SEU-DOMINIO-PUBLICO
+
+PARA PRODUÇÃO
+ASAAS_ENV=production
+ASAAS_API_KEY=$aact_prod_...
+
+IMPORTANTE
+A chave Sandbox começa com $aact_hmlg_.
+A chave Produção começa com $aact_prod_.
+Não coloque a API Key no código, GitHub ou mensagem pública.
+
+PASSO A PASSO RECOMENDADO
+
+1. Aplicar este ZIP na raiz do projeto.
+2. Rodar:
+   npm run build
+
+3. Fazer deploy no Railway.
+
+4. No Asaas, gere uma API Key do ambiente desejado.
+   Recomendação: validar primeiro no Sandbox.
+
+5. Gere um token seguro para o webhook:
+   node scripts/generate-asaas-webhook-token.mjs
+
+6. Coloque as variáveis acima no Railway e faça novo deploy/restart.
+
+7. Pelo Console do Railway, configure/atualize o webhook:
+   node scripts/configure-asaas-webhook.mjs
+
+8. Teste a integração:
+   node scripts/test-asaas-integration.mjs
+
+O resultado esperado contém:
+- "ok": true
+- "api": "connected"
+- webhook enabled: true
+- webhook interrupted: false
+
+9. Faça uma contratação de teste pelo SaborFlow.
+
+SANDBOX
+Use ASAAS_ENV=sandbox e chave $aact_hmlg_. Nenhum pagamento real deve ser usado para homologação.
+
+PRODUÇÃO
+Somente depois da homologação completa, altere no Railway:
+ASAAS_ENV=production
+ASAAS_API_KEY=$aact_prod_...
+
+Mantenha BILLING_PROVIDER=asaas.
+Rode novamente:
+node scripts/configure-asaas-webhook.mjs
+node scripts/test-asaas-integration.mjs
+
+FLUXO DO CLIENTE
+1. Escolhe plano/ciclo.
+2. Escolhe Pix, cartão ou boleto.
+3. Aceita contrato e, no semestral/anual, a cláusula de permanência.
+4. SaborFlow cria Link de Pagamento recorrente no Asaas.
+5. Cliente conclui no Asaas.
+6. Asaas envia webhook.
+7. SaborFlow concilia paymentLink/assinatura.
+8. Pagamento confirmado -> plano é ativado ou agendado para depois do teste grátis.
+
+SEM MIGRATION NOVA
+Esta etapa não cria novas tabelas.
