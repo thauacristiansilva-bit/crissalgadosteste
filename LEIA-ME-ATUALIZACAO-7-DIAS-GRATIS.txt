@@ -1,0 +1,23 @@
+ATUALIZAÇÃO LANDING PAGE SABORFLOW
+
+Esta etapa aplica os seguintes ajustes na página inicial:
+
+1. Mais destaque para o TESTE GRÁTIS DE 7 DIAS.
+2. Hero com CTA mais forte para iniciar cadastro.
+3. Card de destaque guiando a pessoa para o cadastro.
+4. Nova seção com a grade de ícones/"emojis" do sistema.
+5. Nova seção destacando a escolha do teste grátis.
+
+ARQUIVOS ALTERADOS
+- components/marketing/marketing-home.tsx
+- public/marketing/icons-suite.webp
+
+COMO APLICAR
+1. Extraia o conteúdo deste ZIP na raiz do seu projeto.
+2. Aceite substituir os arquivos.
+3. Rode:
+   npm run build
+4. Se der certo:
+   git add .
+   git commit -m "Landing com destaque para 7 dias grátis e nova grade de ícones"
+   git push
