@@ -16,6 +16,7 @@ import type {
   OrganizationRole,
 } from "@/lib/tenant-context"
 import { HelpLabel } from "@/components/admin/help-tip"
+import { DeliverySecurityPanel } from "@/components/admin/delivery-security-panel"
 
 
 type DomainStatus = {
@@ -1631,6 +1632,8 @@ export function SecurityPanel({
           </p>
         )}
       </section>
+
+      <DeliverySecurityPanel />
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

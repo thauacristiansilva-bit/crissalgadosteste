@@ -93,6 +93,31 @@ export function LoginForm() {
     twoFactorCode,
     setTwoFactorCode,
   ] = useState("")
+  const [deliveryChannels,setDeliveryChannels] = useState<Array<{ channel:"email" | "sms"; destination:string }>>([])
+  const [deliveryId,setDeliveryId] = useState("")
+  const [deliveryMessage,setDeliveryMessage] = useState("")
+  const [deliveryNextSend,setDeliveryNextSend] = useState(0)
+  const [deliveryClock,setDeliveryClock] = useState(0)
+
+  useEffect(() => {
+    setDeliveryId(""); setDeliveryMessage(""); setDeliveryChannels([])
+    if (step !== "twoFactor" || twoFactorMode !== "verify") return
+    let active = true
+    fetch("/api/auth/2fa/delivery", { cache:"no-store" }).then((response) => response.json()).then((data) => { if (active && Array.isArray(data.channels)) setDeliveryChannels(data.channels) }).catch(() => undefined)
+    const timer = setInterval(() => setDeliveryClock(Date.now()),1000)
+    return () => { active = false; clearInterval(timer) }
+  },[step,twoFactorMode])
+
+  async function receiveDeliveryCode(channel:"email" | "sms") {
+    setBusy(true); setError(""); setDeliveryId(""); setDeliveryMessage(""); setTwoFactorCode("")
+    try {
+      const response = await fetch("/api/auth/2fa/delivery", { method:"POST",headers:{ "Content-Type":"application/json" },body:JSON.stringify({ channel }) })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.id) throw new Error(data?.error || "Não foi possível enviar o código.")
+      setDeliveryId(data.id);setDeliveryMessage(`Código enviado para ${data.destination}. Válido por 5 minutos.`);setDeliveryNextSend(Date.now()+60_000);setDeliveryClock(Date.now())
+    } catch (err) { setError(err instanceof Error ? err.message : "Falha no envio.") }
+    finally { setBusy(false) }
+  }
 
   const [
     setupInfo,
@@ -495,6 +520,7 @@ export function LoginForm() {
               JSON.stringify({
                 code:
                   twoFactorCode,
+                ...(deliveryId ? { deliveryId } : {}),
               }),
           },
         )
@@ -725,7 +751,7 @@ export function LoginForm() {
               {twoFactorMode ===
               "setup"
                 ? "Use Google Authenticator, Microsoft Authenticator, Authy ou outro aplicativo compatível com TOTP."
-                : "Digite o código atual do seu aplicativo autenticador ou um código de recuperação."}
+                : deliveryId ? "Digite abaixo o código que você recebeu." : "Digite o código do autenticador ou escolha um contato confirmado abaixo."}
             </p>
           </div>
 
@@ -782,6 +808,8 @@ export function LoginForm() {
               )}
             </div>
           )}
+
+          {twoFactorMode === "verify" && deliveryChannels.length > 0 && <div className="space-y-3 rounded-xl border border-gray-200 p-3"><div className="flex flex-wrap gap-2">{deliveryChannels.map((contact) => <button key={contact.channel} type="button" disabled={busy || deliveryNextSend > deliveryClock} onClick={() => void receiveDeliveryCode(contact.channel)} className="flex-1 rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">{contact.channel === "email" ? "Receber por e-mail" : "Receber por SMS"}<span className="mt-1 block font-normal text-gray-500">{contact.destination}</span></button>)}</div>{deliveryNextSend > deliveryClock && <p className="text-xs text-gray-500">Novo envio em {Math.ceil((deliveryNextSend-deliveryClock)/1000)} segundos.</p>}{deliveryMessage && <p role="status" className="text-xs text-blue-800">{deliveryMessage}</p>}{deliveryId && <button type="button" disabled={busy} onClick={() => { setDeliveryId("");setDeliveryMessage("");setTwoFactorCode("") }} className="text-xs font-bold text-gray-600 underline">Usar autenticador ou código de recuperação</button>}</div>}
 
           <form
             onSubmit={

@@ -1,0 +1,70 @@
+ETAPA: RECEBER CODIGO DE ACESSO POR E-MAIL OU SMS
+
+1. INSTALAR NA PASTA ORIGINAL
+Extraia este ZIP. Copie as pastas app, components, lib, database e scripts para a pasta original do projeto. Aceite substituir arquivos, sem apagar as pastas existentes.
+No terminal do VS Code, execute um comando por vez:
+
+npm run typecheck
+node --test scripts/test-delivery-codes.cjs
+git add .
+git commit -m "Adiciona codigo de acesso por email e SMS"
+git push origin main
+
+Aguarde o deploy no Railway. Nao precisa instalar pacote npm adicional.
+
+2. INSTALAR AS TABELAS
+Abra o console do servico SaborFlow no Railway, dentro de /app (onde DATABASE_URL e as dependencias ja existem), e execute:
+
+node scripts/apply-delivery-codes-migration.mjs
+
+A instalacao pode ser executada novamente sem recriar contatos ou apagar dados. Se a sua implantacao ja executou a migracao 045, nao precisa repetir.
+
+3. HABILITAR ENVIO (CONFIGURACAO DO PROGRAMADOR, UMA VEZ)
+No Railway > servico SaborFlow > Variables, adicione:
+
+AUTH_DELIVERY_CODES_ENABLED=true
+
+E-MAIL: usa Resend. Adicione ou mantenha os valores reais ja configurados:
+AUTH_RESEND_API_KEY=chave_do_seu_servico_Resend
+AUTH_EMAIL_FROM=SaborFlow <acesso@seu-dominio.com.br>
+
+Configure um remetente que seu servico aceite e o dominio correspondente.
+Painel: https://resend.com
+Documentacao: https://resend.com/docs
+
+SMS: usa Twilio. Adicione os valores reais da sua conta:
+AUTH_SMS_ACCOUNT_SID=seu_Account_SID
+AUTH_SMS_AUTH_TOKEN=seu_Auth_Token
+AUTH_SMS_FROM=numero_remetente_Twilio_com_DDI
+
+O remetente precisa permitir envio de SMS ao Brasil. Verifique as permissoes geograficas e restricoes da sua conta. Contas de teste podem restringir destinatarios/conteudo. Para uso com clientes, configure uma conta de producao.
+Painel: https://console.twilio.com
+Documentacao: https://www.twilio.com/docs/messaging/api/message-resource
+
+NAO copie literalmente os textos de exemplo como senhas. Use os dados reais da sua conta SOMENTE nas variaveis do Railway, nunca no GitHub ou em mensagem para outras pessoas. Os canais sao independentes: voce pode habilitar so o e-mail primeiro. As mensagens usam o saldo/contratacao dos servicos de envio. Mantenha SESSION_SECRET e a configuracao atual do autenticador.
+Aguarde o deploy apos alterar variaveis.
+
+4. CADASTRAR O CONTATO NO PAINEL
+Entre normalmente > Seguranca > Receber codigo por e-mail ou SMS.
+Escolha o canal. Para SMS, informe seu telefone com DDD. O e-mail sempre e o da sua conta.
+Informe um codigo atual do autenticador ou um codigo de recuperacao para autorizar o cadastro.
+Clique Enviar codigo para confirmar contato. Digite o codigo recebido e confirme.
+Apenas depois desta confirmacao o contato aparece como opcao no login.
+
+Se acabou de usar o mesmo codigo do autenticador no login, aguarde o proximo codigo antes de confirmar o cadastro.
+
+5. TESTAR
+Saia e entre novamente. Depois da senha, escolha Receber por e-mail ou Receber por SMS.
+Digite o codigo recebido no campo de autenticacao e confirme.
+O metodo original e Passkey permanecem disponiveis como alternativas; primeiro cadastro do autenticador ainda e necessario.
+E-mail/SMS sao alternativas opcionais com menor protecao que Passkey/autenticador; nao equivalem aos mesmos niveis de garantia de uma autenticacao resistente a phishing.
+
+LIMITES
+Codigo com 6 digitos, valido por 5 minutos e utilizavel uma vez.
+5 erros invalidam o codigo. Novo envio invalida o anterior.
+Intervalo minimo de 60 segundos e ate 10 envios por usuario por hora, inclusive entre replicas.
+Contato removido, codigo expirado, conta inativa ou e-mail antigo nao podem validar um login.
+Contato e tentativa ficam separados por usuario com politicas de acesso no banco.
+
+VALIDACAO DESTA ENTREGA
+npm run typecheck passou; 9 testes de regressao isolados passaram. Nao foi enviado SMS/e-mail real nem alterado seu banco de producao aqui. A entrega real deve ser verificada por voce depois da configuracao acima.

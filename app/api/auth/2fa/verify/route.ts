@@ -41,6 +41,7 @@ import {
   markAdminUserLoginCompleted,
   verifySecondFactor,
 } from "@/lib/security/two-factor"
+import { consumeDeliveryCode } from "@/lib/security/delivery-codes"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -187,11 +188,12 @@ export async function POST(
       .catch(() => null)) as
       | {
           code?: string
+          deliveryId?: string
         }
       | null
 
   const code =
-    body?.code?.trim() || ""
+    typeof body?.code === "string" ? body.code.trim().slice(0,40) : ""
 
   if (!code) {
     await registerAuthFailure(
@@ -243,11 +245,9 @@ export async function POST(
       recoveryCodes =
         activated.recoveryCodes
     } else {
-      const verified =
-        await verifySecondFactor(
-          challenge.userId,
-          code,
-        )
+      const verified = typeof body?.deliveryId === "string" && body.deliveryId
+        ? await consumeDeliveryCode({ userId:challenge.userId,id:body.deliveryId,code,purpose:"login",binding:store.get(TWO_FACTOR_CHALLENGE_COOKIE)?.value || "" })
+        : await verifySecondFactor(challenge.userId,code)
 
       if (!verified) {
         await registerAuthFailure(
