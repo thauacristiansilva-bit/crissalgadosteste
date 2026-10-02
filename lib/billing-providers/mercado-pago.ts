@@ -65,6 +65,7 @@ export function createMercadoPagoBillingProvider(): BillingProvider {
           auto_recurring: {
             frequency,
             frequency_type: "months",
+            ...(input.startDate ? { start_date: input.startDate } : {}),
             transaction_amount: Number((input.amountCents / 100).toFixed(2)),
             currency_id: input.currency,
           },

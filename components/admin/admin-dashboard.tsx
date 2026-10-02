@@ -196,10 +196,14 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
   const visibleNavItems = useMemo(
     () => navItems.filter((item) =>
       allowedSections.has(item.key) &&
-      !(demoEnvironment && (item.key === "billing" || item.key === "connections")),
+      !(demoEnvironment && item.key === "connections") &&
+      !(demoEnvironment && !demoEnvironment.basicMode && item.key === "billing"),
     ),
     [allowedSections, demoEnvironment],
   )
+  const trialDaysRemaining = demoEnvironment?.basicMode
+    ? Math.max(0, Math.ceil((new Date(demoEnvironment.expiresAt).getTime() - Date.now()) / 86_400_000))
+    : null
 
   const getOrderAudioContext = () => {
     if (typeof window === "undefined") return null
@@ -576,18 +580,30 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
           {demoEnvironment?.basicMode && products.length === 0 && <div className="mb-4 rounded-2xl border border-orange-200 bg-white p-5"><h2 className="text-lg font-black">Vamos registrar sua primeira venda?</h2><p className="mt-2 text-sm text-stone-600">Cadastre uma categoria e seu primeiro produto. Depois, abra Nova venda. Para receber pedidos pelo link, confira endereço, horários e formas de pagamento nas configurações e ative o recebimento de pedidos.</p><button type="button" onClick={() => changeSection("products")} className="mt-4 rounded-xl bg-orange-600 px-4 py-3 text-sm font-bold text-white">Cadastrar meu primeiro produto</button></div>}
           {demoEnvironment && (
-            <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">{demoEnvironment.basicMode ? "Teste grátis de gestão" : "Ambiente demonstrativo"}</p>
-                <p className="mt-1 text-sm font-black text-amber-950">{demoEnvironment.basicMode ? "Seu painel básico · sem IA" : demoEnvironment.kind === "public" ? "Demo pública isolada" : "Trial individual isolado"}</p>
-                <p className="mt-1 text-xs text-amber-800">{demoEnvironment.basicMode ? "1 loja · até 30 produtos · termina em " : "Dados fictícios · integrações externas bloqueadas · expira em "}{new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}</p>
+            <div className={`mb-5 flex flex-col gap-4 rounded-3xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${demoEnvironment.basicMode ? "border-orange-200 bg-orange-50" : "border-amber-300 bg-amber-50"}`}>
+              <div className="flex items-center gap-4">
+                {demoEnvironment.basicMode && (
+                  <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-2xl bg-orange-600 text-white shadow-sm">
+                    <span className="text-2xl font-black leading-none">{trialDaysRemaining}</span>
+                    <span className="mt-1 text-[9px] font-black uppercase tracking-wider">dias</span>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-700">{demoEnvironment.basicMode ? "Seu período gratuito está ativo" : "Ambiente demonstrativo"}</p>
+                  <p className="mt-1 text-sm font-black text-stone-950">{demoEnvironment.basicMode ? `${adminEmail} · Administrador da conta` : demoEnvironment.kind === "public" ? "Demo pública isolada" : "Trial individual isolado"}</p>
+                  <p className="mt-1 text-xs text-stone-600">{demoEnvironment.basicMode ? `${trialDaysRemaining} ${trialDaysRemaining === 1 ? "dia restante" : "dias restantes"} · seus dados, produtos e pedidos ficam nesta conta` : `Dados fictícios · integrações externas bloqueadas · expira em ${new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}`}</p>
+                </div>
               </div>
-              <a href={demoEnvironment.basicMode ? "/planos" : "/demo"} className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-xs font-black text-amber-900">{demoEnvironment.basicMode ? "Ver planos" : "Sobre a demo"}</a>
+              {demoEnvironment.basicMode ? (
+                <button type="button" onClick={() => changeSection("billing")} className="rounded-2xl bg-stone-950 px-4 py-3 text-xs font-black text-white hover:bg-stone-800">Ver meu plano e contratar</button>
+              ) : (
+                <a href="/demo" className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-xs font-black text-amber-900">Sobre a demo</a>
+              )}
             </div>
           )}
           <div className="mb-5 flex flex-col gap-3 rounded-3xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: saborFlowBrand.border }}>
-            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment?.basicMode ? "SABORFLOW · TESTE GRÁTIS" : demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment?.basicMode ? `Gestão básica · ${settings.storeName}` : demoEnvironment ? `Ambiente DEMO ativo · ${settings.storeName}` : `Empresa ativa · ${settings.storeName}`}</p></div>
-            <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>{demoEnvironment?.basicMode ? "TESTE GRÁTIS" : demoEnvironment ? "PAINEL DEMO" : "Painel oficial"}</span>
+            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment?.basicMode ? "SABORFLOW · SUA CONTA" : demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment?.basicMode ? `${settings.storeName} · ${adminEmail}` : demoEnvironment ? `Ambiente DEMO ativo · ${settings.storeName}` : `Empresa ativa · ${settings.storeName}`}</p></div>
+            <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>{demoEnvironment?.basicMode ? "Administrador" : demoEnvironment ? "PAINEL DEMO" : "Painel oficial"}</span>
           </div>
           {settings.cashRegisterEnabled && !openCash && (
             <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -649,7 +665,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div><p className="text-sm font-black" style={{ color: saborFlowBrand.brown }}>Plataforma</p><p className="text-xs text-gray-500">Painel administrativo do SaborFlow.</p></div>
-              <p className="text-xs font-semibold text-gray-500">{demoEnvironment?.basicMode ? "Teste grátis:" : demoEnvironment ? "Ambiente DEMO:" : "Empresa ativa:"} <span style={{ color: saborFlowBrand.orangeStrong }}>{settings.storeName}</span></p>
+              <p className="text-xs font-semibold text-gray-500">{demoEnvironment?.basicMode ? "Conta:" : demoEnvironment ? "Ambiente DEMO:" : "Empresa ativa:"} <span style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment?.basicMode ? adminEmail : settings.storeName}</span></p>
             </div>
           </footer>
         </main>

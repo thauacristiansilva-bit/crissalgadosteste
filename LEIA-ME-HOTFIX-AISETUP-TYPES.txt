@@ -1,0 +1,25 @@
+HOTFIX - BUILD TYPESCRIPT / aiSetup / UUID
+
+Este pacote corrige os erros de build:
+- PlanEntitlements sem a propriedade aiSetup
+- PlanEntitlementKey sem aiSetup
+- objetos de entitlements sem aiSetup
+- tipagem dos UUIDs adminUserId e billingAccountId no fluxo de teste
+- suporte de migration para aiSetup como entitlement de plano
+
+ARQUIVOS ALTERADOS
+- lib/billing-types.ts
+- lib/billing-db.ts
+- lib/billing-contracting.ts
+- lib/demo-db.ts
+- database/migrations/040_ai_setup_entitlement.sql
+
+APLICAÇÃO
+1. Extraia o ZIP na raiz do projeto e aceite substituir.
+2. Rode: npm run build
+3. Se o build passar, faça o deploy normalmente.
+
+MIGRATION 040
+A migration 040 permite que aiSetup também exista como entitlement gravado diretamente em sf_plan_entitlements.
+Ela deixa IA desativada por padrão para planos comuns e preserva legacy-existing como liberado.
+O teste básico continua com aiSetup=false.

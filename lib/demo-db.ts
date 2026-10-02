@@ -508,29 +508,90 @@ async function createDemoEnvironmentInternal(input: {
 
     const environmentId = randomUUID()
     const organizationId = randomUUID()
-    const adminUserId = randomUUID()
-    const billingAccountId = randomUUID()
+    let adminUserId: string = randomUUID()
+    let billingAccountId: string = randomUUID()
     const subscriptionId = randomUUID()
     const membershipId = randomUUID()
     const slug = `${basicProfile ? "teste" : "demo"}-${environmentId.replace(/-/g, "").slice(0, 12)}`
     const storeName = basicProfile?.storeName || (input.kind === "public" ? "SaborFlow Demo" : "SaborFlow Trial Demo")
-    const email = `demo+${environmentId.replace(/-/g, "")}@example.invalid`
+    let email = `demo+${environmentId.replace(/-/g, "")}@example.invalid`
+    let sessionVersion = 1
+    let createSyntheticUser = true
+    let createSyntheticBillingAccount = true
+
+    if (basicProfile && input.requestedByUserId) {
+      const realOwner = await client.query<{
+        user_id: string
+        email: string
+        session_version: number
+        billing_account_id: string
+      }>(`
+        SELECT u.id AS user_id, u.email, u.session_version, ba.id AS billing_account_id
+        FROM sf_users u
+        INNER JOIN sf_billing_accounts ba ON ba.owner_user_id = u.id
+        WHERE u.id = $1
+          AND u.status = 'active'
+          AND ba.status = 'active'
+        LIMIT 1
+        FOR UPDATE OF ba
+      `, [input.requestedByUserId])
+      const ownerRow = realOwner.rows[0]
+      if (!ownerRow) throw new Error("Sua conta comercial não está disponível. Entre novamente.")
+
+      const paidSubscription = await client.query<{ id: string }>(`
+        SELECT s.id
+        FROM sf_subscriptions s
+        INNER JOIN sf_plans p ON p.id = s.plan_id
+        WHERE s.billing_account_id = $1
+          AND p.internal = false
+          AND s.status IN ('trialing', 'active', 'past_due', 'suspended')
+        LIMIT 1
+      `, [ownerRow.billing_account_id])
+      if (paidSubscription.rowCount) {
+        throw new Error("Sua conta já possui um plano comercial. Entre no painel para continuar.")
+      }
+
+      adminUserId = ownerRow.user_id
+      billingAccountId = ownerRow.billing_account_id
+      email = ownerRow.email
+      sessionVersion = Number(ownerRow.session_version || 1)
+      createSyntheticUser = false
+      createSyntheticBillingAccount = false
+
+      await client.query(`
+        UPDATE sf_billing_accounts
+        SET entitlement_overrides = $2::jsonb,
+            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+            onboarding_unlocked_at = COALESCE(onboarding_unlocked_at, now()),
+            updated_at = now()
+        WHERE id = $1
+      `, [
+        billingAccountId,
+        JSON.stringify(basicTrialEntitlements),
+        JSON.stringify({ basicTrial: true, basicTrialEnvironmentId: environmentId }),
+      ])
+    }
+
     const durationMs = input.kind === "public"
       ? publicMinutes() * 60_000
       : (basicProfile ? BASIC_TRIAL_DAYS : trialDays()) * 24 * 60 * 60_000
     const expiresAt = new Date(Date.now() + durationMs)
 
-    await client.query(`
-      INSERT INTO sf_users (
-        id, name, email, status, session_version, password_updated_at, created_at, updated_at
-      ) VALUES ($1, $2, $3, 'active', 1, now(), now(), now())
-    `, [adminUserId, input.kind === "public" ? "Visitante Demo" : "Usuário Trial", email])
+    if (createSyntheticUser) {
+      await client.query(`
+        INSERT INTO sf_users (
+          id, name, email, status, session_version, password_updated_at, created_at, updated_at
+        ) VALUES ($1, $2, $3, 'active', 1, now(), now(), now())
+      `, [adminUserId, input.kind === "public" ? "Visitante Demo" : "Usuário Trial", email])
+    }
 
-    await client.query(`
-      INSERT INTO sf_billing_accounts (
-        id, owner_user_id, status, billing_email, entitlement_overrides, metadata, onboarding_unlocked_at
-      ) VALUES ($1, $2, 'active', $3, $5::jsonb, $4::jsonb, now())
-    `, [billingAccountId, adminUserId, email, JSON.stringify({ demo: true, environmentId, kind: input.kind }), JSON.stringify(basicProfile ? basicTrialEntitlements : {})])
+    if (createSyntheticBillingAccount) {
+      await client.query(`
+        INSERT INTO sf_billing_accounts (
+          id, owner_user_id, status, billing_email, entitlement_overrides, metadata, onboarding_unlocked_at
+        ) VALUES ($1, $2, 'active', $3, $5::jsonb, $4::jsonb, now())
+      `, [billingAccountId, adminUserId, email, JSON.stringify({ demo: true, environmentId, kind: input.kind }), JSON.stringify(basicProfile ? basicTrialEntitlements : {})])
+    }
 
     await client.query(`
       INSERT INTO sf_subscriptions (
@@ -541,7 +602,7 @@ async function createDemoEnvironmentInternal(input: {
         $1, $2, $3, 'active', 'manual', 'internal-demo',
         now(), $4, $4, now(), $5::jsonb, 'demo-active', now()
       )
-    `, [subscriptionId, billingAccountId, planId, expiresAt, JSON.stringify({ demo: true, environmentId, kind: input.kind })])
+    `, [subscriptionId, billingAccountId, planId, expiresAt, JSON.stringify({ demo: true, environmentId, kind: input.kind, ...(basicProfile ? { basicTrial: true, requestedByUserId: input.requestedByUserId } : {}) })])
 
     await client.query(`
       INSERT INTO sf_organizations (
@@ -636,7 +697,7 @@ async function createDemoEnvironmentInternal(input: {
         organizationName: storeName,
         organizationSlug: slug,
         role: "owner",
-        sessionVersion: 1,
+        sessionVersion,
       },
       reused: false,
     }

@@ -1,0 +1,74 @@
+SABORFLOW — CONTA REAL + 7 DIAS GRÁTIS + CONTINUIDADE DO PLANO
+
+O QUE ESTA ETAPA ALTERA
+
+1. O teste grátis deixa de criar um usuário interno demo+... para novos cadastros.
+   A empresa de teste passa a pertencer ao MESMO usuário/e-mail que fez o cadastro.
+
+2. O cliente pode sair e entrar novamente usando o mesmo e-mail e a mesma senha
+   cadastrados no início do teste.
+
+3. O painel deixa de apresentar o teste básico como "PAINEL DEMO".
+   Mostra o e-mail da conta e identifica o usuário como Administrador.
+
+4. O painel mostra a quantidade de dias que faltam para terminar os 7 dias grátis.
+
+5. A aba "Plano e cobrança" fica disponível durante o teste grátis.
+
+6. O cliente pode contratar um plano mensal ou anual antes do teste acabar.
+   Exemplo: se contratar no 5º dia, os 2 dias grátis restantes continuam normalmente.
+
+7. O plano pago é agendado para começar depois do fim do teste.
+   A integração com Mercado Pago envia a data de início da recorrência.
+
+8. Na área do plano, o cliente vê:
+   - e-mail da conta;
+   - dias grátis restantes;
+   - data de término do teste;
+   - plano escolhido;
+   - mensal ou anual;
+   - data programada para início do plano pago.
+
+9. Quando o teste termina e existe um plano autorizado/agendado:
+   - a empresa continua a mesma;
+   - os dados não são recriados;
+   - o trial interno é encerrado;
+   - o plano comercial entra em vigor;
+   - a empresa passa para status ativo.
+
+IMPORTANTE
+- Esta atualização não cria nova migration de banco.
+- O comportamento novo vale principalmente para NOVOS testes criados depois do deploy.
+- Testes antigos que já foram criados com usuário demo interno não são migrados automaticamente.
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto SaborFlow.
+2. Aceite substituir os arquivos.
+3. No terminal do VS Code, rode:
+
+   npm run build
+
+4. Se aparecer "Compiled successfully" e o TypeScript terminar sem erro:
+
+   git add .
+   git commit -m "Conta real no trial e continuidade do plano"
+   git push
+
+TESTE RECOMENDADO ANTES DE DIVULGAR
+1. Use um e-mail NOVO.
+2. Acesse /teste-gratis.
+3. Cadastre nome, CPF, e-mail e senha.
+4. Confirme que o painel mostra o e-mail cadastrado e "Administrador".
+5. Confirme que aparece o contador de dias restantes.
+6. Saia da conta.
+7. Entre por /login usando o mesmo e-mail e senha.
+8. Abra "Plano e cobrança".
+9. Escolha mensal ou anual.
+10. Confirme que, após autorizar a contratação, aparece que o plano está agendado
+    para começar depois do fim dos 7 dias grátis.
+
+VALIDAÇÃO FEITA AQUI
+- Os arquivos alterados passaram por validação de sintaxe TypeScript/TSX.
+- O build completo não pôde ser executado neste ambiente porque o acesso ao registry.npmjs.org
+  estava indisponível e as dependências locais estavam incompletas.
+- Rode obrigatoriamente npm run build no seu VS Code antes do git push.

@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       userId: demo.tenantContext.userId,
       organizationId: demo.tenantContext.organizationId,
       sessionVersion: demo.tenantContext.sessionVersion,
-      authSource: "demo",
+      authSource: "commercial",
       superadminAuthorized: false,
       request,
       maxAgeSeconds: remainingSeconds,

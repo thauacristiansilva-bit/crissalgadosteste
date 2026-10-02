@@ -11,6 +11,7 @@ export type ProviderCheckoutInput = {
   currency: string
   payerEmail: string
   returnUrl: string
+  startDate?: string | null
 }
 
 export type ProviderCheckoutResult = {

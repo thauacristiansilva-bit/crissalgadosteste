@@ -65,7 +65,7 @@ export async function getDemoEnvironmentForOrganization(
     `, [organizationId])
 
     const row = result.rows[0]
-    if (!row) return null
+    if (!row || row.status === "closed") return null
 
     return {
       id: row.id,
@@ -85,47 +85,151 @@ export async function getDemoEnvironmentForOrganization(
 }
 
 export async function expireDemoOrganizationIfNeeded(organizationId: string) {
+  const client = await getPostgresPool().connect()
   try {
-    const result = await getPostgresPool().query<{
+    await client.query("BEGIN")
+    const due = await client.query<{
       id: string
-      expired: boolean
+      billing_account_id: string
+      expires_at: Date | string
+      basic_mode: boolean
     }>(`
-      WITH due AS (
+      SELECT
+        id,
+        billing_account_id,
+        expires_at,
+        COALESCE(metadata ->> 'mode', '') = 'basic' AS basic_mode
+      FROM sf_demo_environments
+      WHERE organization_id = $1
+        AND status = 'active'
+        AND expires_at <= now()
+      LIMIT 1
+      FOR UPDATE
+    `, [organizationId])
+    const demo = due.rows[0]
+    if (!demo) {
+      await client.query("COMMIT")
+      return false
+    }
+
+    // Um teste básico pode ter um plano comercial já autorizado e agendado
+    // para começar exatamente depois dos 7 dias gratuitos.
+    const scheduled = demo.basic_mode
+      ? await client.query<{
+          id: string
+          billing_cycle: "monthly" | "annual" | null
+        }>(`
+          SELECT s.id, s.billing_cycle
+          FROM sf_subscriptions s
+          INNER JOIN sf_plans p ON p.id = s.plan_id
+          WHERE s.billing_account_id = $1
+            AND p.internal = false
+            AND s.status = 'pending'
+            AND lower(COALESCE(s.provider_status, '')) = 'authorized'
+            AND COALESCE(s.metadata ->> 'scheduledActivationAt', '') <> ''
+            AND (s.metadata ->> 'scheduledActivationAt')::timestamptz <= now()
+          ORDER BY s.created_at DESC
+          LIMIT 1
+          FOR UPDATE OF s
+        `, [demo.billing_account_id])
+      : { rows: [] as Array<{ id: string; billing_cycle: "monthly" | "annual" | null }> }
+
+    const paid = scheduled.rows[0]
+    if (paid) {
+      const startsAt = new Date(demo.expires_at)
+      const endsAt = new Date(startsAt)
+      if (paid.billing_cycle === "annual") endsAt.setFullYear(endsAt.getFullYear() + 1)
+      else endsAt.setMonth(endsAt.getMonth() + 1)
+
+      await client.query(`
+        UPDATE sf_subscriptions s
+        SET status = 'canceled',
+            canceled_at = COALESCE(canceled_at, now()),
+            metadata = COALESCE(metadata, '{}'::jsonb) || '{"completedTrial":true}'::jsonb,
+            updated_at = now()
+        FROM sf_plans p
+        WHERE s.plan_id = p.id
+          AND s.billing_account_id = $1
+          AND p.internal = true
+          AND s.status <> 'canceled'
+      `, [demo.billing_account_id])
+
+      await client.query(`
+        UPDATE sf_subscriptions
+        SET status = 'active',
+            activated_at = COALESCE(activated_at, now()),
+            current_period_start = $2,
+            current_period_end = $3,
+            metadata = COALESCE(metadata, '{}'::jsonb) || '{"activatedAfterTrial":true}'::jsonb,
+            updated_at = now()
+        WHERE id = $1
+      `, [paid.id, startsAt, endsAt])
+
+      await client.query(`
         UPDATE sf_demo_environments
-        SET
-          status = 'expired',
+        SET status = 'closed',
+            expired_at = COALESCE(expired_at, now()),
+            metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+            updated_at = now()
+        WHERE id = $1
+      `, [demo.id, JSON.stringify({ convertedToPaid: true, paidSubscriptionId: paid.id })])
+
+      await client.query(`
+        UPDATE sf_organizations
+        SET status = 'active', updated_at = now()
+        WHERE id = $1
+      `, [organizationId])
+
+      await client.query(`
+        UPDATE sf_billing_accounts
+        SET entitlement_overrides = '{}'::jsonb,
+            metadata = (COALESCE(metadata, '{}'::jsonb) - 'basicTrial' - 'basicTrialEnvironmentId') || '{"convertedFromTrial":true}'::jsonb,
+            onboarding_unlocked_at = COALESCE(onboarding_unlocked_at, now()),
+            updated_at = now()
+        WHERE id = $1
+      `, [demo.billing_account_id])
+
+      await client.query("COMMIT")
+      return true
+    }
+
+    await client.query(`
+      UPDATE sf_demo_environments
+      SET status = 'expired',
           expired_at = COALESCE(expired_at, now()),
           updated_at = now()
-        WHERE organization_id = $1
-          AND status = 'active'
-          AND expires_at <= now()
-        RETURNING id, organization_id, billing_account_id
-      ),
-      suspended_org AS (
-        UPDATE sf_organizations o
-        SET status = 'suspended', updated_at = now()
-        FROM due
-        WHERE o.id = due.organization_id
-        RETURNING o.id
-      ),
-      canceled_subscription AS (
-        UPDATE sf_subscriptions s
-        SET
-          status = 'canceled',
+      WHERE id = $1
+    `, [demo.id])
+
+    await client.query(`
+      UPDATE sf_organizations
+      SET status = 'suspended', updated_at = now()
+      WHERE id = $1
+    `, [organizationId])
+
+    // Ao terminar o teste, cancelamos apenas a assinatura interna do trial.
+    // Checkouts comerciais pendentes continuam válidos para o cliente concluir.
+    await client.query(`
+      UPDATE sf_subscriptions s
+      SET status = 'canceled',
           canceled_at = COALESCE(canceled_at, now()),
           updated_at = now(),
-          metadata = COALESCE(metadata, '{}'::jsonb) || '{"expiredBy":"demo-phase-16"}'::jsonb
-        FROM due
-        WHERE s.billing_account_id = due.billing_account_id
-          AND s.status <> 'canceled'
-        RETURNING s.id
-      )
-      SELECT id, true AS expired FROM due
-    `, [organizationId])
-    return Boolean(result.rowCount)
+          metadata = COALESCE(metadata, '{}'::jsonb) || '{"expiredBy":"basic-trial"}'::jsonb
+      FROM sf_plans p
+      WHERE s.plan_id = p.id
+        AND s.billing_account_id = $1
+        AND p.internal = true
+        AND s.status <> 'canceled'
+    `, [demo.billing_account_id])
+
+    await client.query("COMMIT")
+    return true
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined)
     if (missingDemoSchema(error)) return false
     throw error
+  } finally {
+    client.release()
   }
 }
 

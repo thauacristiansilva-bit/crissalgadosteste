@@ -39,10 +39,10 @@ export function BasicTrialSignup({ signedIn }: { signedIn: boolean }) {
     } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível conectar ao servidor."); setBusy(false) }
   }
   return <section className="rounded-[28px] border border-orange-100 bg-white p-6 shadow-xl shadow-orange-950/5 sm:p-8" aria-label="Cadastro do teste grátis">
-    <div className="flex items-center justify-between text-sm font-bold"><span className="text-orange-700">7 dias grátis</span><span className="text-stone-500">Etapa {step} de 2</span></div>
+    <div className="flex items-center justify-between text-sm font-bold"><span className="text-orange-700">7 dias grátis · sua própria conta</span><span className="text-stone-500">Etapa {step} de 2</span></div>
     <div aria-hidden="true" className="mt-4 flex gap-2"><span className="h-1 flex-1 rounded bg-orange-600" /><span className={`h-1 flex-1 rounded ${step === 2 ? "bg-orange-600" : "bg-stone-200"}`} /></div>
     <h2 ref={heading} tabIndex={-1} className="mt-6 text-2xl font-black outline-none">{step === 1 ? "Conte um pouco da sua loja" : authenticated ? "Tudo pronto para começar" : mode === "signup" ? "Crie seu acesso" : "Entre para continuar"}</h2>
-    <p className="mt-2 text-sm leading-6 text-stone-500">{step === 1 ? "Estas respostas ajudam a conhecer sua operação." : "Seu teste começa quando o painel estiver pronto."}</p>
+    <p className="mt-2 text-sm leading-6 text-stone-500">{step === 1 ? "Estas respostas ajudam a conhecer sua operação." : authenticated ? "Sua conta continuará sendo a mesma durante e depois do teste." : mode === "signup" ? "O e-mail e a senha abaixo serão seu acesso ao SaborFlow sempre que voltar." : "Entre com o mesmo e-mail e senha usados no cadastro."}</p>
     {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {step === 1 ? <form onSubmit={next} className="mt-6 space-y-5">
       <label className="block text-sm font-bold">Nome da loja<input className={inputClass} value={profile.storeName} onChange={e => setProfile({ ...profile, storeName: e.target.value })} required minLength={2} maxLength={80} autoComplete="organization" placeholder="Ex.: Delícias da Ana" /></label>
@@ -57,7 +57,7 @@ export function BasicTrialSignup({ signedIn }: { signedIn: boolean }) {
         <label className="block text-sm font-bold">Senha<input name="password" type="password" required minLength={mode === "signup" ? 12 : 1} maxLength={256} autoComplete={mode === "signup" ? "new-password" : "current-password"} className={inputClass} disabled={busy} />{mode === "signup" && <span className="mt-1 block text-xs font-normal text-stone-500">Use pelo menos 12 caracteres.</span>}</label>
         {mode === "signup" && <label className="flex items-start gap-3 text-sm leading-6 text-stone-600"><input type="checkbox" name="legal" required disabled={busy} className="mt-1 h-5 w-5 shrink-0 accent-orange-600" /><span>Li e aceito os <Link target="_blank" href="/termos" className="underline">Termos de Uso</Link> e o <Link target="_blank" href="/privacidade" className="underline">Aviso de Privacidade</Link>.</span></label>}
       </>}
-      <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-4 font-bold text-white hover:bg-orange-700 disabled:opacity-60">{busy && <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />}{busy ? "Preparando seu painel..." : "Abrir meu teste grátis"}</button>
+      <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-4 font-bold text-white hover:bg-orange-700 disabled:opacity-60">{busy && <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />}{busy ? "Preparando sua conta..." : "Entrar no meu painel por 7 dias"}</button>
       <button type="button" disabled={busy} onClick={() => { setStep(1); setError(""); focusHeading() }} className="w-full text-sm font-bold text-stone-500">Voltar às informações da loja</button>
     </form>}
   </section>

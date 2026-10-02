@@ -346,6 +346,7 @@ export async function createCheckoutForUser(input: {
   let checkoutSessionId = ""
   let localSubscriptionId = ""
   let billingAccountId = ""
+  let scheduledStartDate: string | null = null
   let plan: Awaited<ReturnType<typeof publicPlanForCheckout>>
   try {
     await client.query("BEGIN")
@@ -361,6 +362,43 @@ export async function createCheckoutForUser(input: {
     if (row.status !== "active") throw new Error("A conta comercial está suspensa.")
     billingAccountId = row.id
     plan = await publicPlanForCheckout(client, input.planCode, input.billingCycle)
+
+    const basicTrial = await client.query<{ expires_at: Date | string }>(`
+      SELECT d.expires_at
+      FROM sf_demo_environments d
+      WHERE d.billing_account_id = $1
+        AND d.requested_by_user_id = $2
+        AND d.kind = 'trial'
+        AND d.status = 'active'
+        AND d.expires_at > now()
+        AND d.metadata ->> 'mode' = 'basic'
+      ORDER BY d.created_at DESC
+      LIMIT 1
+    `, [billingAccountId, input.userId]).catch((error: unknown) => {
+      if ((error as { code?: string })?.code === "42P01") return { rows: [] as Array<{ expires_at: Date | string }> }
+      throw error
+    })
+    if (basicTrial.rows[0]?.expires_at) {
+      scheduledStartDate = new Date(basicTrial.rows[0].expires_at).toISOString()
+    }
+
+    if (scheduledStartDate) {
+      const alreadyScheduled = await client.query<{ id: string }>(`
+        SELECT s.id
+        FROM sf_subscriptions s
+        INNER JOIN sf_plans p ON p.id = s.plan_id
+        WHERE s.billing_account_id = $1
+          AND p.internal = false
+          AND s.status = 'pending'
+          AND lower(COALESCE(s.provider_status, '')) = 'authorized'
+          AND COALESCE(s.metadata ->> 'scheduledActivationAt', '') <> ''
+        ORDER BY s.created_at DESC
+        LIMIT 1
+      `, [billingAccountId])
+      if (alreadyScheduled.rowCount) {
+        throw new Error("Você já tem um plano contratado e agendado para começar após o teste grátis.")
+      }
+    }
 
     const reusable = await client.query<{
       id: string
@@ -400,7 +438,10 @@ export async function createCheckoutForUser(input: {
       plan.id,
       input.billingCycle,
       provider.name,
-      JSON.stringify({ source: "phase-14-checkout" }),
+      JSON.stringify({
+        source: "phase-14-checkout",
+        ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate, preserveTrial: true } : {}),
+      }),
     ])
     await client.query(`
       INSERT INTO sf_checkout_sessions (
@@ -442,19 +483,20 @@ export async function createCheckoutForUser(input: {
       currency: plan!.currency,
       payerEmail: normalizeEmail(input.email),
       returnUrl: input.returnUrl,
+      startDate: scheduledStartDate,
     })
     await getPostgresPool().query(`
       UPDATE sf_checkout_sessions
       SET status = 'pending', provider_checkout_id = $2, provider_subscription_id = $3,
           checkout_url = $4, metadata = metadata || $5::jsonb, updated_at = now()
       WHERE id = $1
-    `, [checkoutSessionId, checkout.providerCheckoutId, checkout.providerSubscriptionId, checkout.checkoutUrl, JSON.stringify({ providerStatus: checkout.providerStatus })])
+    `, [checkoutSessionId, checkout.providerCheckoutId, checkout.providerSubscriptionId, checkout.checkoutUrl, JSON.stringify({ providerStatus: checkout.providerStatus, ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate } : {}) })])
     await getPostgresPool().query(`
       UPDATE sf_subscriptions
       SET provider_subscription_id = $2, provider_status = $3,
           metadata = metadata || $4::jsonb, last_provider_sync_at = now(), updated_at = now()
       WHERE id = $1
-    `, [localSubscriptionId, checkout.providerSubscriptionId, checkout.providerStatus, JSON.stringify({ checkoutCreated: true })])
+    `, [localSubscriptionId, checkout.providerSubscriptionId, checkout.providerStatus, JSON.stringify({ checkoutCreated: true, ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate, preserveTrial: true } : {}) })])
     return { checkoutUrl: checkout.checkoutUrl, reused: false }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao criar checkout."
@@ -515,6 +557,68 @@ export async function applyProviderSubscriptionSnapshot(
     const supersededBy = subscription.metadata && typeof subscription.metadata === "object"
       ? String(subscription.metadata.supersededBy || "")
       : ""
+    const scheduledActivationAt = subscription.metadata && typeof subscription.metadata === "object"
+      ? String(subscription.metadata.scheduledActivationAt || "")
+      : ""
+    const scheduledActivationTime = scheduledActivationAt ? new Date(scheduledActivationAt).getTime() : 0
+
+    // Quando a contratação acontece durante o teste grátis, o provedor pode
+    // autorizar a assinatura imediatamente, mas o plano comercial só deve
+    // começar depois do último dia gratuito. Mantemos a assinatura local como
+    // pendente/agendada e preservamos o trial até o vencimento.
+    if (mapped === "active" && scheduledActivationTime > Date.now()) {
+      await client.query(`
+        UPDATE sf_subscriptions
+        SET status = 'pending',
+            provider_status = $2,
+            provider_subscription_id = COALESCE(provider_subscription_id, $3),
+            metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
+            last_provider_sync_at = now(), updated_at = now()
+        WHERE id = $1
+      `, [
+        subscription.id,
+        snapshot.status,
+        snapshot.id,
+        JSON.stringify({
+          scheduledActivationAt,
+          providerAuthorized: true,
+          providerNextPaymentDate: snapshot.nextPaymentDate,
+        }),
+      ])
+
+      if (subscription.source_checkout_session_id) {
+        await client.query(`
+          UPDATE sf_checkout_sessions
+          SET status = 'completed',
+              completed_at = COALESCE(completed_at, now()),
+              provider_subscription_id = COALESCE(provider_subscription_id, $2),
+              metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+              updated_at = now()
+          WHERE id = $1
+        `, [
+          subscription.source_checkout_session_id,
+          snapshot.id,
+          JSON.stringify({ scheduledActivationAt, providerAuthorized: true }),
+        ])
+      }
+
+      await client.query(`
+        INSERT INTO sf_subscription_events (
+          id, billing_account_id, subscription_id, event_type, source, provider_event_id, payload
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        ON CONFLICT (source, provider_event_id) WHERE provider_event_id IS NOT NULL DO NOTHING
+      `, [
+        randomUUID(),
+        subscription.billing_account_id,
+        subscription.id,
+        `provider_status_scheduled:${snapshot.status}`,
+        source,
+        providerEventId || null,
+        JSON.stringify({ mappedStatus: mapped, providerSubscriptionId: snapshot.id, scheduledActivationAt }),
+      ])
+      await client.query("COMMIT")
+      return true
+    }
 
     // Um webhook atrasado de um checkout antigo nunca pode reativar um plano que já
     // foi substituído por uma assinatura mais nova.
@@ -605,13 +709,43 @@ export async function applyProviderSubscriptionSnapshot(
         UPDATE sf_billing_accounts
         SET onboarding_unlocked_at = COALESCE(onboarding_unlocked_at, now()),
             entitlement_overrides = CASE
+              WHEN metadata->>'basicTrial' = 'true'
+                THEN '{}'::jsonb
               WHEN metadata->>'bootstrap' IN ('phase-13', 'phase-13-created-by')
                 THEN entitlement_overrides - 'maxOrganizations'
               ELSE entitlement_overrides
             END,
+            metadata = CASE
+              WHEN metadata->>'basicTrial' = 'true'
+                THEN (metadata - 'basicTrial' - 'basicTrialEnvironmentId') || '{"convertedFromTrial":true}'::jsonb
+              ELSE metadata
+            END,
             updated_at = now()
         WHERE id = $1
       `, [subscription.billing_account_id])
+
+      if (scheduledActivationAt) {
+        await client.query(`
+          WITH closed_trial AS (
+            UPDATE sf_demo_environments
+            SET status = 'closed',
+                expired_at = COALESCE(expired_at, now()),
+                metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+                updated_at = now()
+            WHERE billing_account_id = $1
+              AND kind = 'trial'
+              AND metadata ->> 'mode' = 'basic'
+              AND status IN ('active', 'expired')
+            RETURNING organization_id
+          )
+          UPDATE sf_organizations o
+          SET status = 'active', updated_at = now()
+          FROM closed_trial
+          WHERE o.id = closed_trial.organization_id
+        `, [subscription.billing_account_id, JSON.stringify({ convertedToPaid: true, paidSubscriptionId: subscription.id })]).catch((error: unknown) => {
+          if ((error as { code?: string })?.code !== "42P01") throw error
+        })
+      }
     }
 
     await client.query(`
@@ -681,10 +815,12 @@ export async function getCommercialBillingStatus(userId: string, email: string):
       plan_name: string
       billing_cycle: BillingCycle
       subscription_status: SubscriptionStatus
+      scheduled_activation_at: string | null
     }>(`
       SELECT
         cs.id, cs.status, cs.checkout_url, p.code AS plan_code, p.name AS plan_name,
-        cs.billing_cycle, s.status AS subscription_status
+        cs.billing_cycle, s.status AS subscription_status,
+        NULLIF(s.metadata ->> 'scheduledActivationAt', '') AS scheduled_activation_at
       FROM sf_checkout_sessions cs
       INNER JOIN sf_billing_accounts ba ON ba.id = cs.billing_account_id
       INNER JOIN sf_plans p ON p.id = cs.plan_id
@@ -709,6 +845,7 @@ export async function getCommercialBillingStatus(userId: string, email: string):
       planName: c.plan_name,
       billingCycle: c.billing_cycle,
       subscriptionStatus: c.subscription_status,
+      scheduledActivationAt: c.scheduled_activation_at,
     } : null,
   }
 }

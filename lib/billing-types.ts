@@ -102,5 +102,6 @@ export type CommercialBillingStatus = {
     planName: string
     billingCycle: BillingCycle
     subscriptionStatus: SubscriptionStatus
+    scheduledActivationAt?: string | null
   } | null
 }

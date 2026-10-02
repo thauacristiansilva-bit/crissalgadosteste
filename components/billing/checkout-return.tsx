@@ -23,7 +23,7 @@ export function CheckoutReturn() {
 
         const checkout = payload.latestCheckout
         const finished =
-          (checkout?.status === "completed" && checkout?.subscriptionStatus === "active") ||
+          (checkout?.status === "completed" && (checkout?.subscriptionStatus === "active" || Boolean(checkout?.scheduledActivationAt))) ||
           ["failed", "canceled", "expired"].includes(String(checkout?.status || "")) ||
           attempts >= 15
         if (finished) return
@@ -63,6 +63,27 @@ export function CheckoutReturn() {
 
   const checkout = status.latestCheckout
   const paymentConfirmed = checkout?.status === "completed" && checkout.subscriptionStatus === "active"
+  const scheduledConfirmed = checkout?.status === "completed" && Boolean(checkout.scheduledActivationAt) && checkout.subscriptionStatus !== "active"
+
+  if (scheduledConfirmed) {
+    const startsAt = checkout?.scheduledActivationAt ? new Date(checkout.scheduledActivationAt).toLocaleString("pt-BR") : "ao fim do teste grátis"
+    return (
+      <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-7 text-emerald-950">
+        <CheckCircle2 className="h-9 w-9 text-emerald-600" />
+        <h2 className="mt-4 text-2xl font-black">Plano contratado</h2>
+        <p className="mt-2 text-sm leading-relaxed">
+          Sua contratação de <strong>{checkout.planName}</strong> foi autorizada. Seus dias gratuitos continuam normalmente e o plano pago entra em vigor em <strong>{startsAt}</strong>.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed">Você não perde os dias restantes do teste e continua usando a mesma conta, loja, e-mail e senha.</p>
+        <a
+          href="/admin"
+          className="mt-6 inline-flex h-12 items-center rounded-xl bg-emerald-700 px-5 text-sm font-black text-white hover:bg-emerald-800"
+        >
+          Voltar ao meu painel
+        </a>
+      </div>
+    )
+  }
 
   if (paymentConfirmed) {
     const subscription = status.billing?.subscription

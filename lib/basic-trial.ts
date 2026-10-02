@@ -20,4 +20,4 @@ export const basicTrialEntitlements = {
   loyalty: false, modifiers: true, inventory: false, advancedReports: false,
   integrations: false, aiSetup: false,
 }
-export const basicTrialSections = ["overview", "orders", "pdv", "kitchen", "sales", "products", "categories", "customers", "links", "settings", "security"] as const
+export const basicTrialSections = ["overview", "orders", "pdv", "kitchen", "sales", "products", "categories", "customers", "links", "settings", "security", "billing"] as const
