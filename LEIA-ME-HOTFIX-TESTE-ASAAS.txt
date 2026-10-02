@@ -1,0 +1,17 @@
+HOTFIX — SCRIPT DE TESTE DO ASAAS
+
+Este pacote adiciona somente:
+- scripts/test-asaas-payment-link.mjs
+
+Depois de extrair na raiz do projeto:
+
+1. git add .
+2. git commit -m "Adiciona script de teste do Asaas"
+3. git push
+
+Depois do novo deploy no Railway, rode:
+
+node scripts/test-asaas-payment-link.mjs
+
+O script só executa se ASAAS_ENV=sandbox.
+Ele cria um link técnico de teste no Sandbox usando BOLETO e dueDateLimitDays.
