@@ -10,7 +10,7 @@ const dueDateLimitDays = Number.isFinite(rawDays) ? Math.min(30, Math.max(1, Mat
 const body = {
   name: "SaborFlow - teste técnico boleto",
   description: "Link técnico temporário para validar integração Sandbox",
-  value: 1,
+  value: 5,
   billingType: "BOLETO",
   chargeType: "RECURRENT",
   subscriptionCycle: "MONTHLY",
