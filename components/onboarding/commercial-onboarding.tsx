@@ -330,6 +330,11 @@ export function CommercialOnboarding({
                   <p className="font-black">Produtos ativos: {onboarding.catalog.activeProducts}</p>
                   <p className="mt-1 text-xs">O servidor exige pelo menos um produto ativo para publicar a loja.</p>
                 </div>
+                <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                  <p className="text-sm font-black text-gray-950">Já usa outro sistema?</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-600">Não precisa começar do zero. Envie link, prints e fotos do cadastro antigo para organizar a migração antes de cadastrar tudo manualmente.</p>
+                  <a href="/admin/importar-cadastro" className="mt-3 inline-flex rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-black text-white">Importar cadastro antigo</a>
+                </div>
                 <div className="mt-5 grid gap-4 sm:grid-cols-3">
                   <Field label="Produto"><input className={field} placeholder="Ex.: Pizza Calabresa" value={product.name} onChange={(e) => setProduct({ ...product, name: e.target.value })} /></Field>
                   <Field label="Categoria"><input className={field} placeholder="Ex.: Pizzas" value={product.category} onChange={(e) => setProduct({ ...product, category: e.target.value })} /></Field>

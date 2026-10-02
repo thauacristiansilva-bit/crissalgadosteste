@@ -51,7 +51,7 @@ export default async function FreeTrialPage() {
                   <div key={text} className="rounded-2xl bg-stone-50 px-4 py-4 text-sm font-bold text-stone-700">✓ {text}</div>
                 ))}
               </div>
-              <p className="mt-5 text-sm leading-6 text-stone-500">Ao final dos 7 dias, o acesso pode continuar com um plano mensal, semestral ou anual. Se a contratação acontecer antes do fim do teste, os dias restantes continuam valendo.</p>
+              <p className="mt-5 text-sm leading-6 text-stone-500">Ao final dos 7 dias, o acesso pode continuar com um plano mensal ou anual. Se a contratação acontecer antes do fim do teste, os dias restantes continuam valendo.</p>
             </div>
           </div>
 
@@ -91,7 +91,7 @@ export default async function FreeTrialPage() {
             <p className="mt-4 text-base leading-7 text-stone-600">Quando a pessoa gostar do sistema, o caminho para continuar precisa ser direto: escolher o plano e seguir com a mesma empresa, o mesmo acesso e os mesmos dados.</p>
             <div className="mt-7 space-y-3">
               {[
-                "Mensal, semestral ou anual, conforme a estratégia comercial definida.",
+                "Mensal ou anual, conforme a estratégia comercial definida.",
                 "A pessoa continua usando o mesmo e-mail e a mesma senha.",
                 "Os dias restantes do teste grátis não são perdidos se ela contratar antes.",
                 "IA pode ser adicionada depois como um recurso extra, sem travar a gestão base.",

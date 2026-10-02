@@ -11,7 +11,7 @@ import {
   type SafeImageType,
 } from "@/lib/security/image-validation"
 
-export type MediaArea = "products" | "brand"
+export type MediaArea = "products" | "brand" | "migration"
 
 function cleanOrganizationId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-")

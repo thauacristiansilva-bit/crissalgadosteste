@@ -75,12 +75,10 @@ export function CheckoutReturn() {
           Sua contratação de <strong>{checkout.planName}</strong> foi autorizada. Seus dias gratuitos continuam normalmente e o plano pago entra em vigor em <strong>{startsAt}</strong>.
         </p>
         <p className="mt-3 text-sm leading-relaxed">Você não perde os dias restantes do teste e continua usando a mesma conta, loja, e-mail e senha.</p>
-        <a
-          href="/admin"
-          className="mt-6 inline-flex h-12 items-center rounded-xl bg-emerald-700 px-5 text-sm font-black text-white hover:bg-emerald-800"
-        >
-          Voltar ao meu painel
-        </a>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <a href="/admin" className="inline-flex h-12 items-center justify-center rounded-xl bg-emerald-700 px-5 text-sm font-black text-white hover:bg-emerald-800">Voltar ao meu painel</a>
+          {status.hasOrganization && <a href="/admin/importar-cadastro" className="inline-flex h-12 items-center justify-center rounded-xl border border-emerald-300 bg-white px-5 text-sm font-black text-emerald-800">Importar cadastro antigo</a>}
+        </div>
       </div>
     )
   }
@@ -96,12 +94,10 @@ export function CheckoutReturn() {
             ? <>Sua assinatura <strong>{subscription.planName}</strong> foi ativada pelo backend após confirmação do provedor.</>
             : <>Sua assinatura foi ativada pelo backend após confirmação do provedor.</>}
         </p>
-        <a
-          href={status.hasOrganization ? "/admin" : "/admin/nova-empresa"}
-          className="mt-6 inline-flex h-12 items-center rounded-xl bg-emerald-700 px-5 text-sm font-black text-white hover:bg-emerald-800"
-        >
-          {status.hasOrganization ? "Voltar ao painel" : "Configurar minha primeira loja"}
-        </a>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <a href={status.hasOrganization ? "/admin" : "/admin/nova-empresa"} className="inline-flex h-12 items-center justify-center rounded-xl bg-emerald-700 px-5 text-sm font-black text-white hover:bg-emerald-800">{status.hasOrganization ? "Voltar ao painel" : "Configurar minha primeira loja"}</a>
+          {status.hasOrganization && <a href="/admin/importar-cadastro" className="inline-flex h-12 items-center justify-center rounded-xl border border-emerald-300 bg-white px-5 text-sm font-black text-emerald-800">Importar cadastro antigo</a>}
+        </div>
       </div>
     )
   }

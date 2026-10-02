@@ -1,6 +1,7 @@
 "use client"
 
 import Script from "next/script"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Building2, Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, ShieldCheck, UserRound } from "lucide-react"
@@ -49,6 +50,8 @@ function formatCnpj(value: string) {
 }
 
 export function CommercialCheckout() {
+  const searchParams = useSearchParams()
+  const selectedPlanCode = (searchParams.get("plano") || "").trim().toLowerCase()
   const [plans, setPlans] = useState<CommercialPlan[]>([])
   const [status, setStatus] = useState<CommercialBillingStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -285,8 +288,10 @@ export function CommercialCheckout() {
             <div className="grid gap-4 lg:grid-cols-3">
               {plans.map((plan) => {
                 const price = cycle === "annual" ? plan.annualPriceCents : plan.monthlyPriceCents
+                const selected = selectedPlanCode === plan.code.toLowerCase()
                 return (
-                  <article key={plan.id} className="flex flex-col rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                  <article key={plan.id} className={`flex flex-col rounded-3xl border bg-white p-6 shadow-sm ${selected ? "border-orange-400 ring-2 ring-orange-100" : "border-gray-200"}`}>
+                    {selected && <p className="mb-3 inline-flex w-fit rounded-full bg-orange-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-800">Plano escolhido</p>}
                     <h2 className="text-xl font-black text-gray-950">{plan.name}</h2>
                     <p className="mt-2 min-h-10 text-sm text-gray-600">{plan.description}</p>
                     <p className="mt-5 text-3xl font-black text-gray-950">{money(price, plan.currency)}</p>

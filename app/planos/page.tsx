@@ -95,7 +95,7 @@ export default async function PlansPage() {
               </div>
               <div className="mt-6 rounded-2xl border border-dashed border-orange-300 bg-[#fffaf3] p-5 text-sm leading-6 text-stone-600">
                 <p className="font-black text-stone-950">Fluxo sugerido</p>
-                <p className="mt-2">1. Testa por 7 dias → 2. Escolhe mensal, semestral ou anual → 3. Se quiser, adiciona a IA para acelerar configuração e ajustes.</p>
+                <p className="mt-2">1. Testa por 7 dias → 2. Escolhe mensal ou anual → 3. Se quiser, adiciona a IA para acelerar configuração e ajustes.</p>
               </div>
             </div>
           </section>
@@ -225,7 +225,7 @@ export default async function PlansPage() {
             <div className="mt-8 grid gap-4 md:grid-cols-3">
               {[
                 { icon: QrCode, title: "Pix", text: "Pagamento rápido, simples e familiar para boa parte dos clientes." },
-                { icon: CreditCard, title: "Cartão", text: "Cobrança organizada para mensal, semestral ou anual." },
+                { icon: CreditCard, title: "Cartão", text: "Cobrança organizada para mensal ou anual." },
                 { icon: ReceiptText, title: "Boleto", text: "Outra alternativa para quem prefere seguir com cobrança tradicional." },
               ].map(({ icon: Icon, title, text }) => (
                 <article key={title} className="rounded-2xl border border-stone-200 bg-stone-50 p-5">

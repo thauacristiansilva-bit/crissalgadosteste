@@ -1,0 +1,72 @@
+ETAPA 2 — CONTRATAÇÃO + MIGRAÇÃO/IMPORTAÇÃO
+
+O QUE ESTA ETAPA ADICIONA
+
+1. CONTRATAÇÃO MAIS GUIADA
+- página /contratar mais clara;
+- o plano escolhido em /planos?plano=... fica destacado no checkout;
+- reforço de que a mesma conta/empresa continua depois do teste;
+- IA apresentada como adicional opcional, sem alterar o valor do plano base nesta etapa;
+- retorno do pagamento oferece acesso direto à área de importação quando a empresa já existe.
+
+2. ÁREA REAL DE IMPORTAÇÃO
+Nova página:
+  /admin/importar-cadastro
+
+O proprietário pode:
+- informar o sistema anterior;
+- colar o link antigo;
+- descrever o que deve ser preservado;
+- enviar prints e fotos;
+- registrar informações de localização;
+- registrar regras de entrega/operação;
+- registrar produtos, preços, combos e regras importantes;
+- indicar interesse em usar IA;
+- salvar rascunho;
+- enviar o material para preparação.
+
+LIMITES
+- até 60 imagens por migração;
+- até 12 imagens selecionadas por envio;
+- JPG, PNG ou WEBP;
+- até 8 MB por imagem.
+
+3. ACESSO À IMPORTAÇÃO
+- aparece como atalho no painel;
+- aparece para contas de teste sem produtos;
+- aparece na etapa de catálogo do onboarding;
+- aparece após confirmação/agendamento da contratação.
+
+BANCO DE DADOS
+Esta etapa cria:
+  database/migrations/041_migration_intake.sql
+
+IMPORTANTE: depois do deploy, aplique a migration 041.
+
+PASSO A PASSO
+1. Extraia este ZIP na raiz do projeto e aceite substituir os arquivos.
+2. Rode:
+   npm run build
+3. Se o build passar:
+   git add .
+   git commit -m "Etapa 2 contratacao e migracao de cadastro"
+   git push
+4. Depois que o novo deploy estiver disponível no Railway, abra o Console do serviço e rode:
+   node scripts/migrate-multiempresa.mjs
+5. Confirme que aparece:
+   OK 041_migration_intake
+6. Teste:
+   /admin/importar-cadastro
+
+O QUE AINDA NÃO FOI AUTOMATIZADO
+- o sistema NÃO acessa/raspa automaticamente o link externo nesta etapa;
+- as imagens e o link são coletados e armazenados para preparação;
+- a interpretação automática do link + imagens com IA pode ser feita na próxima etapa, com validação de segurança e prévia antes de aplicar no catálogo;
+- Asaas/Pix/cartão/boleto como novo gateway também ficam para a etapa de pagamento, sem substituir o Mercado Pago existente nesta etapa.
+
+SEGURANÇA
+- a migração pertence à organização;
+- acesso somente do proprietário;
+- RLS por tenant;
+- validação real do conteúdo das imagens;
+- links são apenas registrados nesta etapa, não são buscados pelo servidor.
