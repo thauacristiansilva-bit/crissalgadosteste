@@ -342,6 +342,37 @@ export function MarketingHome() {
           </div>
         </section>
 
+        <section id="migracao" className="scroll-mt-28 bg-white px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+          <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[0.96fr_1.04fr] lg:gap-14">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">Diferencial importante</p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight text-stone-950 sm:text-4xl">Migrar do sistema antigo não precisa ser cansativo</h2>
+              <p className="mt-5 text-base leading-7 text-stone-600">Uma das maiores dores de quem troca de sistema é perder tempo cadastrando tudo de novo. O SaborFlow pode se posicionar como a opção que simplifica essa entrada, organizando o máximo possível da operação inicial.</p>
+              <div className="mt-7 grid gap-3 sm:grid-cols-2">
+                {[
+                  "Link do cardápio ou do sistema antigo, se ainda estiver ativo.",
+                  "Prints, fotos e arquivos com produtos e valores.",
+                  "Ajuste de localização, entrega e estrutura da empresa.",
+                  "Revisão final antes de colocar a nova loja no ar.",
+                ].map((item) => (
+                  <div key={item} className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4 text-sm font-bold text-stone-700">
+                    ✓ {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-[28px] border border-emerald-100 bg-emerald-50/60 p-7 shadow-xl shadow-emerald-950/5 sm:p-8">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Como apresentar isso</p>
+              <div className="mt-5 space-y-4 text-sm leading-6 text-stone-700">
+                <p><strong className="text-stone-950">1. Crie a conta.</strong><br />O cliente começa com o teste grátis e usa o próprio e-mail e senha.</p>
+                <p><strong className="text-stone-950">2. Traga o que já existe.</strong><br />Ele pode enviar link, prints, fotos e referências do sistema antigo.</p>
+                <p><strong className="text-stone-950">3. Ajuste e publique.</strong><br />Produtos, preços, entrega e estrutura da operação ficam organizados antes da publicação.</p>
+              </div>
+              <Link href="/teste-gratis" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700">Quero começar com 7 dias grátis <ArrowRight className="h-4 w-4" /></Link>
+            </div>
+          </div>
+        </section>
+
         <section id="como-funciona" className="scroll-mt-28 px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
           <div className="mx-auto max-w-7xl">
             <div className="max-w-3xl">

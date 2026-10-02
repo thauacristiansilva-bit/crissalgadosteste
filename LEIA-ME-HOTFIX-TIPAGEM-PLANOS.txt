@@ -1,0 +1,25 @@
+HOTFIX — TIPAGEM DOS CARDS DE PLANOS / TESTE GRÁTIS
+
+Corrige os erros TS2322 causados por arrays mistos de ícones + textos.
+
+ARQUIVOS CORRIGIDOS
+- app/planos/page.tsx
+- app/teste-gratis/page.tsx
+
+A correção troca os arrays no formato:
+[Icone, titulo, texto]
+
+por objetos tipados:
+{ icon, title, text }
+
+Isso evita o TypeScript inferir "string | componente React" para title/text/key.
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto.
+2. Aceite substituir os dois arquivos.
+3. Rode:
+   npm run build
+4. Se passar:
+   git add .
+   git commit -m "Corrige tipagem dos cards comerciais"
+   git push

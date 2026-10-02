@@ -1,0 +1,38 @@
+ATUALIZAÇÃO COMERCIAL — PLANOS, MIGRAÇÃO E DIVULGAÇÃO
+
+Esta etapa atualiza a parte pública/comercial do SaborFlow com foco em:
+
+1. PLANOS MAIS CLAROS
+- reforço do teste grátis de 7 dias;
+- contratação com a mesma conta e mesma loja;
+- IA apresentada como adicional opcional;
+- formas de pagamento destacadas (Pix, cartão e boleto).
+
+2. MIGRAÇÃO / IMPORTAÇÃO SIMPLIFICADA
+- nova comunicação mostrando que o cliente pode vir de outro sistema sem recadastrar tudo do zero;
+- destaque para uso de link do sistema antigo, prints, fotos, cardápios e ajustes de localização/entrega.
+
+3. DIVULGAÇÃO MAIS BONITA E DIRETA
+- landing/home com novo bloco de diferencial de migração;
+- página de planos com linguagem mais comercial;
+- página de teste grátis mais explicativa e convincente.
+
+ARQUIVOS ALTERADOS
+- components/marketing/marketing-home.tsx
+- app/planos/page.tsx
+- app/teste-gratis/page.tsx
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto.
+2. Aceite substituir os arquivos.
+3. Rode no terminal:
+   npm run build
+4. Se passar sem erro:
+   git add .
+   git commit -m "Atualiza divulgação, planos e migração simplificada"
+   git push
+
+OBSERVAÇÃO
+Esta etapa foca na apresentação e no layout comercial.
+Ela NÃO implementa ainda um importador automático real por link/print/foto no backend.
+Ela prepara a comunicação e a experiência pública para vender melhor essa proposta.
