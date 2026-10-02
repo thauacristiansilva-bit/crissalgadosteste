@@ -8,8 +8,8 @@ const navigation = [
   ["Recursos", "/recursos"],
   ["Segmentos", "/segmentos"],
   ["Planos", "/planos"],
-  ["Demo", "/demo"],
-  ["FAQ", "/faq"],
+  ["Demonstração", "/demo"],
+  ["Dúvidas", "/faq"],
 ] as const
 
 export function MarketingLogo({ compact = false }: { compact?: boolean }) {
@@ -46,8 +46,8 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             <Link href="/entrar" className="rounded-xl px-4 py-2.5 text-sm font-black text-stone-700 hover:bg-white">Entrar</Link>
             <Link href="/contratar" className="inline-flex items-center gap-2 rounded-xl bg-stone-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-black">Começar agora <ArrowRight className="h-4 w-4" /></Link>
           </div>
-          <details className="relative sm:hidden">
-            <summary className="flex h-11 w-11 list-none items-center justify-center rounded-xl border border-orange-100 bg-white text-stone-800 [&::-webkit-details-marker]:hidden"><Menu className="h-5 w-5" /></summary>
+          <details className="relative lg:hidden">
+            <summary aria-label="Abrir menu de navegação" className="flex h-11 w-11 list-none items-center justify-center rounded-xl border border-orange-100 bg-white text-stone-800 [&::-webkit-details-marker]:hidden"><Menu aria-hidden="true" className="h-5 w-5" /></summary>
             <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-orange-100 bg-white p-3 shadow-xl">
               {navigation.map(([label, href]) => <Link key={href} href={href} className="block rounded-xl px-3 py-2.5 text-sm font-bold text-stone-700 hover:bg-orange-50">{label}</Link>)}
               <div className="my-2 border-t border-stone-100" />
@@ -95,8 +95,8 @@ export function MarketingCta() {
       <div className="mx-auto max-w-7xl overflow-hidden rounded-[32px] bg-stone-950 px-6 py-10 text-white sm:px-10 lg:flex lg:items-center lg:justify-between lg:px-14 lg:py-14">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-400">Veja funcionando</p>
-          <h2 className="mt-3 max-w-2xl text-3xl font-black tracking-tight sm:text-4xl">Conheça o fluxo antes de colocar sua operação nele.</h2>
-          <p className="mt-4 max-w-2xl text-sm leading-6 text-stone-300">Abra uma demonstração isolada com dados fictícios ou avance para a contratação quando estiver pronto.</p>
+          <h2 className="mt-3 max-w-2xl text-3xl font-black tracking-tight sm:text-4xl">Experimente antes de escolher seu plano.</h2>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-stone-300">Veja o cardápio e o painel na demonstração. Depois, compare os planos para sua loja.</p>
         </div>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row lg:mt-0 lg:flex-col xl:flex-row">
           <Link href="/demo" className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-black text-white hover:bg-orange-600">Testar demonstração</Link>
