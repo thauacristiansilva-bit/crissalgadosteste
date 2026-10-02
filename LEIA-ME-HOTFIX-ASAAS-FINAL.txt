@@ -1,0 +1,17 @@
+HOTFIX FINAL ASAAS — HEALTH + BOLETO
+
+Este pacote corrige a incompatibilidade entre:
+- app/api/admin/billing-health/route.ts
+- lib/billing-providers/asaas.ts
+
+A rota usa getAsaasIntegrationHealth(appBaseUrl) e o provider agora exporta exatamente essa função.
+Também mantém o suporte a ASAAS_BOLETO_DUE_DAYS para o vencimento do boleto.
+
+APLICAR
+1. Extraia este ZIP na raiz do projeto e aceite substituir os arquivos.
+2. Rode:
+   npm run build
+3. Se passar:
+   git add .
+   git commit -m "Corrige integração Asaas health e boleto"
+   git push
