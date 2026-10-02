@@ -435,11 +435,12 @@ export async function createCheckoutForUser(input: {
         AND cs.plan_id = $2
         AND cs.billing_cycle = $3
         AND cs.provider = $4
+        AND COALESCE(cs.metadata ->> 'paymentMethod', '') = $5
         AND cs.status IN ('creating', 'pending')
         AND cs.created_at > now() - interval '30 minutes'
       ORDER BY cs.created_at DESC
       LIMIT 1
-    `, [billingAccountId, plan.id, input.billingCycle, provider.name])
+    `, [billingAccountId, plan.id, input.billingCycle, provider.name, input.paymentMethod])
 
     if (reusable.rows[0]?.checkout_url) {
       await client.query("COMMIT")
@@ -475,8 +476,8 @@ export async function createCheckoutForUser(input: {
     await client.query(`
       INSERT INTO sf_checkout_sessions (
         id, billing_account_id, user_id, plan_id, subscription_id,
-        billing_cycle, provider, status, amount_cents, currency, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'creating', $8, $9, now() + interval '30 minutes')
+        billing_cycle, provider, status, amount_cents, currency, expires_at, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'creating', $8, $9, now() + interval '30 minutes', $10::jsonb)
     `, [
       checkoutSessionId,
       billingAccountId,
@@ -487,6 +488,7 @@ export async function createCheckoutForUser(input: {
       provider.name,
       plan.amountCents,
       plan.currency,
+      JSON.stringify({ paymentMethod: input.paymentMethod }),
     ])
     await client.query(`
       UPDATE sf_subscriptions

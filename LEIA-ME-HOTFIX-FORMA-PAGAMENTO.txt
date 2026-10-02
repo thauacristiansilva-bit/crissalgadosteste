@@ -1,0 +1,23 @@
+HOTFIX ASAAS — FORMA DE PAGAMENTO
+
+Problema corrigido:
+O SaborFlow reaproveitava por até 30 minutos um checkout pendente do mesmo plano/ciclo sem considerar a forma de pagamento. Assim, um link criado anteriormente para cartão podia ser reutilizado quando o cliente escolhia Pix ou boleto.
+
+Correção:
+- o reaproveitamento de checkout agora considera também paymentMethod;
+- a forma de pagamento é gravada no metadata da sessão desde a criação;
+- Pix, cartão e boleto passam a gerar/reutilizar somente links da mesma forma de pagamento.
+
+Arquivo alterado:
+- lib/billing-contracting.ts
+
+Depois de aplicar:
+npm run build
+git add .
+git commit -m "Corrige forma de pagamento no checkout Asaas"
+git push
+
+Após o deploy, teste separadamente:
+1. Pix
+2. Cartão
+3. Boleto
