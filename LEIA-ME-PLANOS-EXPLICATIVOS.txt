@@ -1,0 +1,33 @@
+ATUALIZAÇÃO — PLANOS MAIS EXPLICATIVOS E COMERCIAIS
+
+Esta etapa melhora a página /planos sem alterar a lógica de cobrança já criada.
+
+PRINCIPAIS MUDANÇAS
+- explicação clara do motivo dos valores;
+- destaque da economia do semestral e anual em reais;
+- comparação lado a lado entre mensal, semestral e anual;
+- seção explicando o que muda na rotina da empresa;
+- imagem da operação integrada para deixar a página menos parecida com uma simples tabela de preços;
+- explicação de vantagens: organização, redução de retrabalho, equipe alinhada e visão do negócio;
+- anual continua destacado como maior economia;
+- regras de fidelidade e multa continuam visíveis;
+- 7 dias grátis continuam destacados antes da contratação;
+- IA continua apresentada como adicional opcional.
+
+ECONOMIAS MOSTRADAS
+- Semestral: R$ 60,00 de economia em comparação com 6 meses no mensal.
+- Anual: R$ 240,00 de economia em comparação com 12 meses no mensal.
+
+ARQUIVOS
+- app/planos/page.tsx
+- public/marketing/operacao-integrada.webp
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto.
+2. Aceite substituir os arquivos.
+3. Rode:
+   npm run build
+4. Se passar:
+   git add .
+   git commit -m "Melhora explicação e apresentação dos planos"
+   git push
