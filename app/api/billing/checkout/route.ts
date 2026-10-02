@@ -3,6 +3,7 @@ import { createCheckoutForUser } from "@/lib/billing-contracting"
 import { getBillingIdentity } from "@/lib/billing-identity"
 import type { BillingCycle, PaymentMethod } from "@/lib/billing-types"
 import { requestIp, requestIsSameOrigin } from "@/lib/security/request-security"
+import { assertSignedContractForCheckout } from "@/lib/contract-signing"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
     paymentMethod?: PaymentMethod
     contractAccepted?: boolean
     commitmentAccepted?: boolean
+    signedContractId?: string
   } | null
 
   const cycles: BillingCycle[] = ["monthly", "semiannual", "annual"]
@@ -44,8 +46,18 @@ export async function POST(request: Request) {
   if (body.billingCycle !== "monthly" && body.commitmentAccepted !== true) {
     return NextResponse.json({ error: "Confirme que você leu a regra de permanência e rescisão antecipada antes de continuar." }, { status: 400 })
   }
+  if (!body.signedContractId) {
+    return NextResponse.json({ error: "Assine o contrato antes de continuar para o pagamento." }, { status: 400 })
+  }
 
   try {
+    await assertSignedContractForCheckout({
+      contractId: body.signedContractId,
+      userId: identity.userId,
+      planCode: body.planCode,
+      billingCycle: body.billingCycle as BillingCycle,
+      paymentMethod: body.paymentMethod as PaymentMethod,
+    })
     const result = await createCheckoutForUser({
       userId: identity.userId,
       email: identity.email,
@@ -57,6 +69,7 @@ export async function POST(request: Request) {
       ipAddress: requestIp(request),
       userAgent: request.headers.get("user-agent") || "",
       returnUrl: returnUrl(request),
+      signedContractId: body.signedContractId,
     })
     return NextResponse.json({ ok: true, checkoutUrl: result.checkoutUrl, reused: result.reused })
   } catch (error) {

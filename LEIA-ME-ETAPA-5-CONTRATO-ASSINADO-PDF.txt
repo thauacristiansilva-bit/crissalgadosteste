@@ -1,0 +1,71 @@
+ETAPA 5 - CONTRATO ASSINADO EM PDF + E-MAIL APOS PAGAMENTO
+
+FLUXO
+1. Cliente escolhe plano, ciclo e forma de pagamento.
+2. Cliente aceita Contrato, Termos de Uso e Privacidade.
+3. No semestral/anual, confirma a permanencia e a multa contratual.
+4. Cliente assina no quadro usando dedo, caneta touch ou mouse.
+5. SaborFlow gera um PDF A4 e registra assinatura, data/hora, IP, user-agent e hashes SHA-256.
+6. Somente depois da assinatura o botao de pagamento e liberado.
+7. Pagamento e processado normalmente pelo Asaas.
+8. Quando o webhook confirmar PAYMENT_CONFIRMED/PAYMENT_RECEIVED, o contrato e marcado como aprovado.
+9. O PDF assinado e enviado ao e-mail do contratante.
+
+MIGRATION
+Apos o deploy, execute no console do Railway:
+  node scripts/migrate-multiempresa.mjs
+
+A migration desta etapa e:
+  043_signed_contracts.sql
+
+E-MAIL
+Esta etapa usa Resend por API HTTP. Nenhuma dependencia npm nova e necessaria.
+Crie/verifique seu dominio no Resend e adicione no Railway:
+
+  RESEND_API_KEY=re_xxxxxxxxx
+  RESEND_FROM_EMAIL=SaborFlow <contratos@appsaborflow.com.br>
+
+Para testar o envio antes de uma compra, adicione temporariamente:
+  CONTRACT_TEST_EMAIL=seuemail@exemplo.com
+
+e rode:
+  node scripts/test-contract-email.mjs
+
+Depois pode remover CONTRACT_TEST_EMAIL.
+
+SEGURANCA
+- A chave de e-mail fica apenas no Railway/server.
+- O PDF so pode ser aberto pelo proprio usuario autenticado.
+- O contrato fica vinculado ao plano/ciclo/forma de pagamento escolhidos.
+- Se essas opcoes mudarem, uma nova assinatura e exigida.
+- O webhook de pagamento dispara o envio do PDF com idempotencia para evitar duplicidade.
+
+OBSERVACAO JURIDICA
+A assinatura desenhada no quadro e uma assinatura eletronica simples acompanhada de evidencias tecnicas.
+Para contratos que exijam nivel avancado/qualificado, integre no futuro um provedor especializado ou ICP-Brasil.
+Recomenda-se revisao do texto contratual por advogado antes de abrir vendas em producao.
+
+ARQUIVOS PRINCIPAIS
+- components/billing/commercial-checkout.tsx
+- components/billing/contract-signature-pad.tsx
+- app/api/billing/checkout/route.ts
+- app/api/billing/contracts/sign/route.ts
+- app/api/billing/contracts/[id]/pdf/route.ts
+- lib/billing-contracting.ts
+- lib/contract-signing.ts
+- lib/contract-pdf.ts
+- lib/transactional-email.ts
+- lib/legal-documents.ts
+- database/migrations/043_signed_contracts.sql
+- scripts/test-contract-email.mjs
+
+DEPLOY
+1. Extraia este ZIP na raiz e aceite substituir.
+2. Rode:
+   npm run build
+3. Se passar:
+   git add .
+   git commit -m "Adiciona contrato assinado em PDF e envio por email"
+   git push
+4. Depois do deploy, rode a migration no Railway.
+5. Configure o Resend no Railway.

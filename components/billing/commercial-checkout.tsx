@@ -7,6 +7,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Building2, Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, QrCode, ReceiptText, ShieldCheck, UserRound } from "lucide-react"
 import type { BillingCycle, CommercialBillingStatus, CommercialPlan, PaymentMethod } from "@/lib/billing-types"
 import { EARLY_TERMINATION_PENALTY_PERCENT, commercialCycleTerms } from "@/lib/commercial-contract"
+import { ContractSignaturePad } from "@/components/billing/contract-signature-pad"
 
 function money(cents: number | null, currency: string) {
   if (cents == null) return "Indisponível"
@@ -72,6 +73,7 @@ export function CommercialCheckout() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("pix")
   const [contractAccepted, setContractAccepted] = useState(false)
   const [commitmentAccepted, setCommitmentAccepted] = useState(false)
+  const [signedContractId, setSignedContractId] = useState("")
   const [googleReady, setGoogleReady] = useState(false)
   const googleButtonRef = useRef<HTMLDivElement | null>(null)
   const googleFlowRef = useRef({ mode, cpf, hasCnpj, cnpj, legalAccepted })
@@ -104,6 +106,9 @@ export function CommercialCheckout() {
 
   const hasSemiannual = useMemo(() => plans.some((plan) => plan.semiannualPriceCents != null), [plans])
   const hasAnnual = useMemo(() => plans.some((plan) => plan.annualPriceCents != null), [plans])
+  const activePlan = useMemo(() => plans.find((plan) => plan.code.toLowerCase() === selectedPlanCode) || plans[0] || null, [plans, selectedPlanCode])
+
+  useEffect(() => { setSignedContractId("") }, [cycle, paymentMethod, contractAccepted, commitmentAccepted])
 
   async function authenticate(event: FormEvent) {
     event.preventDefault()
@@ -185,7 +190,7 @@ export function CommercialCheckout() {
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planCode, billingCycle: cycle, paymentMethod, contractAccepted, commitmentAccepted: cycle === "monthly" ? true : commitmentAccepted }),
+        body: JSON.stringify({ planCode, billingCycle: cycle, paymentMethod, contractAccepted, commitmentAccepted: cycle === "monthly" ? true : commitmentAccepted, signedContractId }),
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || "Não foi possível iniciar o pagamento.")
@@ -333,6 +338,19 @@ export function CommercialCheckout() {
             </label>
           )}
 
+          {activePlan && (
+            <ContractSignaturePad
+              planCode={activePlan.code}
+              billingCycle={cycle}
+              paymentMethod={paymentMethod}
+              contractAccepted={contractAccepted}
+              commitmentAccepted={cycle === "monthly" ? true : commitmentAccepted}
+              disabled={busy}
+              onSigned={(result) => setSignedContractId(result.contractId)}
+              onReset={() => setSignedContractId("")}
+            />
+          )}
+
           {plans.length === 0 ? (
             <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm leading-relaxed text-amber-900">Nenhum plano comercial foi publicado ainda. A infraestrutura de cobrança está pronta, mas preço e limites precisam ser definidos pelo operador do SaborFlow antes de abrir vendas.</div>
           ) : (
@@ -354,7 +372,7 @@ export function CommercialCheckout() {
                       <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />Delivery, cozinha, financeiro, clientes e relatórios</p>
                       <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />IA de configuração contratada separadamente</p>
                     </div>
-                    <button disabled={busy || price == null || !contractAccepted || (cycle !== "monthly" && !commitmentAccepted)} onClick={() => void checkout(plan.code)} className="mt-6 flex h-12 items-center justify-center gap-2 rounded-xl bg-gray-950 text-sm font-black text-white hover:bg-black disabled:opacity-40"><CreditCard className="h-4 w-4" />Ir para pagamento</button>
+                    <button disabled={busy || price == null || !contractAccepted || !signedContractId || (cycle !== "monthly" && !commitmentAccepted)} onClick={() => void checkout(plan.code)} className="mt-6 flex h-12 items-center justify-center gap-2 rounded-xl bg-gray-950 text-sm font-black text-white hover:bg-black disabled:opacity-40"><CreditCard className="h-4 w-4" />{signedContractId ? "Ir para pagamento" : "Assine o contrato para continuar"}</button>
                   </article>
                 )
               })}

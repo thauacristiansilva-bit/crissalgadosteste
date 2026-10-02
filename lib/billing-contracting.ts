@@ -16,6 +16,7 @@ import type {
 import { commitmentEndDate, commercialCycleTerms, EARLY_TERMINATION_PENALTY_PERCENT, nextRecurringDueDateAfterTrial, providerBillingEndDate } from "@/lib/commercial-contract"
 import { updateAsaasSubscriptionSchedule } from "@/lib/billing-providers/asaas"
 import { recordCurrentLegalAcceptanceWithClient, recordSubscriptionContractAcceptanceWithClient } from "@/lib/legal-db"
+import { linkSignedContractToCheckout, sendSignedContractAfterPayment } from "@/lib/contract-signing"
 import { getPostgresPool } from "@/lib/postgres"
 import {
   commercialRegistrationMetadata,
@@ -354,6 +355,7 @@ export async function createCheckoutForUser(input: {
   ipAddress?: string | null
   userAgent?: string | null
   returnUrl: string
+  signedContractId: string
 }) {
   const providerName = configuredBillingProviderName()
   const provider = getBillingProvider(providerName)
@@ -443,6 +445,11 @@ export async function createCheckoutForUser(input: {
     `, [billingAccountId, plan.id, input.billingCycle, provider.name, input.paymentMethod])
 
     if (reusable.rows[0]?.checkout_url) {
+      await client.query(`
+        UPDATE sf_signed_contracts
+        SET checkout_session_id = $3, subscription_id = $4, status = 'payment_pending', updated_at = now()
+        WHERE id = $1 AND user_id = $2 AND checkout_session_id IS NULL AND subscription_id IS NULL
+      `, [input.signedContractId, input.userId, reusable.rows[0].id, reusable.rows[0].subscription_id])
       await client.query("COMMIT")
       return { checkoutUrl: reusable.rows[0].checkout_url, reused: true }
     }
@@ -495,6 +502,11 @@ export async function createCheckoutForUser(input: {
       SET source_checkout_session_id = $2, updated_at = now()
       WHERE id = $1
     `, [localSubscriptionId, checkoutSessionId])
+    await client.query(`
+      UPDATE sf_checkout_sessions
+      SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb, updated_at = now()
+      WHERE id = $1
+    `, [checkoutSessionId, JSON.stringify({ paymentMethod: input.paymentMethod, signedContractId: input.signedContractId })])
     await recordCurrentLegalAcceptanceWithClient(client, {
       userId: input.userId,
       organizationId: null,
@@ -523,6 +535,13 @@ export async function createCheckoutForUser(input: {
   } finally {
     client.release()
   }
+
+  await linkSignedContractToCheckout({
+    contractId: input.signedContractId,
+    userId: input.userId,
+    checkoutSessionId,
+    subscriptionId: localSubscriptionId,
+  })
 
   try {
     const checkout = await provider.createCheckout({
@@ -566,6 +585,11 @@ export async function createCheckoutForUser(input: {
       SET provider_status = 'checkout_failed', updated_at = now()
       WHERE id = $1
     `, [localSubscriptionId]).catch(() => undefined)
+    await getPostgresPool().query(`
+      UPDATE sf_signed_contracts
+      SET checkout_session_id = NULL, subscription_id = NULL, status = 'signed', updated_at = now()
+      WHERE id = $1 AND user_id = $2
+    `, [input.signedContractId, input.userId]).catch(() => undefined)
     throw error
   }
 }
@@ -1089,6 +1113,12 @@ export async function processBillingWebhook(input: {
         raw: payload,
       }, "asaas", input.providerEventId)
 
+      if (status === "ACTIVE") {
+        await sendSignedContractAfterPayment(localSubscriptionId).catch((error) => {
+          console.error("[SaborFlow Contract] Falha não bloqueante ao enviar contrato após pagamento:", error)
+        })
+      }
+
       await pool.query(`UPDATE sf_billing_webhook_events SET processing_status = 'processed', processed_at = now(), updated_at = now() WHERE id = $1`, [rowId])
       return { duplicate: false, processed: true }
     }
@@ -1126,6 +1156,11 @@ export async function processBillingWebhook(input: {
     }
 
     await applyProviderSubscriptionSnapshot(local.rows[0].id, snapshot, input.provider, input.providerEventId)
+    if (mapProviderStatus(snapshot.provider, snapshot.status) === "active") {
+      await sendSignedContractAfterPayment(local.rows[0].id).catch((error) => {
+        console.error("[SaborFlow Contract] Falha não bloqueante ao enviar contrato após pagamento:", error)
+      })
+    }
     await pool.query(`
       UPDATE sf_billing_webhook_events
       SET processing_status = 'processed', processed_at = now(), updated_at = now()
