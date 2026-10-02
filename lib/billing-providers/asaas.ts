@@ -39,6 +39,12 @@ function keyMatchesEnvironment() {
   return asaasEnvironment() === "production" ? value.startsWith("$aact_prod_") : value.startsWith("$aact_hmlg_")
 }
 
+function boletoDueDateLimitDays() {
+  const raw = Number(process.env.ASAAS_BOLETO_DUE_DAYS || "5")
+  if (!Number.isFinite(raw)) return 5
+  return Math.min(30, Math.max(1, Math.floor(raw)))
+}
+
 async function asaasRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase()}${path}`, {
     ...init,
@@ -195,7 +201,7 @@ export function createAsaasBillingProvider(): BillingProvider {
           subscriptionCycle: "MONTHLY",
           externalReference: input.localSubscriptionId,
           notificationEnabled: true,
-          ...(type === "BOLETO" ? { dueDateLimitDays: 5 } : {}),
+          ...(type === "BOLETO" ? { dueDateLimitDays: boletoDueDateLimitDays() } : {}),
           callback: {
             successUrl: input.returnUrl,
             autoRedirect: true,

@@ -1,0 +1,26 @@
+HOTFIX ASAAS — DIAS ÚTEIS PARA VENCIMENTO
+
+Corrige o erro:
+"É necessário informar a quantidade de dias úteis para vencimento da cobrança."
+
+ALTERAÇÕES
+- Envia dueDateLimitDays explicitamente ao criar o Link de Pagamento no Asaas.
+- Padrão: 5 dias úteis.
+- Novo parâmetro opcional no Railway:
+  ASAAS_BOLETO_DUE_DAYS=5
+
+ARQUIVOS ALTERADOS
+- lib/billing-providers/asaas.ts
+- .env.example
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto e aceite substituir.
+2. No Railway, opcionalmente adicione:
+   ASAAS_BOLETO_DUE_DAYS=5
+3. Rode:
+   npm run build
+4. Se passar:
+   git add .
+   git commit -m "Corrige vencimento do boleto no Asaas"
+   git push
+5. Teste novamente a contratação no Sandbox.

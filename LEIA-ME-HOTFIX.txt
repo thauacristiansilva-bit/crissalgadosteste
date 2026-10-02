@@ -1,18 +1,17 @@
-HOTFIX - ACEITE DE TERMOS / LGPD
+HOTFIX ASAAS — RESTAURA HEALTH + VENCIMENTO BOLETO
 
-Causa corrigida:
-- sf_audit_log usa FORCE ROW LEVEL SECURITY (RLS).
-- O aceite agora executa explicitamente dentro do tenant correto.
-- Cadastros novos que ainda não possuem organização recebem bypass interno e temporário apenas nos INSERTs de auditoria legal.
-- A consulta de aceite agora também filtra organization_id + user_id.
-- A API passou a registrar o erro real nos Logs do Railway se ainda houver falha.
+Corrige regressão do hotfix anterior:
+- mantém getAsaasIntegrationHealth usado por app/api/admin/billing-health/route.ts;
+- mantém toda a integração da Etapa 4;
+- mantém ASAAS_BOLETO_DUE_DAYS configurável (padrão 5 dias úteis).
 
-Arquivos funcionais alterados:
-- app/admin/page.tsx
-- app/legal/aceite/page.tsx
-- app/api/legal/accept/route.ts
-- lib/legal-db.ts
+Aplicar na raiz do projeto, substituindo:
+lib/billing-providers/asaas.ts
 
-Não executar migration.
-Não executar SQL.
-Não instalar dependência.
+Depois rode:
+npm run build
+
+Se passar:
+git add .
+git commit -m "Corrige health do Asaas e vencimento do boleto"
+git push
