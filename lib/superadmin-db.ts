@@ -62,6 +62,7 @@ export type SuperadminSnapshot = {
     internal: boolean
     checkoutEnabled: boolean
     monthlyPriceCents: number | null
+    semiannualPriceCents: number | null
     annualPriceCents: number | null
     activeSubscriptions: number
     mrrCents: number
@@ -194,20 +195,21 @@ export async function getSuperadminSnapshot(): Promise<SuperadminSnapshot> {
       WHERE NOT EXISTS (SELECT 1 FROM sf_demo_environments d WHERE d.organization_id = o.id)
       ORDER BY o.created_at DESC LIMIT 200
     `),
-    pool.query<{ id: string; code: string; name: string; active: boolean; internal: boolean; checkout_enabled: boolean; monthly_price_cents: number | null; annual_price_cents: number | null; active_subscriptions: string; mrr_cents: string }>(`
-      SELECT p.id, p.code, p.name, p.active, p.internal, p.checkout_enabled, p.monthly_price_cents, p.annual_price_cents,
+    pool.query<{ id: string; code: string; name: string; active: boolean; internal: boolean; checkout_enabled: boolean; monthly_price_cents: number | null; semiannual_price_cents: number | null; annual_price_cents: number | null; active_subscriptions: string; mrr_cents: string }>(`
+      SELECT p.id, p.code, p.name, p.active, p.internal, p.checkout_enabled, p.monthly_price_cents, p.semiannual_price_cents, p.annual_price_cents,
              COUNT(s.id) FILTER (WHERE s.status = 'active')::text AS active_subscriptions,
              COALESCE(SUM(
                CASE
                  WHEN s.status <> 'active' OR p.internal THEN 0
                  WHEN s.billing_cycle = 'monthly' THEN COALESCE(p.monthly_price_cents, 0)
-                 WHEN s.billing_cycle = 'annual' THEN ROUND(COALESCE(p.annual_price_cents, 0) / 12.0)::integer
+                 WHEN s.billing_cycle = 'semiannual' THEN ROUND(COALESCE(p.semiannual_price_cents, 0) / 6.0)::integer
+             WHEN s.billing_cycle = 'annual' THEN ROUND(COALESCE(p.annual_price_cents, 0) / 12.0)::integer
                  ELSE 0
                END
              ), 0)::text AS mrr_cents
       FROM sf_plans p
       LEFT JOIN sf_subscriptions s ON s.plan_id = p.id
-      GROUP BY p.id, p.code, p.name, p.active, p.internal, p.checkout_enabled, p.monthly_price_cents, p.annual_price_cents, p.sort_order
+      GROUP BY p.id, p.code, p.name, p.active, p.internal, p.checkout_enabled, p.monthly_price_cents, p.semiannual_price_cents, p.annual_price_cents, p.sort_order
       ORDER BY p.internal ASC, p.sort_order ASC, p.name ASC
     `),
     pool.query<{ id: string; billing_account_id: string; provider: string; status: string; amount_cents: number; currency: string; created_at: Date | string }>(`
@@ -277,7 +279,7 @@ export async function getSuperadminSnapshot(): Promise<SuperadminSnapshot> {
     })),
     plans: plans.rows.map((r) => ({
       id: r.id, code: r.code, name: r.name, active: Boolean(r.active), internal: Boolean(r.internal),
-      checkoutEnabled: Boolean(r.checkout_enabled), monthlyPriceCents: r.monthly_price_cents, annualPriceCents: r.annual_price_cents,
+      checkoutEnabled: Boolean(r.checkout_enabled), monthlyPriceCents: r.monthly_price_cents, semiannualPriceCents: r.semiannual_price_cents, annualPriceCents: r.annual_price_cents,
       activeSubscriptions: Number(r.active_subscriptions || 0), mrrCents: Number(r.mrr_cents || 0),
     })),
     checkouts: checkouts.rows.map((r) => ({
@@ -374,7 +376,6 @@ export async function changeSubscriptionPlan(access: SuperadminAccess, subscript
 
 export async function setEntitlementOverride(access: SuperadminAccess, accountId: string, key: PlanEntitlementKey, value: unknown, ipAddress: string | null) {
   if (!PLAN_ENTITLEMENT_KEYS.includes(key)) throw new Error("Entitlement inválido.")
-  if (key === "aiSetup" && typeof value !== "boolean") throw new Error("A permissão da IA deve ser ligada ou desligada.")
   const updated = await getPostgresPool().query(
     `UPDATE sf_billing_accounts
      SET entitlement_overrides = jsonb_set(COALESCE(entitlement_overrides, '{}'::jsonb), ARRAY[$2]::text[], $3::jsonb, true), updated_at = now()

@@ -1,0 +1,93 @@
+ETAPA 3 — PLANOS, PAGAMENTO E CONTRATO DE ASSINATURA
+
+O QUE ESTA ETAPA PREPARA
+
+1) UM PLANO PRINCIPAL: SABORFLOW COMPLETO
+- Mensal: R$ 99,90/mês — sem fidelidade.
+- Semestral: R$ 89,90/mês por 6 meses — total contratual R$ 539,40.
+- Anual: R$ 79,90/mês por 12 meses — total contratual R$ 958,80.
+- IA de configuração continua separada como adicional opcional.
+
+2) TESTE GRÁTIS
+- O teste continua com 7 dias grátis.
+- Se o cliente contratar durante o teste, os dias gratuitos restantes são preservados.
+- O acesso pago é mantido na mesma conta/empresa.
+
+3) CANCELAMENTO / FIDELIDADE
+- Mensal: sem multa de fidelidade.
+- Semestral/anual: permanência mínima correspondente ao período escolhido.
+- Rescisão antecipada: previsão contratual de multa de 30% sobre o saldo das mensalidades vincendas,
+  sempre sujeita aos limites legais e às hipóteses de isenção previstas em lei.
+- No checkout, semestral/anual exigem um SEGUNDO ACEITE específico dessa regra.
+- O aceite é gravado no audit log com versão do contrato, período, preço e percentual de multa.
+
+IMPORTANTE JURÍDICO
+O texto foi estruturado para deixar preço, permanência e limitação de direito em destaque.
+Antes de abrir vendas em produção, recomenda-se revisão do Contrato de Licença e Assinatura por advogado brasileiro,
+especialmente da cláusula de multa de 30%, pois penalidades podem ser revisadas/reduzidas judicialmente quando
+consideradas excessivas e relações de consumo possuem proteções obrigatórias.
+
+4) PAGAMENTOS — ESTRUTURA PREPARADA PARA ASAAS
+Métodos apresentados no checkout:
+- Pix
+- Cartão
+- Boleto
+
+A ativação do plano depende de confirmação do provedor por webhook.
+O retorno visual do checkout NÃO ativa sozinho a assinatura.
+
+5) DOCUMENTOS
+- /termos
+- /privacidade
+- /contrato-assinatura
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto e aceite substituir.
+2. Rode:
+   npm run build
+3. Se o build passar:
+   git add .
+   git commit -m "Etapa 3 planos pagamento e contrato"
+   git push
+4. Depois do deploy, execute a migration:
+   node scripts/migrate-multiempresa.mjs
+
+A migration desta etapa é:
+- database/migrations/042_commercial_pricing_contracts.sql
+
+NÃO ATIVE PAGAMENTOS REAIS AINDA
+Enquanto você não quiser cobrar, deixe BILLING_PROVIDER vazio no Railway.
+
+QUANDO FOR TESTAR O ASAAS EM SANDBOX
+Configure no Railway:
+BILLING_PROVIDER=asaas
+ASAAS_ENV=sandbox
+ASAAS_API_KEY=<chave sandbox>
+ASAAS_WEBHOOK_TOKEN=<token seguro com no mínimo 32 caracteres>
+ASAAS_WEBHOOK_EMAIL=<email que receberá alertas do webhook>
+APP_BASE_URL=https://SEU-DOMINIO
+
+Depois, com essas variáveis disponíveis, execute uma vez:
+node scripts/configure-asaas-webhook.mjs
+
+O script cadastra:
+https://SEU-DOMINIO/api/billing/webhooks/asaas
+
+Eventos principais:
+- SUBSCRIPTION_CREATED
+- SUBSCRIPTION_UPDATED
+- SUBSCRIPTION_INACTIVATED
+- PAYMENT_CREATED
+- PAYMENT_CONFIRMED
+- PAYMENT_RECEIVED
+- PAYMENT_OVERDUE
+- PAYMENT_REFUNDED
+- PAYMENT_CHARGEBACK_REQUESTED
+
+PRODUÇÃO
+Somente depois dos testes em sandbox:
+ASAAS_ENV=production
+ASAAS_API_KEY=<chave de produção>
+BILLING_PROVIDER=asaas
+
+Nunca coloque as chaves do Asaas em arquivos enviados ao GitHub.

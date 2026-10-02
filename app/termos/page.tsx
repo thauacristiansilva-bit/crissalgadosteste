@@ -31,10 +31,12 @@ const sections = [
     ],
   },
   {
-    title: "4. Planos, cobrança e cancelamento",
+    title: "4. Planos, cobrança, permanência e cancelamento",
     body: [
-      "Recursos, limites, preços, periodicidade e condições comerciais podem variar conforme o plano apresentado no momento da contratação. Quando houver cobrança recorrente por provedor de pagamento, a ativação e a continuidade do plano dependem da confirmação do status pelo provedor e pelas regras comerciais exibidas na contratação.",
-      "Cancelamentos, alterações de plano, reembolsos e efeitos sobre o acesso seguirão as condições apresentadas no fluxo comercial e a legislação aplicável. Obrigações já vencidas ou serviços já prestados podem permanecer devidos conforme o caso.",
+      "Recursos, limites, preços, periodicidade e condições comerciais são apresentados antes da contratação. Quando houver cobrança recorrente por provedor de pagamento, a ativação e a continuidade do plano dependem da confirmação financeira e das regras comerciais exibidas no checkout.",
+      "O plano mensal não possui multa de fidelidade para impedir a próxima renovação. Os planos semestral e anual podem possuir permanência mínima em contrapartida a preço mensal reduzido. Nesses casos, a contratação exibirá de forma destacada o prazo, o valor total do contrato e a regra de rescisão antecipada.",
+      "Na rescisão antecipada dos planos semestral ou anual, poderá ser aplicada multa de 30% sobre o saldo das mensalidades vincendas até o fim do período contratado, calculada proporcionalmente e sempre sujeita aos limites da legislação aplicável. A cobrança não afasta direitos legalmente assegurados, inclusive hipóteses em que a multa não possa ser exigida.",
+      "As condições específicas de licença, permanência, valores e meios de pagamento constam também do Contrato de Licença e Assinatura aceito no checkout.",
     ],
   },
   {
@@ -120,7 +122,7 @@ export default function TermsPage() {
           </div>
 
           <div className="mt-10 rounded-2xl bg-orange-50 p-4 text-sm leading-6 text-stone-700">
-            Para informações sobre dados pessoais, consulte o <Link href="/privacidade" className="font-black text-orange-700 underline">Aviso de Privacidade</Link>.
+            Para informações sobre dados pessoais, consulte o <Link href="/privacidade" className="font-black text-orange-700 underline">Aviso de Privacidade</Link>. Para condições comerciais específicas, consulte também o <Link href="/contrato-assinatura" className="font-black text-orange-700 underline">Contrato de Licença e Assinatura</Link>.
           </div>
         </article>
       </main>

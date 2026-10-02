@@ -6,14 +6,17 @@ import { getBillingProvider, configuredBillingProviderName } from "@/lib/billing
 import type { ProviderSubscriptionSnapshot } from "@/lib/billing-provider"
 import type {
   BillingCycle,
+  PaymentMethod,
   CommercialBillingStatus,
   CommercialPlan,
   PlanEntitlementKey,
   PlanEntitlements,
   SubscriptionStatus,
 } from "@/lib/billing-types"
+import { commitmentEndDate, commercialCycleTerms, EARLY_TERMINATION_PENALTY_PERCENT, nextRecurringDueDateAfterTrial, providerBillingEndDate } from "@/lib/commercial-contract"
+import { updateAsaasSubscriptionSchedule } from "@/lib/billing-providers/asaas"
+import { recordCurrentLegalAcceptanceWithClient, recordSubscriptionContractAcceptanceWithClient } from "@/lib/legal-db"
 import { getPostgresPool } from "@/lib/postgres"
-import { recordCurrentLegalAcceptanceWithClient } from "@/lib/legal-db"
 import {
   commercialRegistrationMetadata,
   normalizeCommercialRegistration,
@@ -76,15 +79,17 @@ export async function listCommercialPlans(): Promise<CommercialPlan[]> {
     description: string
     currency: string
     monthly_price_cents: number | null
+    semiannual_price_cents: number | null
     annual_price_cents: number | null
   }>(`
-    SELECT id, code, name, description, currency, monthly_price_cents, annual_price_cents
+    SELECT id, code, name, description, currency, monthly_price_cents, semiannual_price_cents, annual_price_cents
     FROM sf_plans
     WHERE active = true
       AND internal = false
       AND checkout_enabled = true
       AND (
         COALESCE(monthly_price_cents, 0) > 0
+        OR COALESCE(semiannual_price_cents, 0) > 0
         OR COALESCE(annual_price_cents, 0) > 0
       )
     ORDER BY sort_order ASC, name ASC
@@ -107,6 +112,7 @@ export async function listCommercialPlans(): Promise<CommercialPlan[]> {
       description: plan.description,
       currency: plan.currency,
       monthlyPriceCents: plan.monthly_price_cents,
+      semiannualPriceCents: plan.semiannual_price_cents,
       annualPriceCents: plan.annual_price_cents,
       entitlements: mergePlanEntitlements(entitlements.rows),
     })
@@ -314,9 +320,10 @@ async function publicPlanForCheckout(client: PoolClient, code: string, cycle: Bi
     name: string
     currency: string
     monthly_price_cents: number | null
+    semiannual_price_cents: number | null
     annual_price_cents: number | null
   }>(`
-    SELECT id, code, name, currency, monthly_price_cents, annual_price_cents
+    SELECT id, code, name, currency, monthly_price_cents, semiannual_price_cents, annual_price_cents
     FROM sf_plans
     WHERE lower(code) = lower($1)
       AND active = true
@@ -326,9 +333,14 @@ async function publicPlanForCheckout(client: PoolClient, code: string, cycle: Bi
   `, [code])
   const plan = result.rows[0]
   if (!plan) throw new Error("Plano comercial indisponível.")
-  const amountCents = cycle === "annual" ? plan.annual_price_cents : plan.monthly_price_cents
+  const amountCents = cycle === "annual"
+    ? plan.annual_price_cents
+    : cycle === "semiannual"
+      ? plan.semiannual_price_cents
+      : plan.monthly_price_cents
   if (!amountCents || amountCents <= 0) throw new Error("Este ciclo de cobrança não está disponível para o plano selecionado.")
-  return { ...plan, amountCents }
+  const terms = commercialCycleTerms(cycle)
+  return { ...plan, amountCents, recurringAmountCents: terms.installmentCents, commitmentMonths: terms.commitmentMonths }
 }
 
 export async function createCheckoutForUser(input: {
@@ -336,17 +348,27 @@ export async function createCheckoutForUser(input: {
   email: string
   planCode: string
   billingCycle: BillingCycle
+  paymentMethod: PaymentMethod
+  contractAccepted: boolean
+  commitmentAccepted: boolean
+  ipAddress?: string | null
+  userAgent?: string | null
   returnUrl: string
 }) {
   const providerName = configuredBillingProviderName()
   const provider = getBillingProvider(providerName)
   if (!provider.configured()) throw new Error("O provedor de cobrança ainda não foi configurado.")
+  if (input.contractAccepted !== true) throw new Error("Leia e aceite o Contrato de Licença e Assinatura antes de continuar.")
+  if (input.billingCycle !== "monthly" && input.commitmentAccepted !== true) {
+    throw new Error("Confirme a permanência mínima e a regra de rescisão antecipada antes de continuar.")
+  }
 
   const client = await getPostgresPool().connect()
   let checkoutSessionId = ""
   let localSubscriptionId = ""
   let billingAccountId = ""
   let scheduledStartDate: string | null = null
+  let contractEndAt: string | null = null
   let plan: Awaited<ReturnType<typeof publicPlanForCheckout>>
   try {
     await client.query("BEGIN")
@@ -381,6 +403,7 @@ export async function createCheckoutForUser(input: {
     if (basicTrial.rows[0]?.expires_at) {
       scheduledStartDate = new Date(basicTrial.rows[0].expires_at).toISOString()
     }
+    contractEndAt = commitmentEndDate(scheduledStartDate, input.billingCycle)
 
     if (scheduledStartDate) {
       const alreadyScheduled = await client.query<{ id: string }>(`
@@ -439,7 +462,13 @@ export async function createCheckoutForUser(input: {
       input.billingCycle,
       provider.name,
       JSON.stringify({
-        source: "phase-14-checkout",
+        source: "commercial-checkout-v3",
+        paymentMethod: input.paymentMethod,
+        commitmentMonths: plan.commitmentMonths,
+        contractValueCents: plan.amountCents,
+        recurringAmountCents: plan.recurringAmountCents,
+        earlyTerminationPenaltyPercent: EARLY_TERMINATION_PENALTY_PERCENT,
+        ...(contractEndAt ? { contractEndAt } : {}),
         ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate, preserveTrial: true } : {}),
       }),
     ])
@@ -464,6 +493,27 @@ export async function createCheckoutForUser(input: {
       SET source_checkout_session_id = $2, updated_at = now()
       WHERE id = $1
     `, [localSubscriptionId, checkoutSessionId])
+    await recordCurrentLegalAcceptanceWithClient(client, {
+      userId: input.userId,
+      organizationId: null,
+      source: "commercial-checkout",
+      ipAddress: input.ipAddress || null,
+      userAgent: input.userAgent || null,
+    })
+    await recordSubscriptionContractAcceptanceWithClient(client, {
+      userId: input.userId,
+      source: "commercial-checkout",
+      ipAddress: input.ipAddress || null,
+      userAgent: input.userAgent || null,
+      planCode: plan.code,
+      billingCycle: input.billingCycle,
+      paymentMethod: input.paymentMethod,
+      contractValueCents: plan.amountCents,
+      recurringAmountCents: plan.recurringAmountCents,
+      commitmentMonths: plan.commitmentMonths,
+      earlyTerminationPenaltyPercent: EARLY_TERMINATION_PENALTY_PERCENT,
+      explicitCommitmentAccepted: input.billingCycle === "monthly" ? true : input.commitmentAccepted,
+    })
     await client.query("COMMIT")
   } catch (error) {
     await client.query("ROLLBACK")
@@ -479,7 +529,11 @@ export async function createCheckoutForUser(input: {
       planCode: plan!.code,
       planName: plan!.name,
       billingCycle: input.billingCycle,
+      paymentMethod: input.paymentMethod,
       amountCents: plan!.amountCents,
+      recurringAmountCents: plan!.recurringAmountCents,
+      commitmentMonths: plan!.commitmentMonths,
+      contractEndDate: contractEndAt,
       currency: plan!.currency,
       payerEmail: normalizeEmail(input.email),
       returnUrl: input.returnUrl,
@@ -490,13 +544,13 @@ export async function createCheckoutForUser(input: {
       SET status = 'pending', provider_checkout_id = $2, provider_subscription_id = $3,
           checkout_url = $4, metadata = metadata || $5::jsonb, updated_at = now()
       WHERE id = $1
-    `, [checkoutSessionId, checkout.providerCheckoutId, checkout.providerSubscriptionId, checkout.checkoutUrl, JSON.stringify({ providerStatus: checkout.providerStatus, ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate } : {}) })])
+    `, [checkoutSessionId, checkout.providerCheckoutId, checkout.providerSubscriptionId, checkout.checkoutUrl, JSON.stringify({ providerStatus: checkout.providerStatus, paymentMethod: input.paymentMethod, contractEndAt, ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate } : {}) })])
     await getPostgresPool().query(`
       UPDATE sf_subscriptions
       SET provider_subscription_id = $2, provider_status = $3,
           metadata = metadata || $4::jsonb, last_provider_sync_at = now(), updated_at = now()
       WHERE id = $1
-    `, [localSubscriptionId, checkout.providerSubscriptionId, checkout.providerStatus, JSON.stringify({ checkoutCreated: true, ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate, preserveTrial: true } : {}) })])
+    `, [localSubscriptionId, checkout.providerSubscriptionId, checkout.providerStatus, JSON.stringify({ checkoutCreated: true, paymentMethod: input.paymentMethod, contractEndAt, ...(scheduledStartDate ? { scheduledActivationAt: scheduledStartDate, preserveTrial: true } : {}) })])
     return { checkoutUrl: checkout.checkoutUrl, reused: false }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao criar checkout."
@@ -520,6 +574,13 @@ function mapProviderStatus(provider: string, status: string): SubscriptionStatus
     if (normalized === "authorized") return "active"
     if (normalized === "paused") return "suspended"
     if (normalized === "cancelled" || normalized === "canceled") return "canceled"
+    return "pending"
+  }
+  if (provider === "asaas") {
+    if (["active", "received", "confirmed", "payment_received", "payment_confirmed"].includes(normalized)) return "active"
+    if (["overdue", "past_due", "payment_overdue"].includes(normalized)) return "past_due"
+    if (["suspended", "chargeback"].includes(normalized)) return "suspended"
+    if (["inactive", "canceled", "cancelled", "refunded"].includes(normalized)) return "canceled"
     return "pending"
   }
   return "pending"
@@ -898,6 +959,89 @@ export async function processBillingWebhook(input: {
   }
 
   try {
+    if (input.provider === "asaas") {
+      const payload = input.payload && typeof input.payload === "object" ? input.payload as {
+        event?: string
+        subscription?: { id?: string; status?: string; externalReference?: string | null; nextDueDate?: string | null }
+        payment?: { id?: string; status?: string; externalReference?: string | null; subscription?: string | null; dueDate?: string | null }
+      } : {}
+      const subscriptionPayload = payload.subscription
+      const paymentPayload = payload.payment
+      const externalReference = subscriptionPayload?.externalReference || paymentPayload?.externalReference || null
+      const providerSubscriptionId = subscriptionPayload?.id || paymentPayload?.subscription || null
+
+      let local = externalReference ? await pool.query<{ id: string; billing_cycle: BillingCycle | null; metadata: Record<string, unknown> | null }>(`
+        SELECT id, billing_cycle, metadata FROM sf_subscriptions WHERE id::text = $1 LIMIT 1
+      `, [externalReference]) : { rows: [] as Array<{ id: string; billing_cycle: BillingCycle | null; metadata: Record<string, unknown> | null }>, rowCount: 0 }
+
+      if (!local.rowCount && providerSubscriptionId) {
+        local = await pool.query<{ id: string; billing_cycle: BillingCycle | null; metadata: Record<string, unknown> | null }>(`
+          SELECT id, billing_cycle, metadata FROM sf_subscriptions
+          WHERE provider = 'asaas' AND provider_subscription_id = $1
+          ORDER BY created_at DESC LIMIT 1
+        `, [providerSubscriptionId])
+      }
+
+      if (!local.rowCount) {
+        await pool.query(`UPDATE sf_billing_webhook_events SET processing_status = 'ignored', processed_at = now(), updated_at = now() WHERE id = $1`, [rowId])
+        return { duplicate: false, processed: false }
+      }
+
+      const localSubscriptionId = local.rows[0].id
+      if (providerSubscriptionId) {
+        await pool.query(`
+          UPDATE sf_subscriptions
+          SET provider_subscription_id = $2, provider_status = COALESCE($3, provider_status), last_provider_sync_at = now(), updated_at = now()
+          WHERE id = $1
+        `, [localSubscriptionId, providerSubscriptionId, subscriptionPayload?.status || null])
+      }
+
+      if (input.eventType === "SUBSCRIPTION_CREATED" && providerSubscriptionId) {
+        const metadata = local.rows[0].metadata || {}
+        const contractEndAt = typeof metadata.contractEndAt === "string" ? metadata.contractEndAt : ""
+        const scheduledActivationAt = typeof metadata.scheduledActivationAt === "string" ? metadata.scheduledActivationAt : ""
+        const billingCycle = local.rows[0].billing_cycle || "monthly"
+        const providerEndAt = providerBillingEndDate(contractEndAt, billingCycle)
+        const nextDueDate = nextRecurringDueDateAfterTrial(scheduledActivationAt)
+        if (providerEndAt || nextDueDate) {
+          await updateAsaasSubscriptionSchedule(providerSubscriptionId, { endDate: providerEndAt, nextDueDate }).catch((error) => {
+            console.error("[SaborFlow Billing] Não foi possível aplicar o calendário da assinatura no Asaas:", error)
+          })
+        }
+        await pool.query(`UPDATE sf_billing_webhook_events SET processing_status = 'processed', processed_at = now(), updated_at = now() WHERE id = $1`, [rowId])
+        return { duplicate: false, processed: true }
+      }
+
+      const status = input.eventType === "PAYMENT_RECEIVED" || input.eventType === "PAYMENT_CONFIRMED"
+        ? "ACTIVE"
+        : input.eventType === "PAYMENT_OVERDUE"
+          ? "PAST_DUE"
+          : input.eventType === "SUBSCRIPTION_INACTIVATED"
+            ? "INACTIVE"
+            : input.eventType === "PAYMENT_REFUNDED"
+              ? "REFUNDED"
+              : input.eventType === "PAYMENT_CHARGEBACK_REQUESTED"
+                ? "SUSPENDED"
+                : null
+      if (!status) {
+        await pool.query(`UPDATE sf_billing_webhook_events SET processing_status = 'ignored', processed_at = now(), updated_at = now() WHERE id = $1`, [rowId])
+        return { duplicate: false, processed: false }
+      }
+
+      await applyProviderSubscriptionSnapshot(localSubscriptionId, {
+        provider: "asaas",
+        id: providerSubscriptionId || paymentPayload?.id || localSubscriptionId,
+        status,
+        externalReference: localSubscriptionId,
+        payerEmail: null,
+        nextPaymentDate: subscriptionPayload?.nextDueDate || paymentPayload?.dueDate || null,
+        raw: payload,
+      }, "asaas", input.providerEventId)
+
+      await pool.query(`UPDATE sf_billing_webhook_events SET processing_status = 'processed', processed_at = now(), updated_at = now() WHERE id = $1`, [rowId])
+      return { duplicate: false, processed: true }
+    }
+
     if (!input.resourceId || input.eventType !== "subscription_preapproval") {
       await pool.query(`
         UPDATE sf_billing_webhook_events

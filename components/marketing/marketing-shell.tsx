@@ -78,7 +78,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             </div>
             <p className="mt-6 text-xs font-black uppercase tracking-[0.18em] text-stone-400">Legal</p>
             <div className="mt-3 grid gap-2 text-sm font-bold text-stone-600">
-              <Link href="/termos">Termos de Uso</Link><Link href="/privacidade">Aviso de Privacidade</Link>
+              <Link href="/termos">Termos de Uso</Link><Link href="/contrato-assinatura">Contrato de Assinatura</Link><Link href="/privacidade">Aviso de Privacidade</Link>
             </div>
           </div>
         </div>

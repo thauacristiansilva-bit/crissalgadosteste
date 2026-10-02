@@ -1,5 +1,6 @@
-import type { BillingCycle } from "@/lib/billing-types"
+import type { BillingCycle, PaymentMethod } from "@/lib/billing-types"
 import { createMercadoPagoBillingProvider } from "@/lib/billing-providers/mercado-pago"
+import { createAsaasBillingProvider } from "@/lib/billing-providers/asaas"
 
 export type ProviderCheckoutInput = {
   checkoutSessionId: string
@@ -7,7 +8,11 @@ export type ProviderCheckoutInput = {
   planCode: string
   planName: string
   billingCycle: BillingCycle
+  paymentMethod: PaymentMethod
   amountCents: number
+  recurringAmountCents: number
+  commitmentMonths: number
+  contractEndDate?: string | null
   currency: string
   payerEmail: string
   returnUrl: string
@@ -50,6 +55,9 @@ export function getBillingProvider(name = configuredBillingProviderName()): Bill
   }
   if (name === "mercado_pago" || name === "mercadopago") {
     return createMercadoPagoBillingProvider()
+  }
+  if (name === "asaas") {
+    return createAsaasBillingProvider()
   }
   throw new Error(`Provedor de cobrança não suportado: ${name}.`)
 }

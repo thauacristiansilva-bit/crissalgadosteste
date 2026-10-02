@@ -4,8 +4,9 @@ import Script from "next/script"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
-import { Building2, Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, ShieldCheck, UserRound } from "lucide-react"
-import type { BillingCycle, CommercialBillingStatus, CommercialPlan } from "@/lib/billing-types"
+import { AlertTriangle, Building2, Check, CreditCard, LoaderCircle, LockKeyhole, LogIn, Mail, QrCode, ReceiptText, ShieldCheck, UserRound } from "lucide-react"
+import type { BillingCycle, CommercialBillingStatus, CommercialPlan, PaymentMethod } from "@/lib/billing-types"
+import { EARLY_TERMINATION_PENALTY_PERCENT, commercialCycleTerms } from "@/lib/commercial-contract"
 
 function money(cents: number | null, currency: string) {
   if (cents == null) return "Indisponível"
@@ -52,6 +53,8 @@ function formatCnpj(value: string) {
 export function CommercialCheckout() {
   const searchParams = useSearchParams()
   const selectedPlanCode = (searchParams.get("plano") || "").trim().toLowerCase()
+  const selectedCycleParam = (searchParams.get("ciclo") || "").trim().toLowerCase()
+  const initialCycle: BillingCycle = selectedCycleParam === "semiannual" || selectedCycleParam === "annual" ? selectedCycleParam : "monthly"
   const [plans, setPlans] = useState<CommercialPlan[]>([])
   const [status, setStatus] = useState<CommercialBillingStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -65,7 +68,10 @@ export function CommercialCheckout() {
   const [hasCnpj, setHasCnpj] = useState(true)
   const [cnpj, setCnpj] = useState("")
   const [legalAccepted, setLegalAccepted] = useState(false)
-  const [cycle, setCycle] = useState<BillingCycle>("monthly")
+  const [cycle, setCycle] = useState<BillingCycle>(initialCycle)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("pix")
+  const [contractAccepted, setContractAccepted] = useState(false)
+  const [commitmentAccepted, setCommitmentAccepted] = useState(false)
   const [googleReady, setGoogleReady] = useState(false)
   const googleButtonRef = useRef<HTMLDivElement | null>(null)
   const googleFlowRef = useRef({ mode, cpf, hasCnpj, cnpj, legalAccepted })
@@ -96,6 +102,7 @@ export function CommercialCheckout() {
 
   useEffect(() => { void load() }, [])
 
+  const hasSemiannual = useMemo(() => plans.some((plan) => plan.semiannualPriceCents != null), [plans])
   const hasAnnual = useMemo(() => plans.some((plan) => plan.annualPriceCents != null), [plans])
 
   async function authenticate(event: FormEvent) {
@@ -178,7 +185,7 @@ export function CommercialCheckout() {
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planCode, billingCycle: cycle }),
+        body: JSON.stringify({ planCode, billingCycle: cycle, paymentMethod, contractAccepted, commitmentAccepted: cycle === "monthly" ? true : commitmentAccepted }),
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || "Não foi possível iniciar o pagamento.")
@@ -277,31 +284,77 @@ export function CommercialCheckout() {
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">Sua assinatura <strong>{status.billing.subscription.planName}</strong> já está ativa. {status.hasOrganization ? <a href="/admin" className="underline">Voltar ao painel</a> : <a href="/admin/nova-empresa" className="underline">Configurar sua primeira loja</a>}.</div>
           )}
 
-          <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div><p className="text-xs font-black uppercase tracking-wider text-gray-400">Conta contratante</p><p className="font-bold text-gray-900">{status.email}</p></div>
-            {hasAnnual && <div className="flex rounded-xl bg-gray-100 p-1"><button onClick={() => setCycle("monthly")} className={`rounded-lg px-4 py-2 text-sm font-black ${cycle === "monthly" ? "bg-white shadow-sm" : "text-gray-500"}`}>Mensal</button><button onClick={() => setCycle("annual")} className={`rounded-lg px-4 py-2 text-sm font-black ${cycle === "annual" ? "bg-white shadow-sm" : "text-gray-500"}`}>Anual</button></div>}
+          <div className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><p className="text-xs font-black uppercase tracking-wider text-gray-400">Conta contratante</p><p className="font-bold text-gray-900">{status.email}</p></div>
+              <div className="flex flex-wrap rounded-xl bg-gray-100 p-1">
+                <button onClick={() => { setCycle("monthly"); setContractAccepted(false); setCommitmentAccepted(false) }} className={`rounded-lg px-4 py-2 text-sm font-black ${cycle === "monthly" ? "bg-white shadow-sm" : "text-gray-500"}`}>Mensal</button>
+                {hasSemiannual && <button onClick={() => { setCycle("semiannual"); setContractAccepted(false); setCommitmentAccepted(false) }} className={`rounded-lg px-4 py-2 text-sm font-black ${cycle === "semiannual" ? "bg-white shadow-sm" : "text-gray-500"}`}>Semestral</button>}
+                {hasAnnual && <button onClick={() => { setCycle("annual"); setContractAccepted(false); setCommitmentAccepted(false) }} className={`rounded-lg px-4 py-2 text-sm font-black ${cycle === "annual" ? "bg-white shadow-sm" : "text-gray-500"}`}>Anual</button>}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {([
+                ["pix", QrCode, "Pix", "Pagamento rápido"],
+                ["credit_card", CreditCard, "Cartão", "Cobrança recorrente"],
+                ["boleto", ReceiptText, "Boleto", "Cobrança tradicional"],
+              ] as const).map(([value, Icon, label, caption]) => (
+                <button key={value} type="button" onClick={() => setPaymentMethod(value)} className={`rounded-2xl border p-4 text-left transition ${paymentMethod === value ? "border-orange-400 bg-orange-50 ring-2 ring-orange-100" : "border-gray-200 bg-white hover:border-orange-200"}`}>
+                  <Icon className="h-5 w-5 text-orange-600" />
+                  <p className="mt-2 text-sm font-black text-gray-950">{label}</p>
+                  <p className="mt-1 text-xs text-gray-500">{caption}</p>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {cycle !== "monthly" && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                <div>
+                  <p className="font-black">Contrato com permanência mínima de {commercialCycleTerms(cycle).commitmentMonths} meses</p>
+                  <p className="mt-1">Em caso de cancelamento antecipado, poderá ser cobrada multa de <strong>{EARLY_TERMINATION_PENALTY_PERCENT}% sobre o saldo das mensalidades que ainda faltarem</strong>, observados os limites legais e as hipóteses de isenção previstas em lei.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-5 text-sm leading-6 text-gray-700">
+            <input type="checkbox" checked={contractAccepted} onChange={(event) => setContractAccepted(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-orange-600" />
+            <span>Li e aceito o <Link href="/contrato-assinatura" target="_blank" className="font-black text-orange-700 underline">Contrato de Licença e Assinatura</Link>, os <Link href="/termos" target="_blank" className="font-black text-orange-700 underline">Termos de Uso</Link> e o <Link href="/privacidade" target="_blank" className="font-black text-orange-700 underline">Aviso de Privacidade</Link>, incluindo valores, período escolhido e, quando aplicável, a regra de multa de 30% sobre o saldo vincendo na rescisão antecipada.</span>
+          </label>
+
+          {cycle !== "monthly" && (
+            <label className="flex items-start gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
+              <input type="checkbox" checked={commitmentAccepted} onChange={(event) => setCommitmentAccepted(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-700" />
+              <span><strong>Confirmação de permanência:</strong> estou ciente de que o plano {cycle === "annual" ? "anual" : "semestral"} possui permanência mínima de {commercialCycleTerms(cycle).commitmentMonths} meses e que, se eu solicitar rescisão antecipada sem hipótese legal de isenção, poderá ser cobrada multa de <strong>{EARLY_TERMINATION_PENALTY_PERCENT}% sobre o saldo das mensalidades ainda vincendas</strong>.</span>
+            </label>
+          )}
 
           {plans.length === 0 ? (
             <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm leading-relaxed text-amber-900">Nenhum plano comercial foi publicado ainda. A infraestrutura de cobrança está pronta, mas preço e limites precisam ser definidos pelo operador do SaborFlow antes de abrir vendas.</div>
           ) : (
             <div className="grid gap-4 lg:grid-cols-3">
               {plans.map((plan) => {
-                const price = cycle === "annual" ? plan.annualPriceCents : plan.monthlyPriceCents
-                const selected = selectedPlanCode === plan.code.toLowerCase()
+                const price = cycle === "annual" ? plan.annualPriceCents : cycle === "semiannual" ? plan.semiannualPriceCents : plan.monthlyPriceCents
+                const terms = commercialCycleTerms(cycle)
+                const selected = selectedPlanCode === plan.code.toLowerCase() || plans.length === 1
                 return (
                   <article key={plan.id} className={`flex flex-col rounded-3xl border bg-white p-6 shadow-sm ${selected ? "border-orange-400 ring-2 ring-orange-100" : "border-gray-200"}`}>
-                    {selected && <p className="mb-3 inline-flex w-fit rounded-full bg-orange-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-800">Plano escolhido</p>}
+                    {selected && <p className="mb-3 inline-flex w-fit rounded-full bg-orange-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-800">SaborFlow completo</p>}
                     <h2 className="text-xl font-black text-gray-950">{plan.name}</h2>
                     <p className="mt-2 min-h-10 text-sm text-gray-600">{plan.description}</p>
-                    <p className="mt-5 text-3xl font-black text-gray-950">{money(price, plan.currency)}</p>
-                    <p className="text-xs font-bold text-gray-400">por {cycle === "annual" ? "ano" : "mês"}</p>
+                    <p className="mt-5 text-3xl font-black text-gray-950">{money(terms.installmentCents, plan.currency)}<span className="text-sm font-black text-gray-400">/mês</span></p>
+                    <p className="mt-1 text-xs font-bold text-gray-500">{cycle === "monthly" ? "Cobrança mensal, sem fidelidade" : `${terms.commitmentMonths} meses de compromisso · total contratual ${money(price, plan.currency)}`}</p>
                     <div className="mt-5 space-y-2 text-sm text-gray-700">
-                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />Até {limit(plan.entitlements.maxOrganizations)} loja(s)</p>
-                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />Até {limit(plan.entitlements.maxUsers)} usuário(s)</p>
-                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />Até {limit(plan.entitlements.maxProducts)} produto(s)</p>
+                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />{limit(plan.entitlements.maxOrganizations)} loja principal</p>
+                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />Usuários e produtos conforme o plano completo</p>
+                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />Delivery, cozinha, financeiro, clientes e relatórios</p>
+                      <p className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-600" />IA de configuração contratada separadamente</p>
                     </div>
-                    <button disabled={busy || price == null} onClick={() => void checkout(plan.code)} className="mt-6 flex h-12 items-center justify-center gap-2 rounded-xl bg-gray-950 text-sm font-black text-white hover:bg-black disabled:opacity-40"><CreditCard className="h-4 w-4" />Contratar {plan.name}</button>
+                    <button disabled={busy || price == null || !contractAccepted || (cycle !== "monthly" && !commitmentAccepted)} onClick={() => void checkout(plan.code)} className="mt-6 flex h-12 items-center justify-center gap-2 rounded-xl bg-gray-950 text-sm font-black text-white hover:bg-black disabled:opacity-40"><CreditCard className="h-4 w-4" />Ir para pagamento</button>
                   </article>
                 )
               })}

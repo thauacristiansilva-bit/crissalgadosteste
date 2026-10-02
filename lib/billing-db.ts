@@ -49,7 +49,7 @@ type BillingRow = {
   plan_internal: boolean | null
   current_period_end: Date | string | null
   trial_ends_at: Date | string | null
-  billing_cycle: "monthly" | "annual" | "manual" | null
+  billing_cycle: "monthly" | "semiannual" | "annual" | "manual" | null
   provider: string | null
 }
 

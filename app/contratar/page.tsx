@@ -26,8 +26,9 @@ export default function ContractPage() {
               <div className="mt-8 space-y-3">
                 {[
                   ["1", "Entre ou crie sua conta", "Use o mesmo e-mail e senha do teste grátis."],
-                  ["2", "Escolha o plano", "Mensal ou anual conforme os valores comerciais ativos."],
-                  ["3", "Traga seu cadastro antigo", "Depois, envie link, prints e fotos para acelerar a migração."],
+                  ["2", "Escolha período e pagamento", "Mensal, semestral ou anual, com Pix, cartão ou boleto."],
+                  ["3", "Leia e aceite o contrato", "Veja preço, permanência e cancelamento antes de ir ao pagamento."],
+                  ["4", "Traga seu cadastro antigo", "Depois, envie link, prints e fotos para acelerar a migração."],
                 ].map(([number, title, text]) => (
                   <div key={number} className="flex gap-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-sm font-black text-white">{number}</span>
@@ -44,6 +45,11 @@ export default function ContractPage() {
               <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5">
                 <div className="flex items-center gap-2 text-emerald-800"><FileUp className="h-5 w-5" /><p className="font-black">Migração assistida</p></div>
                 <p className="mt-2 text-sm leading-6 text-stone-600">Após entrar na empresa, você terá uma área para colar o link antigo, enviar até 60 imagens e registrar as regras que precisam ser preservadas.</p>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                <p className="font-black text-amber-950">Semestral e anual têm permanência mínima</p>
+                <p className="mt-2 text-sm leading-6 text-amber-900">A regra de rescisão antecipada e a multa de 30% sobre o saldo vincendo aparecem em destaque e exigem confirmação específica antes do pagamento.</p>
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold text-stone-500">

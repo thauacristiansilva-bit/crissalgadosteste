@@ -55,7 +55,7 @@ export function createMercadoPagoBillingProvider(): BillingProvider {
       return Boolean(process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim())
     },
     async createCheckout(input: ProviderCheckoutInput): Promise<ProviderCheckoutResult> {
-      const frequency = input.billingCycle === "annual" ? 12 : 1
+      const frequency = 1
       const payload = await mercadoPagoRequest<MercadoPagoPreapproval>("/preapproval", {
         method: "POST",
         body: JSON.stringify({
@@ -66,7 +66,8 @@ export function createMercadoPagoBillingProvider(): BillingProvider {
             frequency,
             frequency_type: "months",
             ...(input.startDate ? { start_date: input.startDate } : {}),
-            transaction_amount: Number((input.amountCents / 100).toFixed(2)),
+            transaction_amount: Number((input.recurringAmountCents / 100).toFixed(2)),
+            ...(input.contractEndDate ? { end_date: input.contractEndDate } : {}),
             currency_id: input.currency,
           },
           back_url: input.returnUrl,

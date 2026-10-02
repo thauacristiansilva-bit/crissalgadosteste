@@ -25,7 +25,9 @@ export type SubscriptionStatus =
   | "suspended"
   | "canceled"
 
-export type BillingCycle = "monthly" | "annual"
+export type BillingCycle = "monthly" | "semiannual" | "annual"
+
+export type PaymentMethod = "pix" | "credit_card" | "boleto"
 
 export type PlanEntitlements = {
   maxOrganizations: number | null
@@ -56,6 +58,7 @@ export type CommercialPlan = {
   description: string
   currency: string
   monthlyPriceCents: number | null
+  semiannualPriceCents: number | null
   annualPriceCents: number | null
   entitlements: PlanEntitlements
 }

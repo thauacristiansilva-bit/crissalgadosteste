@@ -5,6 +5,7 @@ import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
   PRIVACY_VERSION,
   TERMS_VERSION,
+  SUBSCRIPTION_CONTRACT_VERSION,
   type LegalAcceptanceSource,
 } from "@/lib/legal-documents"
 
@@ -20,7 +21,7 @@ async function insertAuditAcceptance(
   client: PoolClient,
   input: AcceptanceContext & {
     action: string
-    documentType: "terms" | "privacy"
+    documentType: "terms" | "privacy" | "subscription_contract"
     documentVersion: string
   },
 ) {
@@ -186,4 +187,53 @@ export async function recordCustomerPrivacyAcknowledgement(input: {
       ),
     "customer-session",
   )
+}
+
+
+export async function recordSubscriptionContractAcceptanceWithClient(
+  client: PoolClient,
+  input: AcceptanceContext & {
+    planCode: string
+    billingCycle: string
+    paymentMethod: string
+    contractValueCents: number
+    recurringAmountCents: number
+    commitmentMonths: number
+    earlyTerminationPenaltyPercent: number
+    explicitCommitmentAccepted: boolean
+  },
+) {
+  await client.query("SELECT set_config('app.rls_bypass', 'true', true)")
+  try {
+    await client.query(
+      `
+        INSERT INTO sf_audit_log (
+          id, organization_id, user_id, action, entity_type, entity_id,
+          metadata, ip_address, created_at
+        ) VALUES ($1, NULL, $2, 'legal.subscription_contract.accepted',
+          'legal_document', 'subscription_contract', $3::jsonb, $4, now())
+      `,
+      [
+        randomUUID(),
+        input.userId,
+        JSON.stringify({
+          documentType: "subscription_contract",
+          documentVersion: SUBSCRIPTION_CONTRACT_VERSION,
+          source: input.source,
+          planCode: input.planCode,
+          billingCycle: input.billingCycle,
+          paymentMethod: input.paymentMethod,
+          contractValueCents: input.contractValueCents,
+          recurringAmountCents: input.recurringAmountCents,
+          commitmentMonths: input.commitmentMonths,
+          earlyTerminationPenaltyPercent: input.earlyTerminationPenaltyPercent,
+          explicitCommitmentAccepted: input.explicitCommitmentAccepted,
+          userAgent: input.userAgent || "",
+        }),
+        input.ipAddress || null,
+      ],
+    )
+  } finally {
+    await client.query("SELECT set_config('app.rls_bypass', 'false', true)").catch(() => undefined)
+  }
 }

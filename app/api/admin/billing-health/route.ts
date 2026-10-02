@@ -37,7 +37,7 @@ export async function GET() {
       phase: "14-billing",
       ready: false,
       missingTables: missing,
-      message: "Execute as migrations comerciais até 013_billing_checkout_webhooks.",
+      message: "Execute as migrations comerciais, incluindo 042_commercial_pricing_contracts.",
     }, { status: 503 })
   }
 
@@ -52,10 +52,12 @@ export async function GET() {
     WHERE active = true
       AND internal = false
       AND checkout_enabled = true
-      AND (COALESCE(monthly_price_cents, 0) > 0 OR COALESCE(annual_price_cents, 0) > 0)
+      AND (COALESCE(monthly_price_cents, 0) > 0 OR COALESCE(semiannual_price_cents, 0) > 0 OR COALESCE(annual_price_cents, 0) > 0)
   `)
   const provider = billingProviderConfiguration()
-  const webhookConfigured = Boolean(process.env.MERCADO_PAGO_WEBHOOK_SECRET?.trim())
+  const webhookConfigured = provider.provider === "asaas"
+    ? Boolean(process.env.ASAAS_WEBHOOK_TOKEN?.trim())
+    : Boolean(process.env.MERCADO_PAGO_WEBHOOK_SECRET?.trim())
   const appBaseUrlConfigured = Boolean(process.env.APP_BASE_URL?.trim())
   const publicPlans = Number(plans.rows[0]?.count || 0)
 
@@ -86,7 +88,7 @@ export async function GET() {
       webhookConfigured,
       appBaseUrlConfigured,
       saleReady: Boolean(publicPlans > 0 && provider.configured && webhookConfigured && appBaseUrlConfigured),
-      webhookEndpoint: "/api/billing/webhooks/mercado-pago",
+      webhookEndpoint: provider.provider === "asaas" ? "/api/billing/webhooks/asaas" : "/api/billing/webhooks/mercado-pago",
       authority: "provider-confirmed-backend-only",
     },
   })

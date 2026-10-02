@@ -117,7 +117,7 @@ export async function expireDemoOrganizationIfNeeded(organizationId: string) {
     const scheduled = demo.basic_mode
       ? await client.query<{
           id: string
-          billing_cycle: "monthly" | "annual" | null
+          billing_cycle: "monthly" | "semiannual" | "annual" | null
         }>(`
           SELECT s.id, s.billing_cycle
           FROM sf_subscriptions s
@@ -125,20 +125,21 @@ export async function expireDemoOrganizationIfNeeded(organizationId: string) {
           WHERE s.billing_account_id = $1
             AND p.internal = false
             AND s.status = 'pending'
-            AND lower(COALESCE(s.provider_status, '')) = 'authorized'
+            AND lower(COALESCE(s.provider_status, '')) IN ('authorized', 'active', 'received', 'confirmed', 'payment_received', 'payment_confirmed')
             AND COALESCE(s.metadata ->> 'scheduledActivationAt', '') <> ''
             AND (s.metadata ->> 'scheduledActivationAt')::timestamptz <= now()
           ORDER BY s.created_at DESC
           LIMIT 1
           FOR UPDATE OF s
         `, [demo.billing_account_id])
-      : { rows: [] as Array<{ id: string; billing_cycle: "monthly" | "annual" | null }> }
+      : { rows: [] as Array<{ id: string; billing_cycle: "monthly" | "semiannual" | "annual" | null }> }
 
     const paid = scheduled.rows[0]
     if (paid) {
       const startsAt = new Date(demo.expires_at)
       const endsAt = new Date(startsAt)
       if (paid.billing_cycle === "annual") endsAt.setFullYear(endsAt.getFullYear() + 1)
+      else if (paid.billing_cycle === "semiannual") endsAt.setMonth(endsAt.getMonth() + 6)
       else endsAt.setMonth(endsAt.getMonth() + 1)
 
       await client.query(`

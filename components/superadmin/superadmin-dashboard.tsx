@@ -110,7 +110,6 @@ function EntitlementOverride({ accountId, busy, onApply }: { accountId: string; 
         <option value="inventory">inventory</option>
         <option value="advancedReports">advancedReports</option>
         <option value="integrations">integrations</option>
-        <option value="aiSetup">IA de configuração</option>
       </select>
       {booleanKey ? (
         <select value={value} onChange={(event) => setValue(event.target.value)} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold">
@@ -330,24 +329,10 @@ function FinancePanel({ accessRole }: { accessRole: string }) {
 
 export function SuperadminDashboard({ access, initialData }: { access: { email: string; role: string }; initialData: SuperadminSnapshot }) {
   const [data, setData] = useState(initialData)
-  const [marketingVisits, setMarketingVisits] = useState<{ total: number; inicio: number; planos: number; demo: number } | null>(null)
-  const [marketingVisitsError, setMarketingVisitsError] = useState("")
   const [tab, setTab] = useState<Tab>("Visão geral")
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const plans = useMemo(() => data.plans.filter((plan) => plan.active && !plan.internal), [data.plans])
-
-  useEffect(() => {
-    let active = true
-    void fetch("/api/superadmin/marketing-visits", { cache: "no-store" })
-      .then(async response => {
-        const result = await response.json()
-        if (!response.ok) throw new Error(result.error || "Não foi possível carregar as visitas.")
-        if (active) setMarketingVisits(result)
-      })
-      .catch(error => { if (active) setMarketingVisitsError(error instanceof Error ? error.message : "Visitas indisponíveis.") })
-    return () => { active = false }
-  }, [])
 
   async function action(payload: Record<string, unknown>) {
     setBusy(true)
@@ -441,16 +426,6 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
 
         {tab === "Visão geral" && (
           <div className="space-y-5">
-            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-              <h2 className="text-lg font-black">Interesse no SaborFlow · últimos 30 dias</h2>
-              <p className="mt-1 text-xs text-stone-400">Sessões aproximadas por navegador; começa a contar após a instalação. Cada aba conta uma sessão, repetida apenas uma vez por dia em cada página.</p>
-              {marketingVisits ? <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{([
-                ["Visitaram a plataforma", marketingVisits.total],
-                ["Página inicial", marketingVisits.inicio],
-                ["Olharam os planos", marketingVisits.planos],
-                ["Olharam a demo", marketingVisits.demo],
-              ] as const).map(([label, value]) => <div key={label} className="rounded-xl border border-white/10 bg-black/20 p-4"><strong className="text-2xl text-orange-300">{value}</strong><p className="mt-1 text-sm text-stone-300">{label}</p></div>)}</div> : <p className="mt-3 text-sm text-stone-400">{marketingVisitsError || "Carregando visitas..."}</p>}
-            </section>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {metrics.map(([label, value, Icon]) => (
                 <article key={label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
@@ -491,9 +466,9 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
 
         {tab === "Cadastros" && <div className="space-y-3">{data.registrations.length === 0 && <p className="rounded-xl border border-white/10 bg-white/[0.04] p-5 text-sm text-stone-400">Nenhum cadastro comercial na fila.</p>}{data.registrations.map((registration) => <RegistrationReviewCard key={registration.id} registration={registration} busy={busy} onApply={action} />)}</div>}
 
-        {tab === "Contas" && <div className="space-y-3">{data.accounts.map((account) => <article key={account.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-black">{account.ownerEmail || "Sem e-mail"}</p><p className="text-xs text-stone-500">{account.id}</p><p className="mt-2 text-sm text-stone-300">{account.planName || "Sem plano"} · assinatura {account.subscriptionStatus || "—"} · {account.organizations} loja(s)</p></div><div className="flex flex-wrap gap-2"><button disabled={busy || account.status === "active"} onClick={() => action({ action: "set-account-status", accountId: account.id, status: "active" })} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-300 disabled:opacity-40">Desbloquear</button><button disabled={busy || account.status === "suspended"} onClick={() => action({ action: "set-account-status", accountId: account.id, status: "suspended" })} className="rounded-lg bg-red-500/15 px-3 py-2 text-xs font-black text-red-300 disabled:opacity-40">Suspender</button>{account.subscriptionId && plans.length > 0 && <select disabled={busy} value={account.planId || ""} onChange={(event) => action({ action: "change-plan", subscriptionId: account.subscriptionId, planId: event.target.value })} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold">{plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select>}</div></div><div className="mt-4 flex flex-wrap gap-2 text-xs text-stone-400"><span>Status conta: {account.status}</span><span>•</span><span>Provider: {account.provider || "—"}</span><span>•</span><span>Vence: {date(account.currentPeriodEnd)}</span></div><div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-sm"><span>IA de configuração: <strong>{account.overrides.aiSetup === true ? "ligada" : "desligada"}</strong></span><button disabled={busy} onClick={() => action({ action: "set-entitlement", accountId: account.id, key: "aiSetup", value: account.overrides.aiSetup !== true })} className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-black text-stone-950 disabled:opacity-40">{account.overrides.aiSetup === true ? "Desligar IA" : "Ligar IA"}</button></div><EntitlementOverride accountId={account.id} busy={busy} onApply={action} /></article>)}</div>}
+        {tab === "Contas" && <div className="space-y-3">{data.accounts.map((account) => <article key={account.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-black">{account.ownerEmail || "Sem e-mail"}</p><p className="text-xs text-stone-500">{account.id}</p><p className="mt-2 text-sm text-stone-300">{account.planName || "Sem plano"} · assinatura {account.subscriptionStatus || "—"} · {account.organizations} loja(s)</p></div><div className="flex flex-wrap gap-2"><button disabled={busy || account.status === "active"} onClick={() => action({ action: "set-account-status", accountId: account.id, status: "active" })} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-300 disabled:opacity-40">Desbloquear</button><button disabled={busy || account.status === "suspended"} onClick={() => action({ action: "set-account-status", accountId: account.id, status: "suspended" })} className="rounded-lg bg-red-500/15 px-3 py-2 text-xs font-black text-red-300 disabled:opacity-40">Suspender</button>{account.subscriptionId && plans.length > 0 && <select disabled={busy} value={account.planId || ""} onChange={(event) => action({ action: "change-plan", subscriptionId: account.subscriptionId, planId: event.target.value })} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold">{plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select>}</div></div><div className="mt-4 flex flex-wrap gap-2 text-xs text-stone-400"><span>Status conta: {account.status}</span><span>•</span><span>Provider: {account.provider || "—"}</span><span>•</span><span>Vence: {date(account.currentPeriodEnd)}</span></div><EntitlementOverride accountId={account.id} busy={busy} onApply={action} /></article>)}</div>}
 
-        {tab === "Planos" && <div className="grid gap-3 lg:grid-cols-3">{data.plans.map((plan) => <article key={plan.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><p className="text-xs font-black uppercase tracking-wider text-orange-400">{plan.code}</p><h2 className="mt-2 text-xl font-black">{plan.name}</h2><p className="mt-3 text-sm text-stone-300">Mensal: {money(plan.monthlyPriceCents)}<br />Anual: {money(plan.annualPriceCents)}</p><div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-black/20 p-3 text-xs"><div><span className="text-stone-500">Ativas</span><strong className="block text-lg text-white">{plan.activeSubscriptions}</strong></div><div><span className="text-stone-500">MRR</span><strong className="block text-lg text-white">{money(plan.mrrCents)}</strong></div></div><p className="mt-3 text-xs text-stone-500">{plan.internal ? "interno" : "comercial"} · checkout {plan.checkoutEnabled ? "ativo" : "inativo"} · plano {plan.active ? "ativo" : "inativo"}</p></article>)}</div>}
+        {tab === "Planos" && <div className="grid gap-3 lg:grid-cols-3">{data.plans.map((plan) => <article key={plan.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><p className="text-xs font-black uppercase tracking-wider text-orange-400">{plan.code}</p><h2 className="mt-2 text-xl font-black">{plan.name}</h2><p className="mt-3 text-sm text-stone-300">Mensal: {money(plan.monthlyPriceCents)}<br />Semestral: {money(plan.semiannualPriceCents)}<br />Anual: {money(plan.annualPriceCents)}</p><div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-black/20 p-3 text-xs"><div><span className="text-stone-500">Ativas</span><strong className="block text-lg text-white">{plan.activeSubscriptions}</strong></div><div><span className="text-stone-500">MRR</span><strong className="block text-lg text-white">{money(plan.mrrCents)}</strong></div></div><p className="mt-3 text-xs text-stone-500">{plan.internal ? "interno" : "comercial"} · checkout {plan.checkoutEnabled ? "ativo" : "inativo"} · plano {plan.active ? "ativo" : "inativo"}</p></article>)}</div>}
 
         {tab === "DRE SaborFlow" && <FinancePanel accessRole={access.role} />}
 

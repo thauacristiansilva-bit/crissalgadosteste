@@ -102,6 +102,7 @@ export async function getPlatformFinanceSnapshot(monthInput?: string | null): Pr
          COALESCE(SUM(
            CASE
              WHEN s.billing_cycle = 'monthly' THEN COALESCE(p.monthly_price_cents, 0)
+             WHEN s.billing_cycle = 'semiannual' THEN ROUND(COALESCE(p.semiannual_price_cents, 0) / 6.0)::integer
              WHEN s.billing_cycle = 'annual' THEN ROUND(COALESCE(p.annual_price_cents, 0) / 12.0)::integer
              ELSE 0
            END
