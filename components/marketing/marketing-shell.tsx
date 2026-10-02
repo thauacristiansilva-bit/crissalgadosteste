@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { ArrowRight, Menu } from "lucide-react"
 
 const navigation = [
-  ["O sistema", "/#recursos"],
+  ["Recursos", "/#recursos"],
   ["Como funciona", "/#como-funciona"],
   ["Planos", "/planos"],
   ["Demonstração", "/demo"],
@@ -42,9 +42,9 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="hidden items-center gap-2 sm:flex">
             <Link href="/entrar" className="rounded-xl px-4 py-2.5 text-sm font-black text-stone-700 hover:bg-white">Entrar</Link>
-            <Link href="/teste-gratis" className="inline-flex items-center gap-2 rounded-xl bg-stone-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-black">Testar grátis <ArrowRight className="h-4 w-4" /></Link>
+            <Link href="/teste-gratis" className="inline-flex items-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-orange-700">Testar grátis <ArrowRight className="h-4 w-4" /></Link>
           </div>
-          <Link href="/teste-gratis" className="rounded-xl bg-orange-600 px-3 py-2.5 text-xs font-bold text-white sm:hidden">Testar grátis</Link>
+          <Link href="/teste-gratis" className="rounded-xl bg-orange-600 px-3 py-2.5 text-xs font-black text-white sm:hidden">Testar grátis</Link>
           <details className="relative lg:hidden">
             <summary aria-label="Abrir menu de navegação" className="flex h-11 w-11 list-none items-center justify-center rounded-xl border border-orange-100 bg-white text-stone-800 [&::-webkit-details-marker]:hidden"><Menu aria-hidden="true" className="h-5 w-5" /></summary>
             <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-orange-100 bg-white p-3 shadow-xl">

@@ -1,17 +1,59 @@
-ETAPA: MODELOS DO SITE E IMPORTACAO DE CARDAPIO POR FOTO
+SABORFLOW - LANDING VISUAL E TESTE GRATIS BASICO
 
-1. Extraia o ZIP, copie as pastas app, components e lib para sua pasta ORIGINAL do projeto e aceite substituir os arquivos. NAO apague as pastas existentes.
-2. No VS Code, abra o terminal dentro da pasta original e execute um comando por vez:
-   npm run typecheck
-   git add .
-   git commit -m "Adiciona layouts e importacao de cardapio por imagem"
-   git push origin main
-3. Aguarde o deploy automatico no Railway.
+COMO APLICAR
+1. Extraia este ZIP.
+2. Copie app, components, lib, public e scripts para a pasta ORIGINAL do projeto.
+3. Aceite substituir os arquivos de mesmo nome. Nao apague as pastas existentes.
+4. Abra a pasta original no VS Code e rode:
 
-Onde usar:
-- Admin > Configuracoes: escolha o modelo da pagina inicial, o modelo do cardapio e as cores do cardapio; clique Salvar configuracoes. O dashboard mantem o mesmo visual.
-- Admin > Montar minha loja com IA: use os botoes de exemplos ou escreva o pedido. Anexe ate 3 imagens JPG/PNG/WebP de ate 4 MB cada (cardapio fisico e referencias visuais). Clique Gerar previa, veja as abas Pagina inicial e Cardapio, revise nomes e precos, e confirme a publicacao. Imagens sao enviadas ao provedor de IA apenas na geracao da previa; nao sao salvas como fotos dos produtos.
-- A IA depende de AI_SETUP_ENABLED, GEMINI_API_KEY e da liberacao da conta no superadmin, conforme a etapa anterior.
+npm run typecheck
+node --test scripts/test-basic-trial.cjs
 
-O codigo por e-mail/SMS NAO foi incluido neste ZIP: para SMS e preciso confirmar o telefone do titular e configurar um servico de envio. O login atual ja oferece Passkey/Windows Hello como alternativa ao aplicativo autenticador apos o cadastro da chave.
-Nenhuma migracao SQL nova nesta etapa.
+Se nao aparecer erro, rode:
+
+git add app components lib public scripts
+git commit -m "Adiciona landing visual e teste gratis de gestao basica"
+git push origin main
+
+5. Aguarde o deploy do Railway. Atualize a pagina inicial com Ctrl+F5.
+6. Clique em Testar gratis. O cadastro fica em /teste-gratis.
+
+O QUE FOI FEITO
+- Pagina com imagem de atendimento, cardapio ilustrado em celular e fluxo interativo.
+- Cabecalho fixo com botao de teste gratis, inclusive no celular.
+- Perguntas: nome da loja, ramo, experiencia com sistemas e volume de pedidos.
+- Cadastro usando o acesso comercial existente: nome, CPF, email, senha e aceite dos termos.
+- Teste de 7 dias, sem cartao, sem cobranca automatica, com 1 loja, 1 acesso e ate 30 produtos.
+- Painel basico: produtos, categorias, complementos, pedidos, PDV, cozinha, clientes e caixa.
+- Configuracoes simples: dados/endereco, horarios, retirada/entrega e pagamento presencial.
+- Comeca sem clientes, produtos ou pedidos ficticios. Recebimento online inicialmente pausado.
+- Perfil do negocio salvo nos metadados do teste. Nao ha contato comercial automatico.
+- IA desativada nas configuracoes e bloqueada nas APIs do teste basico.
+- Impressao externa, dominio proprio, emissao fiscal e integracoes externas nao fazem parte do teste.
+
+PRIMEIRO USO DO CLIENTE
+Cadastre o primeiro produto. Abra Nova venda para registrar uma venda no PDV.
+Para receber pelo cardapio, confira os dados nas Configuracoes e ative Receber pedidos.
+Para voltar outro dia, abra /teste-gratis, clique em Ja iniciei meu teste e entre com a mesma conta.
+O sistema retoma o ambiente ativo e conserva o prazo original. Ao final, o acesso e pausado.
+A contratacao paga continua pelo fluxo existente. Esta etapa nao implementa migracao automatica dos dados do teste para uma assinatura paga.
+
+BANCO E INSTALACAO
+Nao ha novas dependencias ou migrations nesta etapa. Utiliza a estrutura de demos ja existente (migration 016) e as tabelas atuais de catalogo, pedidos, clientes e operacao.
+As respostas sao armazenadas em sf_demo_environments.metadata.businessProfile.
+Nao e necessario alterar DEMO_TRIAL_DAYS: o novo teste basico usa 7 dias.
+As demonstracoes antigas sao preservadas; uma demo completa ativa nao e convertida silenciosamente em teste basico.
+
+VALIDACAO REALIZADA
+- npm run typecheck: passou.
+- npm run build: passou (apos recriar o cache local do Next).
+- 8 testes automatizados com adaptador de banco isolado: passaram.
+- Pagina inicial, /teste-gratis e /demo responderam HTTP 200, e a imagem carregou.
+- Inicio de teste sem autenticacao retornou HTTP 401.
+- Nao foi realizado cadastro no PostgreSQL de producao nem conferencia visual em navegador. O navegador de teste nao estava disponivel neste ambiente.
+
+CONFERENCIA DEPOIS DO DEPLOY
+Crie uma conta de teste, responda as perguntas e confira o painel basico. Cadastre um produto, registre uma venda e saia/entre novamente pela pagina do teste. Confira o menu fixo e o fluxo interativo no computador e no celular.
+
+IMAGENS
+A foto de atendimento foi gerada para esta pagina. Os celulares e pedidos sao exemplos ilustrativos, identificados na interface, e nao capturas de uma loja real.
