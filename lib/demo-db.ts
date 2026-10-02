@@ -1,3 +1,4 @@
+import { BASIC_TRIAL_DAYS, basicTrialEntitlements, parseBasicTrialProfile, type BasicTrialProfile } from "@/lib/basic-trial"
 import { randomUUID } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
@@ -438,7 +439,11 @@ async function createDemoEnvironmentInternal(input: {
   kind: DemoEnvironmentKind
   requestedByUserId?: string | null
   requestFingerprint?: string | null
+  basicProfile?: BasicTrialProfile
+  resumeOnly?: boolean
 }): Promise<DemoLaunch> {
+  const basicProfile = input.basicProfile ? parseBasicTrialProfile(input.basicProfile) : null
+  if (basicProfile && (input.kind !== "trial" || !input.requestedByUserId)) throw new Error("Entre na sua conta para começar o teste grátis.")
   await expireDueDemoEnvironmentsInternal()
 
   const client = await getPostgresPool().connect()
@@ -472,13 +477,26 @@ async function createDemoEnvironmentInternal(input: {
     }
 
     if (input.kind === "trial" && input.requestedByUserId) {
+      const owner = await client.query("SELECT id FROM sf_users WHERE id = $1 AND status = 'active'", [input.requestedByUserId])
+      if (!owner.rowCount) throw new Error("Sua conta não está disponível. Entre novamente.")
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`saborflow-demo-trial:${input.requestedByUserId}`])
       const reusable = await findReusableTrial(client, input.requestedByUserId)
       if (reusable) {
+        if (basicProfile) {
+          const previous = await client.query("SELECT metadata ->> 'mode' AS mode FROM sf_demo_environments WHERE id = $1", [reusable.environmentId])
+          if (previous.rows[0]?.mode !== "basic") throw new Error("Você já tem uma demonstração ativa. Volte ao início do cadastro e escolha Já iniciei meu teste para retomá-la.")
+        }
         await client.query("COMMIT")
         return reusable
       }
     }
+
+    if (basicProfile || input.resumeOnly) {
+      const previous = await client.query("SELECT id FROM sf_demo_environments WHERE requested_by_user_id = $1 AND kind = 'trial' AND metadata ->> 'mode' = 'basic' LIMIT 1", [input.requestedByUserId])
+      if (previous.rowCount) throw new Error("Seu teste grátis já terminou. Consulte os planos para continuar com o SaborFlow.")
+    }
+
+    if (input.resumeOnly) throw new Error("Não há teste ativo nesta conta. Volte e preencha as informações da loja para começar.")
 
     const plan = await client.query<{ id: string }>(`
       SELECT id FROM sf_plans
@@ -494,12 +512,12 @@ async function createDemoEnvironmentInternal(input: {
     const billingAccountId = randomUUID()
     const subscriptionId = randomUUID()
     const membershipId = randomUUID()
-    const slug = `demo-${environmentId.replace(/-/g, "").slice(0, 12)}`
-    const storeName = input.kind === "public" ? "SaborFlow Demo" : "SaborFlow Trial Demo"
+    const slug = `${basicProfile ? "teste" : "demo"}-${environmentId.replace(/-/g, "").slice(0, 12)}`
+    const storeName = basicProfile?.storeName || (input.kind === "public" ? "SaborFlow Demo" : "SaborFlow Trial Demo")
     const email = `demo+${environmentId.replace(/-/g, "")}@example.invalid`
     const durationMs = input.kind === "public"
       ? publicMinutes() * 60_000
-      : trialDays() * 24 * 60 * 60_000
+      : (basicProfile ? BASIC_TRIAL_DAYS : trialDays()) * 24 * 60 * 60_000
     const expiresAt = new Date(Date.now() + durationMs)
 
     await client.query(`
@@ -511,8 +529,8 @@ async function createDemoEnvironmentInternal(input: {
     await client.query(`
       INSERT INTO sf_billing_accounts (
         id, owner_user_id, status, billing_email, entitlement_overrides, metadata, onboarding_unlocked_at
-      ) VALUES ($1, $2, 'active', $3, '{}'::jsonb, $4::jsonb, now())
-    `, [billingAccountId, adminUserId, email, JSON.stringify({ demo: true, environmentId, kind: input.kind })])
+      ) VALUES ($1, $2, 'active', $3, $5::jsonb, $4::jsonb, now())
+    `, [billingAccountId, adminUserId, email, JSON.stringify({ demo: true, environmentId, kind: input.kind }), JSON.stringify(basicProfile ? basicTrialEntitlements : {})])
 
     await client.query(`
       INSERT INTO sf_subscriptions (
@@ -548,14 +566,14 @@ async function createDemoEnvironmentInternal(input: {
       INSERT INTO sf_organization_settings (
         organization_id, timezone, locale, currency, settings, created_at, updated_at
       ) VALUES ($1, 'America/Sao_Paulo', 'pt-BR', 'BRL', $2::jsonb, now(), now())
-    `, [organizationId, JSON.stringify(demoSettings(storeName))])
+    `, [organizationId, JSON.stringify(basicProfile ? { ...demoSettings(storeName), slogan: "Bem-vindo à nossa loja", welcomeTitle: storeName, welcomeText: "Confira nosso cardápio", phone: "", address: "", storeDistrict: "", city: "", state: "", zipCode: "", storeLatitude: null, storeLongitude: null, acceptingOrders: false, deliveryPricingMode: "fixed", fixedDeliveryFee: 0, deliveryDistanceBands: [], loyaltyEnabled: false, chatbotEnabled: false, chatbotGreeting: "", aiStorefrontChatEnabled: false, aiStorefrontTextEnabled: false, aiStorefrontAudioEnabled: false, aiFloatingButtonEnabled: false, aiPdvEnabled: false, aiPdvTextEnabled: false, aiPdvAudioEnabled: false, pixEnabled: false, cardEnabled: false, cashEnabled: true } : demoSettings(storeName))])
 
     await client.query(`
       INSERT INTO sf_tenant_runtime_state (
         organization_id, ready, source, settings_ready, staff_ready, public_ready,
         staff_count, domains_count, imported_at, updated_at
-      ) VALUES ($1, true, 'demo-phase-16', true, true, true, 2, 0, now(), now())
-    `, [organizationId])
+      ) VALUES ($1, true, 'demo-phase-16', true, true, true, $2, 0, now(), now())
+    `, [organizationId, basicProfile ? 0 : 2])
 
     await client.query(`
       INSERT INTO sf_organization_onboarding (
@@ -589,11 +607,21 @@ async function createDemoEnvironmentInternal(input: {
         phase: 16,
         isolated: true,
         externalEffects: false,
+        ...(basicProfile ? { mode: "basic", businessProfile: basicProfile } : {}),
         ...(input.requestFingerprint ? { requestFingerprint: input.requestFingerprint } : {}),
       }),
     ])
 
-    await seedDemoData(client, organizationId)
+    if (basicProfile) {
+      await client.query("INSERT INTO sf_orders_state (organization_id, ready, source, orders_count, items_count, total_amount, imported_at, updated_at) VALUES ($1, true, 'basic-trial', 0, 0, 0, now(), now())", [organizationId])
+      await client.query("INSERT INTO sf_customers_state (organization_id, ready, source, accounts_count, imported_at, updated_at) VALUES ($1, true, 'basic-trial', 0, now(), now())", [organizationId])
+      await client.query("UPDATE sf_organizations SET industry = $2, phone = '' WHERE id = $1", [organizationId, basicProfile.segment])
+      await client.query("INSERT INTO sf_catalog_state (organization_id, ready, source, categories_count, products_count, imported_at, updated_at) VALUES ($1, true, 'basic-trial', 0, 0, now(), now())", [organizationId])
+      await client.query("INSERT INTO sf_operations_state (organization_id, ready, source, cash_sessions_count, financial_entries_count, delivery_zones_count, couriers_count, imported_at, updated_at) VALUES ($1, true, 'basic-trial', 0, 0, 0, 0, now(), now())", [organizationId])
+      await client.query("INSERT INTO sf_food_composition_state (organization_id, ready, source, modifier_groups_count, modifier_options_count, ingredients_count, recipe_items_count, imported_at, updated_at) VALUES ($1, true, 'basic-trial', 0, 0, 0, 0, now(), now())", [organizationId])
+    } else {
+      await seedDemoData(client, organizationId)
+    }
     await client.query("COMMIT")
 
     return {
@@ -653,6 +681,8 @@ export async function createDemoEnvironment(input: {
   kind: DemoEnvironmentKind
   requestedByUserId?: string | null
   requestFingerprint?: string | null
+  basicProfile?: BasicTrialProfile
+  resumeOnly?: boolean
 }): Promise<DemoLaunch> {
   return runWithRlsBypass(() => createDemoEnvironmentInternal(input))
 }

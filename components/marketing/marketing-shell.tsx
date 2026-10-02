@@ -4,12 +4,10 @@ import type { ReactNode } from "react"
 import { ArrowRight, Menu } from "lucide-react"
 
 const navigation = [
-  ["Soluções", "/solucoes"],
-  ["Recursos", "/recursos"],
-  ["Segmentos", "/segmentos"],
+  ["O sistema", "/#recursos"],
+  ["Como funciona", "/#como-funciona"],
   ["Planos", "/planos"],
   ["Demonstração", "/demo"],
-  ["Dúvidas", "/faq"],
 ] as const
 
 export function MarketingLogo({ compact = false }: { compact?: boolean }) {
@@ -33,8 +31,8 @@ export function MarketingLogo({ compact = false }: { compact?: boolean }) {
 
 export function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#fffaf3] text-stone-950">
-      <header className="sticky top-0 z-40 border-b border-orange-100/80 bg-[#fffaf3]/95 backdrop-blur">
+    <div className="min-h-screen pt-[76px] bg-[#fffaf3] text-stone-950">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-orange-100/80 bg-[#fffaf3]/95 backdrop-blur">
         <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <MarketingLogo compact />
           <nav className="hidden items-center gap-6 lg:flex" aria-label="Navegação principal">
@@ -44,15 +42,16 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="hidden items-center gap-2 sm:flex">
             <Link href="/entrar" className="rounded-xl px-4 py-2.5 text-sm font-black text-stone-700 hover:bg-white">Entrar</Link>
-            <Link href="/contratar" className="inline-flex items-center gap-2 rounded-xl bg-stone-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-black">Começar agora <ArrowRight className="h-4 w-4" /></Link>
+            <Link href="/teste-gratis" className="inline-flex items-center gap-2 rounded-xl bg-stone-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-black">Testar grátis <ArrowRight className="h-4 w-4" /></Link>
           </div>
+          <Link href="/teste-gratis" className="rounded-xl bg-orange-600 px-3 py-2.5 text-xs font-bold text-white sm:hidden">Testar grátis</Link>
           <details className="relative lg:hidden">
             <summary aria-label="Abrir menu de navegação" className="flex h-11 w-11 list-none items-center justify-center rounded-xl border border-orange-100 bg-white text-stone-800 [&::-webkit-details-marker]:hidden"><Menu aria-hidden="true" className="h-5 w-5" /></summary>
             <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-orange-100 bg-white p-3 shadow-xl">
               {navigation.map(([label, href]) => <Link key={href} href={href} className="block rounded-xl px-3 py-2.5 text-sm font-bold text-stone-700 hover:bg-orange-50">{label}</Link>)}
               <div className="my-2 border-t border-stone-100" />
               <Link href="/entrar" className="block rounded-xl px-3 py-2.5 text-sm font-bold text-stone-700 hover:bg-orange-50">Entrar</Link>
-              <Link href="/contratar" className="mt-1 block rounded-xl bg-stone-950 px-3 py-2.5 text-center text-sm font-black text-white">Começar agora</Link>
+              <Link href="/teste-gratis" className="mt-1 block rounded-xl bg-stone-950 px-3 py-2.5 text-center text-sm font-black text-white">Testar grátis</Link>
             </div>
           </details>
         </div>
@@ -75,7 +74,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-400">Comece</p>
             <div className="mt-4 grid gap-2 text-sm font-bold text-stone-600">
-              <Link href="/demo">Testar demonstração</Link><Link href="/contratar">Contratar</Link><Link href="/entrar">Entrar no painel</Link><Link href="/faq">Perguntas frequentes</Link>
+              <Link href="/demo">Testar demonstração</Link><Link href="/teste-gratis">Teste grátis</Link><Link href="/entrar">Entrar no painel</Link><Link href="/faq">Perguntas frequentes</Link>
             </div>
             <p className="mt-6 text-xs font-black uppercase tracking-[0.18em] text-stone-400">Legal</p>
             <div className="mt-3 grid gap-2 text-sm font-bold text-stone-600">

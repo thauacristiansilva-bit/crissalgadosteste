@@ -1,3 +1,4 @@
+import { getDemoEnvironmentForOrganization } from "@/lib/demo-policy"
 import {
   buildHelpCenterAiContext,
   searchHelpCenterArticles,
@@ -426,6 +427,8 @@ async function tenantAiContext() {
   ) {
     return null
   }
+
+  if ((await getDemoEnvironmentForOrganization(session.organizationId))?.basicMode) return null
 
   return runWithTenantRlsScope(
     [session.organizationId],

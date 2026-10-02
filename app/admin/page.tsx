@@ -51,6 +51,7 @@ export default async function AdminPage() {
       operationalPermissions={access?.permissions || []}
       demoEnvironment={demoEnvironment ? {
         kind: demoEnvironment.kind,
+        basicMode: demoEnvironment.basicMode,
         expiresAt: demoEnvironment.expiresAt,
       } : null}
       organizationSlug={session.mode === "tenant" ? session.organizationSlug : null}

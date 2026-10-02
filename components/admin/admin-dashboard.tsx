@@ -67,6 +67,8 @@ import { SimpleConnectionsPanel } from "@/components/admin/simple-connections-pa
 import { TeamPanel } from "@/components/admin/team-panel"
 import { isStoreOpenNow, zonedDateString } from "@/lib/operations"
 import { OrganizationSwitcher } from "@/components/admin/organization-switcher"
+import { BasicTrialSettings } from "@/components/admin/basic-trial-settings"
+import { basicTrialSections } from "@/lib/basic-trial"
 import { AiQuickQuestion } from "@/components/admin/ai-quick-question"
 import { AiStoreSetupPanel } from "@/components/admin/ai-store-setup-panel"
 import { SecurityPanel } from "@/components/admin/security-panel"
@@ -156,7 +158,7 @@ const saborFlowBrand = {
   border: "#f0d0aa",
 }
 
-export function AdminDashboard({ initialData, adminEmail, adminRole, operationalPermissions, demoEnvironment, organizationSlug }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; operationalPermissions: OperationalPermission[]; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string } | null; organizationSlug?: string | null }) {
+export function AdminDashboard({ initialData, adminEmail, adminRole, operationalPermissions, demoEnvironment, organizationSlug }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; operationalPermissions: OperationalPermission[]; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string; basicMode?: boolean } | null; organizationSlug?: string | null }) {
   const router = useRouter()
   const [section, setSection] = useState<Section>(
     () =>
@@ -184,8 +186,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
   )
   const audioContextRef = useRef<AudioContext | null>(null)
   const allowedSections = useMemo(
-    () => new Set(getAllowedAdminSections(adminRole, operationalPermissions)),
-    [adminRole, operationalPermissions],
+    () => new Set(getAllowedAdminSections(adminRole, operationalPermissions).filter(key => !demoEnvironment?.basicMode || (basicTrialSections as readonly string[]).includes(key))),
+    [adminRole, operationalPermissions, demoEnvironment?.basicMode],
   )
   const canViewFinancialData = permissionListHas(
     operationalPermissions,
@@ -430,6 +432,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
   }, [orders, settings.timeZone])
 
   function changeSection(next: Section) {
+    if (!allowedSections.has(next)) return
     setSection(next)
     setMobileNav(false)
   }
@@ -560,7 +563,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
               </p>
             </div>
 
-            {section === "overview" && (
+            {section === "overview" && !demoEnvironment?.basicMode && (
               <AiQuickQuestion
                 settings={settings}
                 onSettingsChanged={setSettings}
@@ -571,19 +574,20 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
         </header>
 
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
+          {demoEnvironment?.basicMode && products.length === 0 && <div className="mb-4 rounded-2xl border border-orange-200 bg-white p-5"><h2 className="text-lg font-black">Vamos registrar sua primeira venda?</h2><p className="mt-2 text-sm text-stone-600">Cadastre uma categoria e seu primeiro produto. Depois, abra Nova venda. Para receber pedidos pelo link, confira endereço, horários e formas de pagamento nas configurações e ative o recebimento de pedidos.</p><button type="button" onClick={() => changeSection("products")} className="mt-4 rounded-xl bg-orange-600 px-4 py-3 text-sm font-bold text-white">Cadastrar meu primeiro produto</button></div>}
           {demoEnvironment && (
             <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">Ambiente demonstrativo</p>
-                <p className="mt-1 text-sm font-black text-amber-950">{demoEnvironment.kind === "public" ? "Demo pública isolada" : "Trial individual isolado"}</p>
-                <p className="mt-1 text-xs text-amber-800">Dados fictícios · integrações externas bloqueadas · expira em {new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">{demoEnvironment.basicMode ? "Teste grátis de gestão" : "Ambiente demonstrativo"}</p>
+                <p className="mt-1 text-sm font-black text-amber-950">{demoEnvironment.basicMode ? "Seu painel básico · sem IA" : demoEnvironment.kind === "public" ? "Demo pública isolada" : "Trial individual isolado"}</p>
+                <p className="mt-1 text-xs text-amber-800">{demoEnvironment.basicMode ? "1 loja · até 30 produtos · termina em " : "Dados fictícios · integrações externas bloqueadas · expira em "}{new Date(demoEnvironment.expiresAt).toLocaleString("pt-BR")}</p>
               </div>
-              <a href="/demo" className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-xs font-black text-amber-900">Sobre a demo</a>
+              <a href={demoEnvironment.basicMode ? "/planos" : "/demo"} className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-xs font-black text-amber-900">{demoEnvironment.basicMode ? "Ver planos" : "Sobre a demo"}</a>
             </div>
           )}
           <div className="mb-5 flex flex-col gap-3 rounded-3xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: saborFlowBrand.border }}>
-            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment ? `Ambiente DEMO ativo · ${settings.storeName}` : `Empresa ativa · ${settings.storeName}`}</p></div>
-            <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>{demoEnvironment ? "PAINEL DEMO" : "Painel oficial"}</span>
+            <div><p className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: saborFlowBrand.orangeStrong }}>{demoEnvironment?.basicMode ? "SABORFLOW · TESTE GRÁTIS" : demoEnvironment ? "SABORFLOW DEMO" : "SaborFlow"}</p><p className="text-sm font-bold" style={{ color: saborFlowBrand.brown }}>{demoEnvironment?.basicMode ? `Gestão básica · ${settings.storeName}` : demoEnvironment ? `Ambiente DEMO ativo · ${settings.storeName}` : `Empresa ativa · ${settings.storeName}`}</p></div>
+            <span className="rounded-2xl px-3 py-2 text-xs font-black" style={{ color: saborFlowBrand.brown, backgroundColor: saborFlowBrand.creamStrong }}>{demoEnvironment?.basicMode ? "TESTE GRÁTIS" : demoEnvironment ? "PAINEL DEMO" : "Painel oficial"}</span>
           </div>
           {settings.cashRegisterEnabled && !openCash && (
             <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -624,9 +628,10 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} canViewFinancialData={canViewFinancialData} />}
           {section === "marketing" && <MarketingPanel products={products} coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
-          {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment)} />}
+          {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment && !demoEnvironment.basicMode)} />}
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
-          {section === "settings" && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
+          {section === "settings" && demoEnvironment?.basicMode && <BasicTrialSettings settings={settings} onSettingsChanged={setSettings} />}
+          {section === "settings" && !demoEnvironment?.basicMode && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
           {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
           {section === "connections" && <SimpleConnectionsPanel settings={settings} organizationSlug={organizationSlug || ""} onSettingsChanged={setSettings} />}
           {section === "ai_setup" && <AiStoreSetupPanel availableProducts={products} currentSettings={settings} publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}`} onApplied={async () => {
@@ -644,7 +649,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div><p className="text-sm font-black" style={{ color: saborFlowBrand.brown }}>Plataforma</p><p className="text-xs text-gray-500">Painel administrativo do SaborFlow.</p></div>
-              <p className="text-xs font-semibold text-gray-500">{demoEnvironment ? "Ambiente DEMO:" : "Empresa ativa:"} <span style={{ color: saborFlowBrand.orangeStrong }}>{settings.storeName}</span></p>
+              <p className="text-xs font-semibold text-gray-500">{demoEnvironment?.basicMode ? "Teste grátis:" : demoEnvironment ? "Ambiente DEMO:" : "Empresa ativa:"} <span style={{ color: saborFlowBrand.orangeStrong }}>{settings.storeName}</span></p>
             </div>
           </footer>
         </main>

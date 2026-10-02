@@ -1,3 +1,4 @@
+import { getDemoEnvironmentForOrganization } from "@/lib/demo-policy"
 import {
   NextResponse,
 } from "next/server"
@@ -740,6 +741,8 @@ export async function POST(
         403,
       )
     }
+
+    if ((await getDemoEnvironmentForOrganization(organization.id))?.basicMode) return json({ ok: false, error: "O teste grátis básico não inclui IA." }, 403)
 
     const rate =
       await enforceRateLimit(

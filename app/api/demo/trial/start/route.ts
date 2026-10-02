@@ -1,3 +1,4 @@
+import { parseBasicTrialProfile } from "@/lib/basic-trial"
 import { NextResponse } from "next/server"
 import {
   ADMIN_SESSION_COOKIE,
@@ -28,10 +29,26 @@ export async function POST(request: Request) {
     }, { status: 401 })
   }
 
+  const raw = await request.text()
+  if (raw.length > 4096) return NextResponse.json({ error: "Cadastro muito grande." }, { status: 413 })
+  let basicProfile
+  let resumeOnly = true
+  if (raw.trim()) {
+    try {
+      const body = JSON.parse(raw)
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Cadastro inválido.")
+      resumeOnly = body.resumeOnly === true
+      if (!resumeOnly) basicProfile = parseBasicTrialProfile(body.profile)
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Cadastro inválido." }, { status: 400 })
+    }
+  }
   try {
     const demo = await createDemoEnvironment({
       kind: "trial",
       requestedByUserId: commercialSession.userId,
+      basicProfile,
+      resumeOnly,
     })
     const remainingSeconds = Math.max(60, Math.floor((new Date(demo.expiresAt).getTime() - Date.now()) / 1000))
 

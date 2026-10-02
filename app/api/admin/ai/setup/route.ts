@@ -1,3 +1,4 @@
+import { getDemoEnvironmentForOrganization } from "@/lib/demo-policy"
 import { NextResponse } from "next/server"
 import { getVerifiedTenantSession, canManageCatalog } from "@/lib/tenant-access"
 import { canManageOrganizationSettings } from "@/lib/tenant-permissions"
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
   if (!canManageCatalog(session.role) || !canManageOrganizationSettings(session.role)) return json({ error: "Esta ação exige permissão para catálogo e configurações." }, 403)
   if (process.env.AI_SETUP_ENABLED !== "true") return json({ error: "O assistente de cadastro ainda não está habilitado neste servidor." }, 503)
 
+  if ((await getDemoEnvironmentForOrganization(session.organizationId))?.basicMode) return json({ error: "O teste grátis básico não inclui IA." }, 403)
   const org = session.organizationId
   const account = await runWithTenantRlsScope([org], session.userId, () => getBillingSnapshotForOrganization(org), "tenant-session")
   if (!account.account || !account.subscription || !["active", "trialing"].includes(account.subscription.status)) return json({ error: "É preciso ter uma assinatura ativa para usar o assistente." }, 403)

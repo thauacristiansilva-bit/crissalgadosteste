@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useState } from "react"
 import { Clock3, Play, ShieldCheck, Store, UserRound } from "lucide-react"
 
@@ -59,10 +60,10 @@ export function DemoLauncher({ expired = false }: { expired?: boolean }) {
 
           <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-100 text-stone-700"><UserRound className="h-6 w-6" /></div>
-            <h2 className="mt-5 text-2xl font-black">Trial individual</h2>
-            <p className="mt-2 text-sm leading-6 text-stone-600">Para quem já criou a conta comercial. O ambiente fica disponível por mais tempo e continua isolado da cobrança real.</p>
-            <div className="mt-5 flex items-center gap-2 text-sm font-bold text-stone-700"><Clock3 className="h-4 w-4" /> 7 dias · reutiliza seu trial ativo</div>
-            <button type="button" disabled={Boolean(loading)} onClick={() => start("trial")} className="mt-7 h-12 w-full rounded-2xl border border-stone-300 bg-stone-50 px-5 font-black text-stone-900 transition hover:bg-stone-100 disabled:opacity-50">{loading === "trial" ? "Preparando trial..." : "Iniciar trial individual"}</button>
+            <h2 className="mt-5 text-2xl font-black">Teste grátis de gestão</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-600">Comece com seus produtos, pedidos, PDV e caixa. Um painel simples, sem IA e sem cartão.</p>
+            <div className="mt-5 flex items-center gap-2 text-sm font-bold text-stone-700"><Clock3 className="h-4 w-4" /> 7 dias · 1 loja · até 30 produtos</div>
+            <Link href="/teste-gratis" className="mt-7 flex h-12 w-full items-center justify-center rounded-2xl bg-stone-950 px-5 font-black text-white">Começar teste grátis</Link>
           </section>
         </div>
 

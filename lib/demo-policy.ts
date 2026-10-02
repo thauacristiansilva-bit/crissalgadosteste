@@ -10,6 +10,7 @@ export type DemoEnvironmentSnapshot = {
   expiresAt: string
   startedAt: string
   lastSeenAt: string
+  basicMode: boolean
   requestedByUserId: string | null
 }
 
@@ -45,6 +46,7 @@ export async function getDemoEnvironmentForOrganization(
       expires_at: Date | string
       started_at: Date | string
       last_seen_at: Date | string
+      basic_mode: boolean
       requested_by_user_id: string | null
     }>(`
       SELECT
@@ -55,7 +57,8 @@ export async function getDemoEnvironmentForOrganization(
         expires_at,
         started_at,
         last_seen_at,
-        requested_by_user_id
+        requested_by_user_id,
+        COALESCE(metadata ->> 'mode', '') = 'basic' AS basic_mode
       FROM sf_demo_environments
       WHERE organization_id = $1
       LIMIT 1
@@ -72,6 +75,7 @@ export async function getDemoEnvironmentForOrganization(
       expiresAt: iso(row.expires_at),
       startedAt: iso(row.started_at),
       lastSeenAt: iso(row.last_seen_at),
+      basicMode: row.basic_mode === true,
       requestedByUserId: row.requested_by_user_id,
     }
   } catch (error) {
@@ -179,6 +183,10 @@ export async function assertDemoSettingsPatchAllowed(
 ) {
   const demo = await getDemoEnvironmentForOrganization(organizationId)
   if (!demo) return
+
+  if (demo.basicMode && ["chatbotEnabled", "aiStorefrontChatEnabled", "aiStorefrontTextEnabled", "aiStorefrontAudioEnabled", "aiFloatingButtonEnabled", "aiPdvEnabled", "aiPdvTextEnabled", "aiPdvAudioEnabled"].some(key => patch[key] === true)) {
+    throw new DemoPolicyError("O teste grátis básico não inclui IA.", "basic_trial_ai_blocked")
+  }
 
   const enablingExternalEffect =
     patch.autoPrintNewOrders === true ||
