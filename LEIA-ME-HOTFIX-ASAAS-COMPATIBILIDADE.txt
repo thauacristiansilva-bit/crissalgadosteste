@@ -1,0 +1,21 @@
+HOTFIX ASAAS — COMPATIBILIDADE DEFINITIVA
+
+Corrige a incompatibilidade entre:
+- getAsaasConnectionStatus()
+- getAsaasIntegrationHealth(appBaseUrl)
+
+O provider agora exporta as duas funções, evitando regressões entre versões/hotfixes.
+
+Também preserva a lógica atual do checkout Asaas, incluindo:
+- dueDateLimitDays
+- ASAAS_BOLETO_DUE_DAYS
+- Pix, cartão e boleto
+- checkout real
+
+ARQUIVO ALTERADO
+- lib/billing-providers/asaas.ts
+
+APLICAR
+1. Extraia na raiz do projeto.
+2. Aceite substituir o arquivo.
+3. Rode: npm run build

@@ -1,0 +1,19 @@
+HOTFIX ASAAS — CHECKOUT REAL
+
+Problema corrigido:
+O script técnico já enviava dueDateLimitDays corretamente, mas o fluxo real podia criar o link sem o campo em determinados meios de pagamento.
+
+Correção:
+- o checkout real agora sempre envia dueDateLimitDays;
+- usa ASAAS_BOLETO_DUE_DAYS, padrão 5;
+- mantém Pix, cartão e boleto;
+- não altera o webhook nem a lógica de ativação do plano.
+
+Railway:
+ASAAS_BOLETO_DUE_DAYS=5
+
+Aplicar e testar:
+npm run build
+git add .
+git commit -m "Corrige vencimento no checkout real do Asaas"
+git push
