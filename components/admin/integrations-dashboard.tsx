@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { WhatsAppInbox } from "@/components/admin/whatsapp-inbox"
+import { WhatsAppEmbeddedSignup } from "@/components/admin/whatsapp-embedded-signup"
 
 type Provider = "resend" | "twilio" | "whatsapp_meta" | "webhook"
 type Channel = "email" | "sms" | "whatsapp" | "webhook"
@@ -299,6 +300,8 @@ export function IntegrationsDashboard({ currentOrganizationName, embedded = fals
             </section>
 
             {!embedded && <WhatsAppInbox />}
+
+            <WhatsAppEmbeddedSignup onConnected={() => void load()} />
 
             <section className="grid gap-3 lg:grid-cols-3">
               <div className={`rounded-2xl border p-4 ${data.runtime.encryptionKeyConfigured ? "border-emerald-200 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>

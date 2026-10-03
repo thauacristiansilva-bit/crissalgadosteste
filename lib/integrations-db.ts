@@ -124,9 +124,29 @@ function sanitizedConnectionSettings(provider: IntegrationProvider, input: Recor
     const defaultCountryCode = cleanText(input.defaultCountryCode, 5).replace(/\D/g, "")
     const templateName = cleanText(input.templateName, 200)
     const languageCode = cleanText(input.languageCode, 20) || "pt_BR"
+    const phoneNumberId = cleanText(input.phoneNumberId, 120)
+    const wabaId = cleanText(input.wabaId, 120)
+    const businessId = cleanText(input.businessId, 120)
+    const displayPhoneNumber = cleanText(input.displayPhoneNumber, 80)
+    const verifiedName = cleanText(input.verifiedName, 160)
+    const qualityRating = cleanText(input.qualityRating, 40)
+    const onboardingMethod = cleanText(input.onboardingMethod, 80)
     if (!/^v\d+\.\d+$/.test(apiVersion)) throw new Error("Informe a versão da Graph API no formato vNN.N.")
     if (!defaultCountryCode) throw new Error("Informe o código do país para os destinatários.")
-    return { apiVersion, defaultCountryCode, templateName, languageCode, orderNotificationsEnabled: input.orderNotificationsEnabled === true }
+    return {
+      apiVersion,
+      defaultCountryCode,
+      templateName,
+      languageCode,
+      orderNotificationsEnabled: input.orderNotificationsEnabled === true,
+      ...(phoneNumberId ? { phoneNumberId } : {}),
+      ...(wabaId ? { wabaId } : {}),
+      ...(businessId ? { businessId } : {}),
+      ...(displayPhoneNumber ? { displayPhoneNumber } : {}),
+      ...(verifiedName ? { verifiedName } : {}),
+      ...(qualityRating ? { qualityRating } : {}),
+      ...(onboardingMethod ? { onboardingMethod } : {}),
+    }
   }
   const endpointUrl = cleanText(input.endpointUrl, 1000)
   if (!endpointUrl) throw new Error("Informe o endpoint HTTPS do webhook.")
