@@ -22,6 +22,7 @@ import {
   PackageCheck,
   PackageSearch,
   ReceiptText,
+  Route,
   Settings,
   ShieldCheck,
   ShoppingCart,
@@ -159,7 +160,7 @@ const saborFlowBrand = {
   border: "#f0d0aa",
 }
 
-export function AdminDashboard({ initialData, adminEmail, adminRole, operationalPermissions, demoEnvironment, organizationSlug }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; operationalPermissions: OperationalPermission[]; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string; basicMode?: boolean } | null; organizationSlug?: string | null }) {
+export function AdminDashboard({ initialData, adminEmail, adminRole, operationalPermissions, demoEnvironment, organizationSlug, onboardingGuide }: { initialData: DashboardData; adminEmail: string; adminRole: OrganizationRole; operationalPermissions: OperationalPermission[]; demoEnvironment?: { kind: "public" | "trial"; expiresAt: string; basicMode?: boolean } | null; organizationSlug?: string | null; onboardingGuide?: { pending: boolean; guideMode: "guided" | "self" | null; completedSteps: number; totalSteps: number } | null }) {
   const router = useRouter()
   const [section, setSection] = useState<Section>(
     () =>
@@ -579,6 +580,19 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
         </header>
 
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
+          {onboardingGuide?.pending && onboardingGuide.guideMode === "self" && (
+            <div className="mb-5 flex flex-col gap-4 rounded-3xl border border-orange-200 bg-orange-50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-orange-700 shadow-sm"><Route className="h-5 w-5" /></div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-orange-700">Configuração inicial</p>
+                  <h2 className="mt-1 text-base font-black text-stone-950">Você está configurando sua empresa por conta própria</h2>
+                  <p className="mt-1 text-sm leading-6 text-stone-600">Se ficar em dúvida, retome o tutorial a qualquer momento. Progresso salvo: {onboardingGuide.completedSteps} de {onboardingGuide.totalSteps} etapas.</p>
+                </div>
+              </div>
+              <a href="/onboarding" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-sm font-black text-white hover:bg-orange-700"><Route className="h-4 w-4" />Retomar passo a passo</a>
+            </div>
+          )}
           {demoEnvironment?.basicMode && products.length === 0 && <div className="mb-4 rounded-2xl border border-orange-200 bg-white p-5"><h2 className="text-lg font-black">Vamos colocar sua empresa no SaborFlow?</h2><p className="mt-2 text-sm text-stone-600">Você pode cadastrar o primeiro produto manualmente ou trazer informações do sistema antigo por link, prints e fotos para evitar começar do zero.</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => changeSection("products")} className="rounded-xl bg-orange-600 px-4 py-3 text-sm font-bold text-white">Cadastrar meu primeiro produto</button><a href="/admin/importar-cadastro" className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-center text-sm font-bold text-orange-800">Importar cadastro antigo</a></div></div>}
           {demoEnvironment && (
             <div className={`mb-5 flex flex-col gap-4 rounded-3xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${demoEnvironment.basicMode ? "border-orange-200 bg-orange-50" : "border-amber-300 bg-amber-50"}`}>

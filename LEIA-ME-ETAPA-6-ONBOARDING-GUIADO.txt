@@ -1,0 +1,66 @@
+ETAPA 6 — ONBOARDING GUIADO / TUTORIAL PARA NOVOS USUÁRIOS
+
+OBJETIVO
+Deixar o primeiro acesso do SaborFlow simples para qualquer pessoa, mesmo quem nunca usou um sistema de gestão.
+
+NOVO FLUXO
+Ao entrar pela primeira vez, o proprietário escolhe:
+
+1. QUERO O PASSO A PASSO — recomendado
+   O sistema guia a configuração em ordem e salva o progresso.
+
+2. PREFIRO CONFIGURAR SOZINHO
+   O usuário entra diretamente no painel. A loja não é publicada vazia e o tutorial pode ser retomado depois.
+
+ETAPAS DO TUTORIAL
+1. Nome e informações da empresa
+2. Logo e aparência
+3. Localização
+4. Horários
+5. Entrega e retirada
+6. Produtos / importação do cadastro antigo
+7. Revisar e publicar
+
+MELHORIAS
+- barra de progresso;
+- explicação simples em cada etapa;
+- dicas de preenchimento;
+- upload direto de logo e capa;
+- progresso salvo por empresa;
+- importação do cadastro antigo destacada na etapa de produtos;
+- opção de pular o tutorial;
+- aviso no painel para retomar o passo a passo;
+- publicação continua protegida pelas validações do servidor.
+
+ARQUIVOS ALTERADOS
+- components/onboarding/commercial-onboarding.tsx
+- lib/commercial-onboarding.ts
+- app/api/admin/commercial-onboarding/route.ts
+- app/admin/page.tsx
+- components/admin/admin-dashboard.tsx
+
+MIGRATION NOVA
+- database/migrations/044_guided_onboarding_tutorial.sql
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto e aceite substituir os arquivos.
+2. Rode:
+   npm run build
+3. Se o build passar:
+   git add .
+   git commit -m "Adiciona onboarding guiado para novos usuarios"
+   git push
+4. Depois que o Railway concluir o deploy, abra o Console do serviço e rode:
+   node scripts/migrate-multiempresa.mjs
+5. Confira se aparece:
+   APLICANDO 044_guided_onboarding_tutorial...
+   OK 044_guided_onboarding_tutorial
+
+TESTE SUGERIDO
+- criar/usar uma empresa ainda não configurada;
+- acessar /onboarding;
+- escolher "Quero o passo a passo";
+- concluir nome, logo, localização, horários, atendimento e produto;
+- testar publicação;
+- em outra empresa/conta de teste, escolher "Configurar sozinho";
+- conferir se /admin abre e mostra o botão "Retomar passo a passo".

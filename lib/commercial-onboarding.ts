@@ -15,11 +15,12 @@ import {
 } from "@/lib/organization-db"
 import type { BusinessHour, StoreSettings } from "@/lib/types"
 
-export const COMMERCIAL_ONBOARDING_VERSION = 3
+export const COMMERCIAL_ONBOARDING_VERSION = 4
 
 export const commercialOnboardingSteps = [
   "business",
   "brand",
+  "location",
   "hours",
   "fulfillment",
   "catalog",
@@ -49,6 +50,7 @@ export type CommercialOnboardingSnapshot = {
     completedSteps: CommercialOnboardingStep[]
     completed: boolean
     publishedAt: string | null
+    guideMode: "guided" | "self" | null
   }
   settings: StoreSettings
   catalog: {
@@ -76,6 +78,7 @@ type OnboardingRow = {
   completed_steps: unknown
   completed_at: Date | string | null
   published_at: Date | string | null
+  guide_mode: "guided" | "self" | null
 }
 
 function iso(value: Date | string | null) {
@@ -227,7 +230,7 @@ export async function getCommercialOnboardingSnapshot(
       ),
       getPostgresPool().query<OnboardingRow>(
         `
-          SELECT version, current_step, completed_steps, completed_at, published_at
+          SELECT version, current_step, completed_steps, completed_at, published_at, guide_mode
           FROM sf_organization_onboarding
           WHERE organization_id = $1
           LIMIT 1
@@ -266,7 +269,7 @@ export async function getCommercialOnboardingSnapshot(
     const activeProducts = Number(catalogResult.rows[0]?.active_products || 0)
     const pending: string[] = []
 
-    for (const step of ["business", "brand", "hours", "fulfillment", "catalog"] as CommercialOnboardingStep[]) {
+    for (const step of ["business", "brand", "location", "hours", "fulfillment", "catalog"] as CommercialOnboardingStep[]) {
       if (!done.includes(step)) pending.push(step)
     }
     if (activeProducts <= 0) pending.push("produto ativo")
@@ -296,6 +299,7 @@ export async function getCommercialOnboardingSnapshot(
         completedSteps: done,
         completed: organization.onboarding_status === "complete" && state.current_step === "published",
         publishedAt: iso(state.published_at),
+        guideMode: state.guide_mode === "guided" || state.guide_mode === "self" ? state.guide_mode : null,
       },
       settings,
       catalog: {
@@ -338,24 +342,15 @@ export async function saveCommercialOnboardingStep(
     const email = cleanText(data.email, 180).toLowerCase()
     const legalName = cleanText(data.legalName, 180)
     const industry = cleanText(data.industry, 100)
-    const address = cleanText(data.address, 180)
-    const storeDistrict = cleanText(data.storeDistrict, 100)
-    const city = cleanText(data.city, 100)
-    const state = cleanText(data.state, 2).toUpperCase()
-    const zipCode = cleanText(data.zipCode, 12)
+    const slogan = cleanText(data.slogan, 140)
 
     if (storeName.length < 2) throw new Error("Informe o nome comercial da loja.")
     if (!phone) throw new Error("Informe um telefone comercial.")
-    if (!city || state.length !== 2) throw new Error("Informe cidade e UF da loja.")
 
     await updateTenantSettings(organizationId, {
       storeName,
       phone,
-      address,
-      storeDistrict,
-      city,
-      state,
-      zipCode,
+      slogan,
     })
     await getPostgresPool().query(
       `
@@ -383,7 +378,25 @@ export async function saveCommercialOnboardingStep(
       logoImage: cleanText(data.logoImage, 800),
       coverImage: cleanText(data.coverImage, 800),
     })
-    await markStepComplete(organizationId, "brand", "hours", userId)
+    await markStepComplete(organizationId, "brand", "location", userId)
+  } else if (step === "location") {
+    const address = cleanText(data.address, 180)
+    const storeDistrict = cleanText(data.storeDistrict, 100)
+    const city = cleanText(data.city, 100)
+    const state = cleanText(data.state, 2).toUpperCase()
+    const zipCode = cleanText(data.zipCode, 12)
+
+    if (!address) throw new Error("Informe o endereço da loja.")
+    if (!city || state.length !== 2) throw new Error("Informe cidade e UF da loja.")
+
+    await updateTenantSettings(organizationId, {
+      address,
+      storeDistrict,
+      city,
+      state,
+      zipCode,
+    })
+    await markStepComplete(organizationId, "location", "hours", userId)
   } else if (step === "hours") {
     const businessHours = normalizeHours(data.businessHours)
     await updateTenantSettings(organizationId, {
@@ -423,6 +436,40 @@ export async function saveCommercialOnboardingStep(
     throw new Error("Etapa inválida para salvamento.")
   }
 
+  return getCommercialOnboardingSnapshot(organizationId)
+}
+
+export async function setCommercialOnboardingGuideMode(
+  organizationId: string,
+  userId: string,
+  mode: "guided" | "self",
+) {
+  await ensureOnboardingRow(organizationId)
+  await getPostgresPool().query(
+    `
+      UPDATE sf_organization_onboarding
+      SET
+        guide_mode = $2,
+        guide_choice_at = now(),
+        updated_at = now()
+      WHERE organization_id = $1
+    `,
+    [organizationId, mode],
+  )
+  await getPostgresPool().query(
+    `
+      INSERT INTO sf_audit_log (
+        id, organization_id, user_id, action, entity_type, entity_id, metadata
+      )
+      VALUES ($1, $2, $3, 'onboarding.guide.mode', 'organization', $2::uuid::text, $4::jsonb)
+    `,
+    [
+      randomUUID(),
+      organizationId,
+      userId,
+      JSON.stringify({ version: COMMERCIAL_ONBOARDING_VERSION, mode }),
+    ],
+  )
   return getCommercialOnboardingSnapshot(organizationId)
 }
 

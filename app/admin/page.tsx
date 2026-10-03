@@ -6,7 +6,7 @@ import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { getTenantAwareAdminData } from "@/lib/tenant-admin-data"
 import { getOperationalAccessForSession } from "@/lib/operational-rbac"
 import { getDefaultOperationalPath } from "@/lib/operational-home"
-import { getCommercialOnboardingSnapshot } from "@/lib/commercial-onboarding"
+import { commercialOnboardingSteps, getCommercialOnboardingSnapshot } from "@/lib/commercial-onboarding"
 import { demoOrganizationIsUsable, getDemoEnvironmentForOrganization } from "@/lib/demo-policy"
 
 export const dynamic = "force-dynamic"
@@ -27,9 +27,26 @@ export default async function AdminPage() {
     redirect("/legal/aceite")
   }
 
+  let onboardingGuide: {
+    pending: boolean
+    guideMode: "guided" | "self" | null
+    completedSteps: number
+    totalSteps: number
+  } | null = null
+
   if (session.mode === "tenant" && session.role === "owner") {
     const onboarding = await getCommercialOnboardingSnapshot(session.organizationId)
-    if (onboarding && !onboarding.state.completed) redirect("/onboarding")
+    if (onboarding && !onboarding.state.completed && onboarding.state.guideMode !== "self") {
+      redirect("/onboarding")
+    }
+    if (onboarding) {
+      onboardingGuide = {
+        pending: !onboarding.state.completed,
+        guideMode: onboarding.state.guideMode,
+        completedSteps: onboarding.state.completedSteps.length,
+        totalSteps: commercialOnboardingSteps.length,
+      }
+    }
   }
 
   const access = session.mode === "tenant"
@@ -51,10 +68,10 @@ export default async function AdminPage() {
       operationalPermissions={access?.permissions || []}
       demoEnvironment={demoEnvironment ? {
         kind: demoEnvironment.kind,
-        basicMode: demoEnvironment.basicMode,
         expiresAt: demoEnvironment.expiresAt,
       } : null}
       organizationSlug={session.mode === "tenant" ? session.organizationSlug : null}
+      onboardingGuide={onboardingGuide}
       initialData={await getTenantAwareAdminData(session, access?.permissions)}
     />
   )

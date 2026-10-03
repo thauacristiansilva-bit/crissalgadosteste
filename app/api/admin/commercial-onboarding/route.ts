@@ -3,6 +3,7 @@ import {
   getCommercialOnboardingSnapshot,
   publishCommercialOnboarding,
   saveCommercialOnboardingStep,
+  setCommercialOnboardingGuideMode,
   type CommercialOnboardingStep,
 } from "@/lib/commercial-onboarding"
 import { billingErrorStatus } from "@/lib/billing-db"
@@ -78,12 +79,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
-  const body = (await request.json().catch(() => null)) as { action?: string } | null
-  if (body?.action !== "publish") {
-    return NextResponse.json({ error: "Ação inválida." }, { status: 400 })
-  }
+  const body = (await request.json().catch(() => null)) as
+    | { action?: string; mode?: "guided" | "self" }
+    | null
 
   try {
+    if (body?.action === "guide-mode") {
+      if (body.mode !== "guided" && body.mode !== "self") {
+        return NextResponse.json({ error: "Modo de configuração inválido." }, { status: 400 })
+      }
+      const onboarding = await setCommercialOnboardingGuideMode(
+        auth.session.organizationId,
+        auth.session.userId,
+        body.mode,
+      )
+      return NextResponse.json({ ok: true, onboarding })
+    }
+
+    if (body?.action !== "publish") {
+      return NextResponse.json({ error: "Ação inválida." }, { status: 400 })
+    }
+
     const onboarding = await publishCommercialOnboarding(
       auth.session.organizationId,
       auth.session.userId,
