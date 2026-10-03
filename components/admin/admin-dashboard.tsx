@@ -19,6 +19,7 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  MessageCircle,
   PackageCheck,
   PackageSearch,
   ReceiptText,
@@ -75,7 +76,7 @@ import { AiQuickQuestion } from "@/components/admin/ai-quick-question"
 import { AiStoreSetupPanel } from "@/components/admin/ai-store-setup-panel"
 import { SecurityPanel } from "@/components/admin/security-panel"
 import { HelpCenterPanel } from "@/components/admin/help-center-panel"
-import { TutorialSystem } from "@/components/admin/tutorial-system"
+import { WhatsAppCenterPanel } from "@/components/admin/whatsapp-center-panel"
 import { getAllowedAdminSections, type AdminSection } from "@/lib/admin-access"
 import type { OrganizationRole } from "@/lib/tenant-context"
 import { permissionListHas, type OperationalPermission } from "@/lib/operational-permissions"
@@ -106,7 +107,7 @@ interface DashboardRefreshPayload extends Partial<DashboardData> {
 
 type Section = AdminSection
 
-type NavGroup = "inicio" | "vendas" | "catalogo" | "clientes" | "gestao"
+type NavGroup = "inicio" | "vendas" | "catalogo" | "clientes" | "atendimento" | "gestao"
 
 type NavItem = {
   key: Section
@@ -129,6 +130,7 @@ const navItems: NavItem[] = [
   { key: "marketing", label: "Cupons e campanhas", icon: Megaphone, group: "clientes" },
   { key: "reviews", label: "Avaliações", icon: Star, group: "clientes" },
   { key: "links", label: "Link da loja", icon: Link2, group: "clientes" },
+  { key: "whatsapp", label: "WhatsApp", icon: MessageCircle, group: "atendimento" },
   { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
   { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
   { key: "chatbot", label: "Atendimento automático", icon: Bot, group: "gestao" },
@@ -144,10 +146,11 @@ const navGroupLabels: Record<NavGroup, string> = {
   vendas: "Vendas",
   catalogo: "Cardápio e estoque",
   clientes: "Clientes e marketing",
+  atendimento: "Atendimento",
   gestao: "Gestão",
 }
 
-const navGroupOrder: NavGroup[] = ["inicio", "vendas", "catalogo", "clientes", "gestao"]
+const navGroupOrder: NavGroup[] = ["inicio", "vendas", "catalogo", "clientes", "atendimento", "gestao"]
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
@@ -553,7 +556,6 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
 
   return (
     <div className="min-h-screen text-gray-950 lg:flex" style={{ backgroundColor: saborFlowBrand.cream }}>
-      <TutorialSystem currentSection={section} onSectionChange={changeSection} allowedSections={allowedSections} />
       <aside className="hidden h-screen w-80 shrink-0 flex-col lg:sticky lg:top-0 lg:flex" style={{ background: `linear-gradient(180deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.brownSoft} 100%)` }}>{nav}</aside>
       {mobileNav && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Fechar menu" onClick={() => setMobileNav(false)} className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" /><aside className="relative flex h-full w-80 flex-col shadow-2xl" style={{ background: `linear-gradient(180deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.brownSoft} 100%)` }}><button onClick={() => setMobileNav(false)} aria-label="Fechar menu" className="absolute right-3 top-3 rounded-lg p-2 text-white hover:bg-white/10"><X className="h-5 w-5" /></button>{nav}</aside></div>}
 
@@ -628,8 +630,8 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
               <button type="button" onClick={() => changeSection("sales")} className="h-10 rounded-xl bg-white px-4 text-sm font-black text-amber-900 shadow-sm ring-1 ring-amber-200">Abrir caixa</button>
             </div>
           )}
-          {section === "overview" && <div className="space-y-6" data-tutorial="overview-root">
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-tutorial="overview-kpis">
+          {section === "overview" && <div className="space-y-6">
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 { label: "Pedidos hoje", value: summary.todayOrders, icon: ReceiptText, description: `${summary.openOrders} em andamento`, cls: "text-blue-700 bg-blue-50" },
                 { label: "Faturamento hoje", value: canViewFinancialData ? formatCurrency(summary.todayRevenue) : "Restrito", icon: DollarSign, description: canViewFinancialData ? "Pedidos não cancelados" : "Requer permissão financeira", cls: "text-violet-700 bg-violet-50" },
@@ -640,32 +642,33 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
             <div className="grid gap-5 xl:grid-cols-[1.5fr_.5fr]">
               <OrdersPanel orders={orders.slice(0, 5)} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} />
               <aside className="space-y-4">
-                <div data-tutorial="overview-shortcuts" className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-gray-900">Atalhos</h2><div className="mt-4 grid gap-2"><button onClick={() => changeSection("pdv")} className="flex items-center gap-3 rounded-xl bg-blue-50 px-4 py-3 text-left text-sm font-bold text-blue-800 hover:bg-blue-100"><ShoppingCart className="h-5 w-5" />Novo pedido no balcão</button><button onClick={() => changeSection("kitchen")} className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-left text-sm font-bold text-amber-800 hover:bg-amber-100"><ChefHat className="h-5 w-5" />Abrir cozinha</button><button onClick={() => changeSection("inventory")} className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left text-sm font-bold text-emerald-800 hover:bg-emerald-100"><PackageSearch className="h-5 w-5" />Ver inventário</button><button onClick={() => changeSection("products")} className="flex items-center gap-3 rounded-xl bg-violet-50 px-4 py-3 text-left text-sm font-bold text-violet-800 hover:bg-violet-100"><BookOpen className="h-5 w-5" />Editar cardápio</button><a href="/admin/importar-cadastro" className="flex items-center gap-3 rounded-xl bg-orange-50 px-4 py-3 text-left text-sm font-bold text-orange-800 hover:bg-orange-100"><UploadCloud className="h-5 w-5" />Importar cadastro antigo</a></div></div>
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-gray-900">Atalhos</h2><div className="mt-4 grid gap-2"><button onClick={() => changeSection("pdv")} className="flex items-center gap-3 rounded-xl bg-blue-50 px-4 py-3 text-left text-sm font-bold text-blue-800 hover:bg-blue-100"><ShoppingCart className="h-5 w-5" />Novo pedido no balcão</button><button onClick={() => changeSection("kitchen")} className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-left text-sm font-bold text-amber-800 hover:bg-amber-100"><ChefHat className="h-5 w-5" />Abrir cozinha</button><button onClick={() => changeSection("inventory")} className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left text-sm font-bold text-emerald-800 hover:bg-emerald-100"><PackageSearch className="h-5 w-5" />Ver inventário</button><button onClick={() => changeSection("products")} className="flex items-center gap-3 rounded-xl bg-violet-50 px-4 py-3 text-left text-sm font-bold text-violet-800 hover:bg-violet-100"><BookOpen className="h-5 w-5" />Editar cardápio</button><a href="/admin/importar-cadastro" className="flex items-center gap-3 rounded-xl bg-orange-50 px-4 py-3 text-left text-sm font-bold text-orange-800 hover:bg-orange-100"><UploadCloud className="h-5 w-5" />Importar cadastro antigo</a></div></div>
                 <div className="rounded-2xl p-5 text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${saborFlowBrand.brown} 0%, ${saborFlowBrand.orangeStrong} 100%)` }}><p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#ffd39f" }}>Loja online</p><h2 className="mt-2 text-lg font-black">Site conectado ao admin</h2><p className="mt-2 text-sm leading-relaxed text-blue-100">Cardápio, disponibilidade, estoque, branding, taxas e pedidos usam a mesma base.</p><a href="/minha-loja" target="_blank" className="mt-4 inline-flex rounded-xl bg-white px-3 py-2 text-xs font-black text-blue-900">Abrir loja</a></div>
               </aside>
             </div>
           </div>}
-          {section === "pdv" && <div data-tutorial="pdv-root"><PdvPanel products={products} settings={settings} onOrderCreated={onOrderCreated} /></div>}
+          {section === "pdv" && <PdvPanel products={products} settings={settings} onOrderCreated={onOrderCreated} />}
           {section === "sales" && <SalesPanel orders={orders} settings={settings} initialCashSessions={cashSessions} initialEntries={financialEntries} />}
           {section === "dre" && <DrePanel timeZone={settings.timeZone || "America/Sao_Paulo"} />}
-          {section === "orders" && <div data-tutorial="orders-wrapper"><OrdersPanel orders={orders} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} /></div>}
-          {section === "kitchen" && <div data-tutorial="kitchen-root"><KitchenPanel orders={orders} settings={settings} onOrderUpdated={onOrderUpdated} /></div>}
-          {section === "inventory" && <div data-tutorial="inventory-root"><InventoryPanel products={products} onProductsChanged={setProducts} /></div>}
-          {section === "products" && <div data-tutorial="products-root"><ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} /></div>}
+          {section === "orders" && <OrdersPanel orders={orders} couriers={couriers} settings={settings} onOrderUpdated={onOrderUpdated} />}
+          {section === "kitchen" && <KitchenPanel orders={orders} settings={settings} onOrderUpdated={onOrderUpdated} />}
+          {section === "inventory" && <InventoryPanel products={products} onProductsChanged={setProducts} />}
+          {section === "products" && <ProductsPanel products={products} categories={categories} onProductsChanged={setProducts} />}
           {section === "categories" && (
-            <div className="space-y-6" data-tutorial="categories-root">
+            <div className="space-y-6">
               <CategoriesPanel categories={categories} onCategoriesChanged={setCategories} />
-              <div data-tutorial="category-order"><CategoryOrderPanel categories={categories} onCategoriesChanged={setCategories} /></div>
+              <CategoryOrderPanel categories={categories} onCategoriesChanged={setCategories} />
             </div>
           )}
-          {section === "customers" && <div data-tutorial="customers-root"><CustomersPanel customers={customers} onCustomersChanged={setCustomers} canViewFinancialData={canViewFinancialData} /></div>}
-          {section === "marketing" && <div data-tutorial="marketing-root"><MarketingPanel products={products} coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} /></div>}
+          {section === "customers" && <CustomersPanel customers={customers} onCustomersChanged={setCustomers} canViewFinancialData={canViewFinancialData} />}
+          {section === "marketing" && <MarketingPanel products={products} coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
-          {section === "links" && <div data-tutorial="links-root"><LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment && !demoEnvironment.basicMode)} /></div>}
-          {section === "team" && <div data-tutorial="team-root"><TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} /></div>}
-          {section === "settings" && demoEnvironment?.basicMode && <div data-tutorial="settings-root"><BasicTrialSettings settings={settings} onSettingsChanged={setSettings} /></div>}
-          {section === "settings" && !demoEnvironment?.basicMode && <div data-tutorial="settings-root"><SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} /></div>}
-          {section === "chatbot" && <div data-tutorial="chatbot-root"><ChatbotPanel settings={settings} onSettingsChanged={setSettings} /></div>}
+          {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment && !demoEnvironment.basicMode)} />}
+          {section === "whatsapp" && <WhatsAppCenterPanel />}
+          {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
+          {section === "settings" && demoEnvironment?.basicMode && <BasicTrialSettings settings={settings} onSettingsChanged={setSettings} />}
+          {section === "settings" && !demoEnvironment?.basicMode && <SettingsPanel settings={settings} deliveryZones={deliveryZones} couriers={couriers} staffMembers={staffMembers} onSettingsChanged={setSettings} onDeliveryZonesChanged={setDeliveryZones} onCouriersChanged={setCouriers} />}
+          {section === "chatbot" && <ChatbotPanel settings={settings} onSettingsChanged={setSettings} />}
           {section === "connections" && <SimpleConnectionsPanel settings={settings} organizationSlug={organizationSlug || ""} onSettingsChanged={setSettings} />}
           {section === "ai_setup" && <AiStoreSetupPanel availableProducts={products} currentSettings={settings} publicStorePath={`/loja/${encodeURIComponent(organizationSlug || "")}`} onApplied={async () => {
             const response = await fetch("/api/dashboard", { cache: "no-store" })
@@ -677,7 +680,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           }} />}
           {section === "help" && <HelpCenterPanel />}
           {section === "security" && <SecurityPanel canManageSecurity={permissionListHas(operationalPermissions, "security.manage")} />}
-          {section === "billing" && <div data-tutorial="billing-root"><BillingPanel /></div>}
+          {section === "billing" && <BillingPanel />}
 
           <footer className="mt-8 rounded-3xl border bg-white px-5 py-4 shadow-sm" style={{ borderColor: saborFlowBrand.border }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
