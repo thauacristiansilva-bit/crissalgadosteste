@@ -1,6 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import {
+  useEffect,
+  useState,
+} from "react"
+
 import {
   CheckCircle2,
   ExternalLink,
@@ -18,23 +22,59 @@ type Connection = {
 }
 
 export function MetaInstagramConnectionCard() {
-  const [configured, setConfigured] = useState(false)
-  const [connection, setConnection] = useState<Connection | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState("")
+  const [
+    configured,
+    setConfigured,
+  ] = useState(false)
+
+  const [
+    connection,
+    setConnection,
+  ] =
+    useState<Connection | null>(
+      null,
+    )
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true)
+
+  const [
+    message,
+    setMessage,
+  ] = useState("")
 
   async function refresh() {
     setLoading(true)
+
     try {
-      const response = await fetch("/api/meta/instagram/status", {
-        cache: "no-store",
-      })
-      const data = await response.json()
+      const response =
+        await fetch(
+          "/api/meta/instagram/status",
+          {
+            cache: "no-store",
+          },
+        )
+
+      const data =
+        await response.json()
+
       if (!response.ok) {
-        throw new Error(data.error || "Erro ao verificar Instagram.")
+        throw new Error(
+          data.error ||
+          "Erro ao verificar Instagram.",
+        )
       }
-      setConfigured(Boolean(data.configured))
-      setConnection(data.connection || null)
+
+      setConfigured(
+        Boolean(data.configured),
+      )
+
+      setConnection(
+        data.connection ||
+        null,
+      )
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -51,22 +91,41 @@ export function MetaInstagramConnectionCard() {
   }, [])
 
   async function disconnect() {
-    if (!window.confirm("Desconectar o Instagram desta empresa?")) return
+    if (
+      !window.confirm(
+        "Desconectar o Instagram desta empresa?",
+      )
+    ) {
+      return
+    }
 
-    const response = await fetch("/api/meta/instagram/disconnect", {
-      method: "POST",
-    })
-    const data = await response.json()
+    const response =
+      await fetch(
+        "/api/meta/instagram/disconnect",
+        {
+          method: "POST",
+        },
+      )
+
+    const data =
+      await response.json()
+
     if (!response.ok) {
-      setMessage(data.error || "Nao foi possivel desconectar.")
+      setMessage(
+        data.error ||
+        "Nao foi possivel desconectar.",
+      )
       return
     }
 
     setConnection(null)
-    setMessage("Instagram desconectado.")
+    setMessage(
+      "Instagram desconectado.",
+    )
   }
 
-  const connected = Boolean(connection?.connected)
+  const connected =
+    Boolean(connection?.connected)
 
   return (
     <section className="rounded-2xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 via-white to-orange-50 p-5 shadow-sm">
@@ -75,13 +134,18 @@ export function MetaInstagramConnectionCard() {
           <p className="text-xs font-black uppercase tracking-[0.15em] text-fuchsia-700">
             Publicacao automatica
           </p>
+
           <h2 className="mt-1 text-lg font-black text-gray-950">
-            Instagram / Meta
+            Instagram
           </h2>
+
           <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
-            Conecte uma conta profissional uma unica vez. As publicacoes
-            agendadas de Feed e Story entram na fila automatica e sao enviadas
-            pela API oficial da Meta.
+            Conexao direta pelo
+            Instagram Business Login.
+            Nao depende de Pagina do
+            Facebook. Feed e Story
+            entram na fila automatica
+            do Sabor Flow.
           </p>
         </div>
 
@@ -97,6 +161,7 @@ export function MetaInstagramConnectionCard() {
                 <RefreshCw className="h-4 w-4" />
                 Atualizar
               </button>
+
               <button
                 type="button"
                 onClick={disconnect}
@@ -127,6 +192,7 @@ export function MetaInstagramConnectionCard() {
           <span className="text-[11px] font-black uppercase text-gray-400">
             Estado
           </span>
+
           <div className="mt-1 flex items-center gap-2 text-sm font-black">
             {connected ? (
               <>
@@ -136,7 +202,7 @@ export function MetaInstagramConnectionCard() {
             ) : configured ? (
               "Aguardando conexao"
             ) : (
-              "Meta ainda nao configurada no Railway"
+              "Instagram Login ainda nao configurado no Railway"
             )}
           </div>
         </div>
@@ -145,6 +211,7 @@ export function MetaInstagramConnectionCard() {
           <span className="text-[11px] font-black uppercase text-gray-400">
             Conta
           </span>
+
           <p className="mt-1 text-sm font-black text-gray-800">
             {connection?.username
               ? `@${connection.username}`
@@ -156,6 +223,7 @@ export function MetaInstagramConnectionCard() {
           <span className="text-[11px] font-black uppercase text-gray-400">
             Automacao
           </span>
+
           <p className="mt-1 text-sm font-black text-gray-800">
             Feed + Story
           </p>
@@ -164,14 +232,22 @@ export function MetaInstagramConnectionCard() {
 
       {!configured && (
         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-          O desenvolvedor precisa configurar META_APP_ID, META_APP_SECRET,
-          META_TOKEN_ENCRYPTION_KEY, APP_PUBLIC_URL e CRON_SECRET no Railway.
+          Configure no Railway:
+          META_INSTAGRAM_APP_ID,
+          META_INSTAGRAM_APP_SECRET,
+          META_TOKEN_ENCRYPTION_KEY
+          e APP_PUBLIC_URL.
+          Mantenha META_APP_ID e
+          META_APP_SECRET existentes
+          para as outras integracoes.
         </div>
       )}
 
       <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
-        O Status do WhatsApp continua assistido: o Sabor Flow prepara a arte e
-        o horario, mas nao tenta automatizar o Status por meios nao oficiais.
+        O Status do WhatsApp continua
+        assistido. O Sabor Flow nao
+        tenta automatizar o Status por
+        meios nao oficiais.
       </div>
 
       {message && (

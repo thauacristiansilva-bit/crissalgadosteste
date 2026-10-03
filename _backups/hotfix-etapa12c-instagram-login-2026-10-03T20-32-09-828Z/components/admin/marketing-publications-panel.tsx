@@ -311,8 +311,8 @@ async function flyerBlob(channel: Channel, flyer: FlyerDraft) {
   return await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob)
-      else reject(new Error("Não foi possível gerar o JPG."))
-    }, "image/jpeg", 0.92)
+      else reject(new Error("Não foi possível gerar o PNG."))
+    }, "image/png", 0.95)
   })
 }
 
@@ -401,7 +401,7 @@ export function MarketingPublicationsPanel({ settings }: { settings: StoreSettin
     try {
       const blob = await flyerBlob(draft.channel, draft.flyer)
       const form = new FormData()
-      form.set("file", new File([blob], "flyer.jpg", { type: "image/jpeg" }))
+      form.set("file", new File([blob], "flyer.png", { type: "image/png" }))
       const response = await fetch("/api/marketing-publications/assets", {
         method: "POST",
         body: form,
@@ -427,10 +427,10 @@ export function MarketingPublicationsPanel({ settings }: { settings: StoreSettin
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement("a")
       anchor.href = url
-      anchor.download = `saborflow-${draft.channel}-${Date.now()}.jpg`
+      anchor.download = `saborflow-${draft.channel}-${Date.now()}.png`
       anchor.click()
       setTimeout(() => URL.revokeObjectURL(url), 2_000)
-      setMessage("Flyer baixado em JPG.")
+      setMessage("Flyer baixado em PNG.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro ao baixar flyer.")
     } finally {
@@ -713,7 +713,7 @@ export function MarketingPublicationsPanel({ settings }: { settings: StoreSettin
               </label>
               <button type="button" disabled={busy} onClick={uploadFlyer} className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
                 <Sparkles className="h-4 w-4" />
-                Gerar e anexar JPG
+                Gerar e anexar PNG
               </button>
               <button type="button" disabled={busy} onClick={downloadCurrentFlyer} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 disabled:opacity-50">
                 <Download className="h-4 w-4" />

@@ -16,16 +16,21 @@ function required(name: string) {
 }
 
 export function metaGraphVersion() {
-  const value = String(process.env.META_GRAPH_VERSION || DEFAULT_GRAPH_VERSION).trim()
+  const value = String(
+    process.env.META_GRAPH_VERSION ||
+    process.env.META_GRAPH_API_VERSION ||
+    DEFAULT_GRAPH_VERSION,
+  ).trim()
+
   return /^v\d+\.\d+$/.test(value) ? value : DEFAULT_GRAPH_VERSION
 }
 
-export function metaAppId() {
-  return required("META_APP_ID")
+export function instagramAppId() {
+  return required("META_INSTAGRAM_APP_ID")
 }
 
-export function metaAppSecret() {
-  return required("META_APP_SECRET")
+export function instagramAppSecret() {
+  return required("META_INSTAGRAM_APP_SECRET")
 }
 
 export function metaPublicBaseUrl() {
@@ -44,11 +49,15 @@ export function metaPublicBaseUrl() {
   if (url.protocol !== "https:" && url.hostname !== "localhost") {
     throw new Error("APP_PUBLIC_URL precisa usar HTTPS.")
   }
+
   return url.origin
 }
 
 export function metaRedirectUri() {
-  const explicit = String(process.env.META_INSTAGRAM_REDIRECT_URI || "").trim()
+  const explicit = String(
+    process.env.META_INSTAGRAM_REDIRECT_URI || "",
+  ).trim()
+
   return explicit || `${metaPublicBaseUrl()}/api/meta/instagram/callback`
 }
 
@@ -59,7 +68,7 @@ function tokenKey() {
 
 export function encryptMetaToken(token: string) {
   const clean = String(token || "").trim()
-  if (!clean) throw new Error("Token da Meta vazio.")
+  if (!clean) throw new Error("Token do Instagram vazio.")
 
   const iv = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", tokenKey(), iv)
@@ -78,9 +87,11 @@ export function encryptMetaToken(token: string) {
 }
 
 export function decryptMetaToken(value: string) {
-  const [version, ivRaw, tagRaw, encryptedRaw] = String(value || "").split(".")
+  const [version, ivRaw, tagRaw, encryptedRaw] =
+    String(value || "").split(".")
+
   if (version !== "v1" || !ivRaw || !tagRaw || !encryptedRaw) {
-    throw new Error("Token da Meta armazenado em formato invalido.")
+    throw new Error("Token do Instagram armazenado em formato invalido.")
   }
 
   const decipher = createDecipheriv(
@@ -94,6 +105,7 @@ export function decryptMetaToken(value: string) {
     decipher.update(Buffer.from(encryptedRaw, "base64url")),
     decipher.final(),
   ])
+
   return plain.toString("utf8")
 }
 
@@ -107,7 +119,7 @@ type OauthStatePayload = {
 function stateSecret() {
   return String(
     process.env.META_OAUTH_STATE_SECRET ||
-    process.env.META_APP_SECRET ||
+    process.env.META_INSTAGRAM_APP_SECRET ||
     "",
   ).trim()
 }
@@ -117,7 +129,12 @@ export function createMetaOauthState(
   userId: string,
 ) {
   const secret = stateSecret()
-  if (!secret) throw new Error("META_OAUTH_STATE_SECRET/META_APP_SECRET nao configurada.")
+
+  if (!secret) {
+    throw new Error(
+      "META_OAUTH_STATE_SECRET/META_INSTAGRAM_APP_SECRET nao configurada.",
+    )
+  }
 
   const payload: OauthStatePayload = {
     organizationId,
@@ -126,20 +143,34 @@ export function createMetaOauthState(
     exp: Date.now() + 10 * 60 * 1000,
   }
 
-  const data = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")
-  const signature = createHmac("sha256", secret).update(data).digest("base64url")
+  const data = Buffer.from(
+    JSON.stringify(payload),
+    "utf8",
+  ).toString("base64url")
+
+  const signature = createHmac("sha256", secret)
+    .update(data)
+    .digest("base64url")
+
   return `${data}.${signature}`
 }
 
-export function verifyMetaOauthState(state: string): OauthStatePayload {
+export function verifyMetaOauthState(
+  state: string,
+): OauthStatePayload {
   const [data, signature] = String(state || "").split(".")
   const secret = stateSecret()
+
   if (!data || !signature || !secret) {
     throw new Error("Estado OAuth invalido.")
   }
 
-  const expected = createHmac("sha256", secret).update(data).digest()
+  const expected = createHmac("sha256", secret)
+    .update(data)
+    .digest()
+
   const received = Buffer.from(signature, "base64url")
+
   if (
     received.length !== expected.length ||
     !timingSafeEqual(received, expected)
@@ -167,22 +198,24 @@ export function metaAuthorizationUrl(
   organizationId: string,
   userId: string,
 ) {
-  const version = metaGraphVersion()
-  const url = new URL(`https://www.facebook.com/${version}/dialog/oauth`)
-  url.searchParams.set("client_id", metaAppId())
+  const url = new URL("https://www.instagram.com/oauth/authorize")
+
+  url.searchParams.set("force_reauth", "true")
+  url.searchParams.set("client_id", instagramAppId())
   url.searchParams.set("redirect_uri", metaRedirectUri())
   url.searchParams.set("response_type", "code")
   url.searchParams.set(
     "scope",
     [
-      "pages_show_list",
-      "pages_read_engagement",
-      "instagram_basic",
-      "instagram_content_publish",
+      "instagram_business_basic",
+      "instagram_business_content_publish",
     ].join(","),
   )
-  url.searchParams.set("auth_type", "rerequest")
-  url.searchParams.set("state", createMetaOauthState(organizationId, userId))
+  url.searchParams.set(
+    "state",
+    createMetaOauthState(organizationId, userId),
+  )
+
   return url.toString()
 }
 
@@ -190,8 +223,10 @@ type TokenResponse = {
   access_token?: string
   token_type?: string
   expires_in?: number
+  user_id?: string | number
   error?: {
     message?: string
+    error_user_msg?: string
   }
 }
 
@@ -203,8 +238,10 @@ async function graphJson<T>(
     ...init,
     cache: "no-store",
   })
+
   const text = await response.text()
   let data: any = {}
+
   try {
     data = text ? JSON.parse(text) : {}
   } catch {
@@ -215,51 +252,146 @@ async function graphJson<T>(
     const message =
       data?.error?.message ||
       data?.error?.error_user_msg ||
-      `Erro HTTP ${response.status} na Meta.`
+      data?.error_message ||
+      data?.message ||
+      `Erro HTTP ${response.status} no Instagram.`
+
     throw new Error(message)
   }
 
   return data as T
 }
 
-export async function exchangeFacebookCode(code: string) {
-  const version = metaGraphVersion()
-  const shortUrl = new URL(
-    `https://graph.facebook.com/${version}/oauth/access_token`,
-  )
-  shortUrl.searchParams.set("client_id", metaAppId())
-  shortUrl.searchParams.set("client_secret", metaAppSecret())
-  shortUrl.searchParams.set("redirect_uri", metaRedirectUri())
-  shortUrl.searchParams.set("code", code)
+async function exchangeShortInstagramToken(code: string) {
+  const body = new URLSearchParams()
+  body.set("client_id", instagramAppId())
+  body.set("client_secret", instagramAppSecret())
+  body.set("grant_type", "authorization_code")
+  body.set("redirect_uri", metaRedirectUri())
+  body.set("code", code)
 
-  const short = await graphJson<TokenResponse>(shortUrl)
-  if (!short.access_token) {
-    throw new Error("A Meta nao retornou token de acesso.")
+  const data = await graphJson<TokenResponse>(
+    "https://api.instagram.com/oauth/access_token",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    },
+  )
+
+  if (!data.access_token) {
+    throw new Error("O Instagram nao retornou o token de acesso.")
   }
 
-  const longUrl = new URL(
-    `https://graph.facebook.com/${version}/oauth/access_token`,
+  return data
+}
+
+async function exchangeLongInstagramToken(
+  shortToken: string,
+) {
+  const url = new URL(
+    "https://graph.instagram.com/access_token",
   )
-  longUrl.searchParams.set("grant_type", "fb_exchange_token")
-  longUrl.searchParams.set("client_id", metaAppId())
-  longUrl.searchParams.set("client_secret", metaAppSecret())
-  longUrl.searchParams.set("fb_exchange_token", short.access_token)
+  url.searchParams.set("grant_type", "ig_exchange_token")
+  url.searchParams.set("client_secret", instagramAppSecret())
+  url.searchParams.set("access_token", shortToken)
 
   try {
-    const long = await graphJson<TokenResponse>(longUrl)
-    if (long.access_token) {
-      return {
-        accessToken: long.access_token,
-        expiresIn: Number(long.expires_in || 0),
-      }
+    const data = await graphJson<TokenResponse>(url)
+
+    if (!data.access_token) {
+      throw new Error(
+        "O Instagram nao retornou o token de longa duracao.",
+      )
     }
-  } catch {
-    // Mantem o token curto como fallback. A interface avisa se reconexao for necessaria.
+
+    return data
+  } catch (firstError) {
+    // Algumas variacoes recentes do endpoint aceitam o mesmo
+    // intercambio por POST. O fallback evita quebrar a conexao.
+    const body = new URLSearchParams()
+    body.set("grant_type", "ig_exchange_token")
+    body.set("client_secret", instagramAppSecret())
+    body.set("access_token", shortToken)
+
+    try {
+      const data = await graphJson<TokenResponse>(
+        "https://graph.instagram.com/access_token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body,
+        },
+      )
+
+      if (!data.access_token) {
+        throw new Error(
+          "O Instagram nao retornou o token de longa duracao.",
+        )
+      }
+
+      return data
+    } catch {
+      throw firstError
+    }
+  }
+}
+
+export async function exchangeInstagramCode(
+  code: string,
+) {
+  const short = await exchangeShortInstagramToken(code)
+
+  try {
+    const long = await exchangeLongInstagramToken(
+      short.access_token!,
+    )
+
+    return {
+      accessToken: long.access_token!,
+      expiresIn: Number(long.expires_in || 0),
+      userId: String(short.user_id || ""),
+      longLived: true,
+    }
+  } catch (error) {
+    console.warn(
+      "[instagram-oauth] Nao foi possivel converter o token em longa duracao:",
+      error,
+    )
+
+    return {
+      accessToken: short.access_token!,
+      expiresIn: Number(short.expires_in || 3600),
+      userId: String(short.user_id || ""),
+      longLived: false,
+    }
+  }
+}
+
+export async function refreshInstagramLongLivedToken(
+  accessToken: string,
+) {
+  const url = new URL(
+    "https://graph.instagram.com/refresh_access_token",
+  )
+  url.searchParams.set("grant_type", "ig_refresh_token")
+  url.searchParams.set("access_token", accessToken)
+
+  const data = await graphJson<TokenResponse>(url)
+
+  if (!data.access_token) {
+    throw new Error(
+      "O Instagram nao retornou um novo token ao renovar a conexao.",
+    )
   }
 
   return {
-    accessToken: short.access_token,
-    expiresIn: Number(short.expires_in || 0),
+    accessToken: data.access_token,
+    expiresIn: Number(data.expires_in || 0),
   }
 }
 
@@ -272,69 +404,65 @@ export type MetaInstagramAccount = {
   accountType: string
 }
 
-type PageRow = {
-  id?: string
-  name?: string
-  access_token?: string
-  instagram_business_account?: {
-    id?: string
-  }
-}
-
 export async function resolveInstagramAccount(
-  userAccessToken: string,
+  accessToken: string,
+  oauthUserId?: string,
 ): Promise<MetaInstagramAccount> {
   const version = metaGraphVersion()
-  const url = new URL(`https://graph.facebook.com/${version}/me/accounts`)
+  const url = new URL(
+    `https://graph.instagram.com/${version}/me`,
+  )
+
   url.searchParams.set(
     "fields",
-    "id,name,access_token,tasks,instagram_business_account",
+    "id,username,account_type",
   )
-  url.searchParams.set("limit", "100")
-  url.searchParams.set("access_token", userAccessToken)
+  url.searchParams.set("access_token", accessToken)
 
-  const pages = await graphJson<{ data?: PageRow[] }>(url)
-  const page = (pages.data || []).find(
-    (item) =>
-      item.id &&
-      item.access_token &&
-      item.instagram_business_account?.id,
-  )
-
-  if (!page?.id || !page.access_token || !page.instagram_business_account?.id) {
-    throw new Error(
-      "Nao encontrei uma Pagina do Facebook ligada a uma conta profissional do Instagram.",
-    )
-  }
-
-  const igId = page.instagram_business_account.id
-  const igUrl = new URL(`https://graph.facebook.com/${version}/${igId}`)
-  igUrl.searchParams.set("fields", "id,username,account_type")
-  igUrl.searchParams.set("access_token", page.access_token)
-
-  const ig = await graphJson<{
+  const profile = await graphJson<{
     id?: string
     username?: string
     account_type?: string
-  }>(igUrl)
+  }>(url)
+
+  const instagramUserId =
+    String(profile.id || oauthUserId || "").trim()
+
+  if (!instagramUserId) {
+    throw new Error(
+      "O Instagram nao retornou o ID da conta profissional.",
+    )
+  }
 
   return {
-    pageId: page.id,
-    pageName: String(page.name || ""),
-    pageAccessToken: page.access_token,
-    instagramUserId: ig.id || igId,
-    username: String(ig.username || ""),
-    accountType: String(ig.account_type || ""),
+    pageId: "",
+    pageName: "Instagram Login",
+    pageAccessToken: accessToken,
+    instagramUserId,
+    username: String(profile.username || ""),
+    accountType: String(profile.account_type || ""),
   }
 }
 
-export function absoluteMarketingMediaUrl(mediaUrl: string) {
+export function absoluteMarketingMediaUrl(
+  mediaUrl: string,
+) {
   const clean = String(mediaUrl || "").trim()
-  if (!clean) throw new Error("A publicacao nao possui arte para enviar.")
-  const url = new URL(clean, metaPublicBaseUrl())
-  if (url.protocol !== "https:") {
-    throw new Error("A Meta exige uma URL publica HTTPS para a arte.")
+
+  if (!clean) {
+    throw new Error(
+      "A publicacao nao possui arte para enviar.",
+    )
   }
+
+  const url = new URL(clean, metaPublicBaseUrl())
+
+  if (url.protocol !== "https:") {
+    throw new Error(
+      "O Instagram exige uma URL publica HTTPS para a arte.",
+    )
+  }
+
   return url.toString()
 }
 
@@ -356,7 +484,9 @@ export async function createInstagramImageContainer(input: {
   story?: boolean
 }) {
   const version = metaGraphVersion()
-  const url = `https://graph.facebook.com/${version}/${encodeURIComponent(input.igUserId)}/media`
+  const url =
+    `https://graph.instagram.com/${version}/${encodeURIComponent(input.igUserId)}/media`
+
   const body = new URLSearchParams()
   body.set("image_url", input.imageUrl)
   body.set("access_token", input.accessToken)
@@ -364,20 +494,29 @@ export async function createInstagramImageContainer(input: {
   if (input.story) {
     body.set("media_type", "STORIES")
   } else if (input.caption) {
-    body.set("caption", input.caption.slice(0, 2200))
+    body.set(
+      "caption",
+      input.caption.slice(0, 2200),
+    )
   }
 
-  const data = await graphJson<ContainerResponse>(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+  const data = await graphJson<ContainerResponse>(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
     },
-    body,
-  })
+  )
 
   if (!data.id) {
-    throw new Error("A Meta nao retornou o container da publicacao.")
+    throw new Error(
+      "O Instagram nao retornou o container da publicacao.",
+    )
   }
+
   return data.id
 }
 
@@ -389,23 +528,47 @@ export async function waitInstagramContainer(
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const url = new URL(
-      `https://graph.facebook.com/${version}/${encodeURIComponent(containerId)}`,
+      `https://graph.instagram.com/${version}/${encodeURIComponent(containerId)}`,
     )
-    url.searchParams.set("fields", "status_code,status")
-    url.searchParams.set("access_token", accessToken)
 
-    const status = await graphJson<ContainerStatus>(url)
-    if (!status.status_code || status.status_code === "FINISHED") {
+    url.searchParams.set(
+      "fields",
+      "status_code,status",
+    )
+    url.searchParams.set(
+      "access_token",
+      accessToken,
+    )
+
+    const status =
+      await graphJson<ContainerStatus>(url)
+
+    if (
+      !status.status_code ||
+      status.status_code === "FINISHED" ||
+      status.status_code === "PUBLISHED"
+    ) {
       return
     }
-    if (status.status_code === "ERROR" || status.status_code === "EXPIRED") {
-      throw new Error(status.status || "A Meta nao conseguiu processar a arte.")
+
+    if (
+      status.status_code === "ERROR" ||
+      status.status_code === "EXPIRED"
+    ) {
+      throw new Error(
+        status.status ||
+        "O Instagram nao conseguiu processar a arte.",
+      )
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await new Promise((resolve) =>
+      setTimeout(resolve, 3000),
+    )
   }
 
-  throw new Error("A Meta demorou demais para processar a arte.")
+  throw new Error(
+    "O Instagram demorou demais para processar a arte.",
+  )
 }
 
 export async function publishInstagramContainer(input: {
@@ -414,21 +577,29 @@ export async function publishInstagramContainer(input: {
   containerId: string
 }) {
   const version = metaGraphVersion()
-  const url = `https://graph.facebook.com/${version}/${encodeURIComponent(input.igUserId)}/media_publish`
+  const url =
+    `https://graph.instagram.com/${version}/${encodeURIComponent(input.igUserId)}/media_publish`
+
   const body = new URLSearchParams()
   body.set("creation_id", input.containerId)
   body.set("access_token", input.accessToken)
 
-  const data = await graphJson<{ id?: string }>(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+  const data = await graphJson<{ id?: string }>(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
     },
-    body,
-  })
+  )
 
   if (!data.id) {
-    throw new Error("A Meta nao retornou o ID da publicacao.")
+    throw new Error(
+      "O Instagram nao retornou o ID da publicacao.",
+    )
   }
+
   return data.id
 }

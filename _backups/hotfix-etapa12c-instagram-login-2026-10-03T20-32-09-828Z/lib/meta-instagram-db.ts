@@ -19,79 +19,52 @@ type ConnectionRow = {
   updated_at: Date | string
 }
 
-function iso(
-  value: Date | string | null,
-) {
+function iso(value: Date | string | null) {
   if (!value) return null
-
-  const date =
-    value instanceof Date
-      ? value
-      : new Date(value)
-
-  return Number.isFinite(date.getTime())
-    ? date.toISOString()
-    : null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null
 }
 
 export async function getMetaInstagramConnection(
   organizationId: string,
 ) {
   try {
-    const result =
-      await getPostgresPool().query<ConnectionRow>(`
-        SELECT
-          organization_id,
-          page_id,
-          page_name,
-          instagram_user_id,
-          instagram_username,
-          account_type,
-          access_token_encrypted,
-          token_expires_at,
-          active,
-          connected_at,
-          updated_at
-        FROM sf_meta_instagram_connections
-        WHERE organization_id = $1
-        LIMIT 1
-      `, [organizationId])
+    const result = await getPostgresPool().query<ConnectionRow>(`
+      SELECT
+        organization_id,
+        page_id,
+        page_name,
+        instagram_user_id,
+        instagram_username,
+        account_type,
+        access_token_encrypted,
+        token_expires_at,
+        active,
+        connected_at,
+        updated_at
+      FROM sf_meta_instagram_connections
+      WHERE organization_id = $1
+      LIMIT 1
+    `, [organizationId])
 
     const row = result.rows[0]
-
     if (!row) return null
 
     return {
-      organizationId:
-        row.organization_id,
+      organizationId: row.organization_id,
       pageId: row.page_id,
       pageName: row.page_name,
-      instagramUserId:
-        row.instagram_user_id,
-      username:
-        row.instagram_username,
-      accountType:
-        row.account_type,
-      accessToken:
-        decryptMetaToken(
-          row.access_token_encrypted,
-        ),
-      tokenExpiresAt:
-        iso(row.token_expires_at),
+      instagramUserId: row.instagram_user_id,
+      username: row.instagram_username,
+      accountType: row.account_type,
+      accessToken: decryptMetaToken(row.access_token_encrypted),
+      tokenExpiresAt: iso(row.token_expires_at),
       active: Boolean(row.active),
-      connectedAt:
-        iso(row.connected_at),
-      updatedAt:
-        iso(row.updated_at),
+      connectedAt: iso(row.connected_at),
+      updatedAt: iso(row.updated_at),
     }
   } catch (error) {
-    if (
-      (error as { code?: string })?.code ===
-      "42P01"
-    ) {
-      return null
-    }
-
+    if ((error as { code?: string })?.code === "42P01") return null
     throw error
   }
 }
@@ -99,23 +72,16 @@ export async function getMetaInstagramConnection(
 export async function getMetaInstagramConnectionPublic(
   organizationId: string,
 ) {
-  const connection =
-    await getMetaInstagramConnection(
-      organizationId,
-    )
-
+  const connection = await getMetaInstagramConnection(organizationId)
   if (!connection) return null
 
   return {
     connected: connection.active,
     pageName: connection.pageName,
     username: connection.username,
-    accountType:
-      connection.accountType,
-    tokenExpiresAt:
-      connection.tokenExpiresAt,
-    connectedAt:
-      connection.connectedAt,
+    accountType: connection.accountType,
+    tokenExpiresAt: connection.tokenExpiresAt,
+    connectedAt: connection.connectedAt,
   }
 }
 
@@ -159,29 +125,7 @@ export async function saveMetaInstagramConnection(
     account.instagramUserId,
     account.username,
     account.accountType,
-    encryptMetaToken(
-      account.pageAccessToken,
-    ),
-    tokenExpiresAt,
-  ])
-}
-
-export async function updateMetaInstagramToken(
-  organizationId: string,
-  accessToken: string,
-  tokenExpiresAt: string | null,
-) {
-  await getPostgresPool().query(`
-    UPDATE sf_meta_instagram_connections
-    SET
-      access_token_encrypted = $2,
-      token_expires_at = $3,
-      active = true,
-      updated_at = now()
-    WHERE organization_id = $1
-  `, [
-    organizationId,
-    encryptMetaToken(accessToken),
+    encryptMetaToken(account.pageAccessToken),
     tokenExpiresAt,
   ])
 }
