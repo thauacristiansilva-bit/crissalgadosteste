@@ -144,8 +144,6 @@ export function MarketingPanel({
     useState({
       enabled:
         settings.loyaltyEnabled,
-      cashbackEnabled: Boolean(settings.cashbackEnabled),
-      cashbackPercent: Number(settings.cashbackPercent || 0),
       points:
         settings.loyaltyPointsPerReal,
       rewardPoints:
@@ -382,8 +380,6 @@ export function MarketingPanel({
           body: JSON.stringify({
             loyaltyEnabled:
               loyalty.enabled,
-            cashbackEnabled: loyalty.cashbackEnabled,
-            cashbackPercent: loyalty.cashbackPercent,
             loyaltyPointsPerReal:
               loyalty.points,
             loyaltyRewardPoints:
@@ -1359,106 +1355,48 @@ export function MarketingPanel({
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-2">
             <Gift className="h-5 w-5 text-violet-700" />
-            <h2 className="font-black">
-              Programa de fidelidade
-            </h2>
+            <h2 className="font-black">Programa de cashback</h2>
           </div>
+          <p className="mt-2 text-sm text-gray-500">O cliente identificado pelo CPF vê o saldo em reais no checkout e pode escolher usar ou guardar para outro pedido.</p>
 
           <div className="mt-4 space-y-3">
             <label className="flex items-center justify-between rounded-xl border border-gray-200 p-3">
               <span>
-                <strong className="block text-sm">
-                  Ativar pontos
-                </strong>
-                <small className="text-gray-500">
-                  Clientes logados acumulam pontos automaticamente.
-                </small>
+                <strong className="block text-sm">Ativar cashback</strong>
+                <small className="text-gray-500">O crédito entra somente quando o pedido é concluído.</small>
               </span>
               <input
                 type="checkbox"
                 checked={loyalty.enabled}
-                onChange={(event) =>
-                  setLoyalty({
-                    ...loyalty,
-                    enabled:
-                      event.target.checked,
-                  })
-                }
+                onChange={(event) => setLoyalty({ ...loyalty, enabled: event.target.checked })}
                 className="h-5 w-5"
               />
             </label>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="mb-1 block text-xs font-bold uppercase text-gray-500">
-                  Pontos por R$ 1
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  value={loyalty.points}
-                  onChange={(event) =>
-                    setLoyalty({
-                      ...loyalty,
-                      points: Number(
-                        event.target.value,
-                      ),
-                    })
-                  }
-                  className="h-10 w-full rounded-xl border border-gray-200 px-3"
-                />
-              </label>
+            <label>
+              <span className="mb-1 block text-xs font-bold uppercase text-gray-500">Cashback sobre os produtos (%)</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={loyalty.points}
+                onChange={(event) => setLoyalty({ ...loyalty, points: Math.max(0, Math.min(100, Number(event.target.value))) })}
+                className="h-10 w-full rounded-xl border border-gray-200 px-3"
+              />
+              <small className="mt-1 block text-gray-500">Ex.: 5 = 5% de cashback. Cupom e cashback usado são descontados antes de calcular o novo crédito; entrega não gera cashback.</small>
+            </label>
 
-              <label>
-                <span className="mb-1 block text-xs font-bold uppercase text-gray-500">
-                  Meta de pontos
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  value={
-                    loyalty.rewardPoints
-                  }
-                  onChange={(event) =>
-                    setLoyalty({
-                      ...loyalty,
-                      rewardPoints:
-                        Number(
-                          event.target.value,
-                        ),
-                    })
-                  }
-                  className="h-10 w-full rounded-xl border border-gray-200 px-3"
-                />
-              </label>
+            <div className="rounded-xl border border-violet-100 bg-violet-50 p-3 text-xs leading-5 text-violet-800">
+              Internamente o SaborFlow mantém o saldo em centavos/pontos inteiros para evitar erro de arredondamento: <strong>100 pontos internos = R$ 1,00</strong>. Para o cliente aparece somente o valor em reais.
             </div>
-
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-              <label className="flex items-center gap-2 font-bold text-emerald-900"><input type="checkbox" checked={loyalty.cashbackEnabled} onChange={(event) => setLoyalty({ ...loyalty, cashbackEnabled: event.target.checked })} /> Ativar cashback para clientes com conta</label>
-              <label className="mt-3 block text-sm text-emerald-900">Porcentagem devolvida em cada pedido concluído (%)<input type="number" min="0" max="100" step="0.01" value={loyalty.cashbackPercent} onChange={(event) => setLoyalty({ ...loyalty, cashbackPercent: Number(event.target.value) })} className="mt-1 h-10 w-full rounded-xl border border-emerald-200 px-3" /></label>
-              <p className="mt-2 text-xs text-emerald-800">O cliente usa o saldo na próxima compra. O crédito acontece quando o pedido é concluído.</p>
-            </div>
-            <textarea
-              value={loyalty.rewardText}
-              onChange={(event) =>
-                setLoyalty({
-                  ...loyalty,
-                  rewardText:
-                    event.target.value,
-                })
-              }
-              rows={3}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              placeholder="Benefício do programa"
-            />
 
             <button
               type="button"
               onClick={saveLoyalty}
               className="h-10 w-full rounded-xl bg-violet-700 text-sm font-black text-white"
             >
-              Salvar fidelidade
+              Salvar cashback
             </button>
           </div>
         </section>

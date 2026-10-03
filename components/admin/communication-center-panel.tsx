@@ -147,6 +147,25 @@ function priorityLabel(priority: string) {
   return labels[priority] || priority
 }
 
+function audienceLabel(audience: string) {
+  const labels: Record<string, string> = {
+    all: "Todos com consentimento",
+    new: "Novos clientes",
+    repeat: "Compraram novamente",
+    frequent: "Frequentes",
+    elite: "Melhores clientes",
+    active: "Ativos",
+    sleeping: "Sem comprar há algum tempo",
+    inactive: "Inativos",
+    never: "Cadastrados sem pedido",
+    trial: "Teste grátis (legado)",
+    monthly: "Mensal (legado)",
+    semiannual: "Semestral (legado)",
+    annual: "Anual (legado)",
+  }
+  return labels[audience] || audience
+}
+
 export function CommunicationCenterPanel() {
   const [tab, setTab] = useState<TabKey>("tickets")
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
@@ -441,14 +460,14 @@ export function CommunicationCenterPanel() {
       {tab === "campaigns" && (
         <div className="space-y-4">
           <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-black text-gray-950">Campanhas</h3><p className="text-xs text-gray-500">Prepare novidades, cupons e comunicados antes de conectar o envio externo.</p></div><button type="button" onClick={() => setShowCampaignForm((value) => !value)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-orange-500 px-4 text-sm font-black text-white"><Plus className="h-4 w-4" /> Nova campanha</button></div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-black text-gray-950">Campanhas</h3><p className="text-xs text-gray-500">Prepare novidades e cupons para seus clientes. O público é baseado no comportamento de compra; o envio externo só dispara quando o canal estiver conectado e houver consentimento.</p></div><button type="button" onClick={() => setShowCampaignForm((value) => !value)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-orange-500 px-4 text-sm font-black text-white"><Plus className="h-4 w-4" /> Nova campanha</button></div>
             {showCampaignForm && (
               <div className="mt-4 grid gap-3 rounded-2xl border border-orange-200 bg-orange-50/50 p-4 lg:grid-cols-2">
                 <input value={campaignForm.name} onChange={(event) => setCampaignForm((current) => ({ ...current, name: event.target.value }))} placeholder="Nome interno da campanha" className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm" />
                 <input value={campaignForm.subject} onChange={(event) => setCampaignForm((current) => ({ ...current, subject: event.target.value }))} placeholder="Assunto do e-mail" className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm" />
-                <select value={campaignForm.audience} onChange={(event) => setCampaignForm((current) => ({ ...current, audience: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="all">Todos</option><option value="trial">Teste grátis</option><option value="monthly">Mensal</option><option value="semiannual">Semestral</option><option value="annual">Anual</option><option value="inactive">Inativos</option></select>
+                <select value={campaignForm.audience} onChange={(event) => setCampaignForm((current) => ({ ...current, audience: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="all">Todos com consentimento</option><option value="new">Novos clientes</option><option value="repeat">Compraram novamente</option><option value="frequent">Frequentes</option><option value="elite">Melhores clientes</option><option value="active">Ativos</option><option value="sleeping">Sem comprar há algum tempo</option><option value="inactive">Inativos</option><option value="never">Cadastrados sem pedido</option></select>
                 <select value={campaignForm.channel} onChange={(event) => setCampaignForm((current) => ({ ...current, channel: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="email">E-mail</option><option value="whatsapp">WhatsApp</option><option value="both">E-mail + WhatsApp</option><option value="in_app">Dentro do SaborFlow</option></select>
-                <input value={campaignForm.couponCode} onChange={(event) => setCampaignForm((current) => ({ ...current, couponCode: event.target.value }))} placeholder="Cupom opcional" className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm" />
+                <input value={campaignForm.couponCode} onChange={(event) => setCampaignForm((current) => ({ ...current, couponCode: event.target.value.toUpperCase() }))} placeholder="Cupom opcional" className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm" />
                 <input type="datetime-local" value={campaignForm.scheduledAt} onChange={(event) => setCampaignForm((current) => ({ ...current, scheduledAt: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm" />
                 <textarea value={campaignForm.body} onChange={(event) => setCampaignForm((current) => ({ ...current, body: event.target.value }))} placeholder="Mensagem da campanha" rows={5} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm lg:col-span-2" />
                 <div className="lg:col-span-2"><button disabled={busy || !campaignForm.name.trim() || !campaignForm.body.trim()} type="button" onClick={() => void createCampaign()} className="h-10 rounded-xl bg-[#2f1c13] px-5 text-sm font-black text-white disabled:opacity-50">Salvar campanha</button></div>
@@ -457,7 +476,7 @@ export function CommunicationCenterPanel() {
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {(snapshot?.campaigns || []).map((item) => (
-              <article key={item.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="font-black text-gray-900">{item.name}</p><p className="mt-1 text-xs text-gray-500">{item.channel} · {item.audience}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-black text-gray-600">{statusLabel(item.status)}</span></div><p className="mt-3 line-clamp-3 text-sm leading-relaxed text-gray-600">{item.body}</p>{item.couponCode && <p className="mt-3 text-xs font-black text-orange-700">Cupom: {item.couponCode}</p>}<p className="mt-3 text-[11px] text-gray-400">{item.scheduledAt ? `Agendada: ${formatDate(item.scheduledAt)}` : `Criada: ${formatDate(item.createdAt)}`}</p></article>
+              <article key={item.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="font-black text-gray-900">{item.name}</p><p className="mt-1 text-xs text-gray-500">{item.channel} · {audienceLabel(item.audience)}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-black text-gray-600">{statusLabel(item.status)}</span></div><p className="mt-3 line-clamp-3 text-sm leading-relaxed text-gray-600">{item.body}</p>{item.couponCode && <p className="mt-3 text-xs font-black text-orange-700">Cupom: {item.couponCode}</p>}<p className="mt-3 text-[11px] text-gray-400">{item.scheduledAt ? `Agendada: ${formatDate(item.scheduledAt)}` : `Criada: ${formatDate(item.createdAt)}`}</p></article>
             ))}
           </div>
         </div>

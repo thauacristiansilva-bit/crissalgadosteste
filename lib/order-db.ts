@@ -2,7 +2,6 @@ import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { getCurrentDeploymentOrganizationId } from "@/lib/catalog-db"
 import { reverseIngredientsForOrderWithClient } from "@/lib/food-composition-db"
-import { applyCashbackForOrderStatusTransitionWithClient } from "@/lib/cashback-db"
 import { applyLoyaltyForOrderStatusTransitionWithClient } from "@/lib/loyalty-db"
 import type {
   DashboardSummary,
@@ -21,8 +20,9 @@ type OrderRow = {
   subtotal: string | number
   discount: string | number
   coupon_code: string | null
+  cashback_redeemed_points: number
+  cashback_discount: string | number
   delivery_fee: string | number
-  cashback_used_cents: number
   total: string | number
   payment_status: Order["paymentStatus"]
   payment_method: Order["paymentMethod"]
@@ -80,8 +80,11 @@ function mapOrder(row: OrderRow, itemRows: OrderItemRow[]): Order {
     subtotal: Number(row.subtotal),
     discount: Number(row.discount),
     ...(row.coupon_code ? { couponCode: row.coupon_code } : {}),
+    cashbackRedeemedPoints: Math.max(0, Number(row.cashback_redeemed_points || 0)),
+    cashbackDiscount: Math.max(0, Number(row.cashback_discount || 0)),
+    // Compatibilidade com tickets/resumos criados antes da carteira monetária.
+    cashbackUsed: Math.max(0, Number(row.cashback_discount || 0)),
     deliveryFee: Number(row.delivery_fee),
-    cashbackUsed: Number(row.cashback_used_cents || 0) / 100,
     total: Number(row.total),
     paymentStatus: row.payment_status,
     paymentMethod: row.payment_method,
@@ -125,8 +128,9 @@ const orderSelect = `
     subtotal,
     discount,
     coupon_code,
+    cashback_redeemed_points,
+    cashback_discount,
     delivery_fee,
-    COALESCE((to_jsonb(sf_orders)->>'cashback_used_cents')::int, 0) AS cashback_used_cents,
     total,
     payment_status,
     payment_method,
@@ -377,6 +381,8 @@ async function writeOrder(
         subtotal,
         discount,
         coupon_code,
+        cashback_redeemed_points,
+        cashback_discount,
         delivery_fee,
         total,
         payment_status,
@@ -397,9 +403,9 @@ async function writeOrder(
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17::jsonb, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27
+        $8, $9, $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, $19::jsonb, $20, $21, $22,
+        $23, $24, $25, $26, $27, $28, $29
       )
       ON CONFLICT (organization_id, id)
       DO UPDATE SET
@@ -411,6 +417,8 @@ async function writeOrder(
         subtotal = EXCLUDED.subtotal,
         discount = EXCLUDED.discount,
         coupon_code = EXCLUDED.coupon_code,
+        cashback_redeemed_points = EXCLUDED.cashback_redeemed_points,
+        cashback_discount = EXCLUDED.cashback_discount,
         delivery_fee = EXCLUDED.delivery_fee,
         total = EXCLUDED.total,
         payment_status = EXCLUDED.payment_status,
@@ -439,6 +447,8 @@ async function writeOrder(
       order.subtotal,
       order.discount,
       order.couponCode || null,
+      order.cashbackRedeemedPoints || 0,
+      order.cashbackDiscount || 0,
       order.deliveryFee,
       order.total,
       order.paymentStatus,
@@ -568,8 +578,6 @@ export async function upsertTenantOrder(
         }
       }
     }
-
-    await applyCashbackForOrderStatusTransitionWithClient(client, organizationId, previous.rows[0]?.status || null, order)
 
     await applyLoyaltyForOrderStatusTransitionWithClient(
       client,

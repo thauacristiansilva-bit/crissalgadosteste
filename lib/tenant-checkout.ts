@@ -34,6 +34,9 @@ import {
   getPostgresPool,
 } from "@/lib/postgres"
 import {
+  redeemCashbackForOrderWithClient,
+} from "@/lib/loyalty-db"
+import {
   getCurrentRlsContext,
   runWithTenantRlsScope,
 } from "@/lib/rls-context"
@@ -66,10 +69,10 @@ export type TenantCheckoutInput = {
   requestedFor?: string
   timing?: "now" | "scheduled"
   couponCode?: string
+  useCashback?: boolean
   channel?: Order["channel"]
   bypassLeadTime?: boolean
   accountId?: number
-  redeemCashback?: boolean
 }
 
 export type TenantCheckoutResult = {
@@ -135,8 +138,8 @@ function normalizedItems(
       throw new Error("Quantidade de produto ou complementos inválidos.")
     }
 
-    const modifierOptionIds = parsedModifierOptionIds
-    if (modifierOptionIds.length > 100) {
+    const modifierOptionIds = [...new Set(parsedModifierOptionIds)]
+    if (modifierOptionIds.length > 50) {
       throw new Error("Há complementos demais em um dos itens do pedido.")
     }
 
@@ -561,7 +564,7 @@ async function createTenantCheckoutOrderInScope(
           organizationId,
           productIds,
         )
-      : new Map<number, ProductModifierGroup[]>()
+      : new Map()
 
     const requestedStock = new Map<number, number>()
     for (const requestedItem of requested) {
@@ -597,7 +600,6 @@ async function createTenantCheckoutOrderInScope(
           modifierGroups: groups,
         },
         requestedItem.modifierOptionIds,
-        requestedItem.quantity,
       )
 
       if (!pricing.ok) throw new Error(pricing.error)
@@ -690,13 +692,12 @@ async function createTenantCheckoutOrderInScope(
         quote.zone
     }
 
-    const amountBeforeCashback = money(
-      Math.max(
-        0,
-        subtotal -
-          coupon.discount,
-      ) + deliveryFee,
+    const eligibleAfterCoupon = money(
+      Math.max(0, subtotal - coupon.discount),
     )
+    let cashbackRedeemedPoints = 0
+    let cashbackDiscount = 0
+    let total = money(eligibleAfterCoupon + deliveryFee)
 
     const id =
       await nextOrderId(
@@ -753,17 +754,15 @@ async function createTenantCheckoutOrderInScope(
     let accountId:
       | number
       | undefined
-    let cashbackUsedCents = 0
 
     if (input.accountId) {
       const account =
         await client.query<{
           id: number
           active: boolean
-          cashback_cents: number
         }>(
           `
-            SELECT id, active, COALESCE((to_jsonb(sf_customer_accounts)->>'cashback_cents')::int, 0) AS cashback_cents
+            SELECT id, active
             FROM sf_customer_accounts
             WHERE organization_id = $1
               AND id = $2
@@ -785,18 +784,10 @@ async function createTenantCheckoutOrderInScope(
       }
 
       accountId = Number(row.id)
-      if (input.redeemCashback) {
-        if (!settings.cashbackEnabled) throw new Error("Cashback não está ativo nesta loja.")
-        cashbackUsedCents = Math.min(Math.max(0, Number(row.cashback_cents)), Math.round(amountBeforeCashback * 100))
-        if (!cashbackUsedCents) throw new Error("Não há saldo de cashback disponível.")
-      }
 
       // FASE 21: o crédito de fidelidade deixou de acontecer no checkout.
       // Ele é aplicado de forma idempotente quando o pedido passa para concluído.
     }
-
-    if (input.redeemCashback && !accountId) throw new Error("Entre na sua conta para usar cashback.")
-    const total = money(amountBeforeCashback - cashbackUsedCents / 100)
 
     const order: Order = {
       id,
@@ -817,8 +808,9 @@ async function createTenantCheckoutOrderInScope(
               coupon.couponCode,
           }
         : {}),
+      cashbackRedeemedPoints,
+      cashbackDiscount,
       deliveryFee,
-      cashbackUsed: cashbackUsedCents / 100,
       total,
       paymentStatus: "unpaid",
       paymentMethod:
@@ -866,6 +858,8 @@ async function createTenantCheckoutOrderInScope(
           subtotal,
           discount,
           coupon_code,
+          cashback_redeemed_points,
+          cashback_discount,
           delivery_fee,
           total,
           payment_status,
@@ -883,10 +877,10 @@ async function createTenantCheckoutOrderInScope(
         )
         VALUES (
           $1, $2, $3, $4, $5, $6,
-          $7, $8, $9, $10, $11,
-          $12, $13, $14, $15, $16,
-          $17::jsonb, $18, $19, $20,
-          $21, $22, $23, $24
+          $7, $8, $9, $10, $11, $12, $13,
+          $14, $15, $16, $17, $18,
+          $19::jsonb, $20, $21, $22,
+          $23, $24, $25, $26
         )
       `,
       [
@@ -900,6 +894,8 @@ async function createTenantCheckoutOrderInScope(
         order.subtotal,
         order.discount,
         order.couponCode || null,
+        order.cashbackRedeemedPoints || 0,
+        order.cashbackDiscount || 0,
         order.deliveryFee,
         order.total,
         order.paymentStatus,
@@ -923,21 +919,35 @@ async function createTenantCheckoutOrderInScope(
       ],
     )
 
-    if (cashbackUsedCents && accountId) {
-      const updated = await client.query<{ cashback_cents: number }>(
-        `UPDATE sf_customer_accounts SET cashback_cents = cashback_cents - $3, updated_at = now()
-         WHERE organization_id = $1 AND id = $2 RETURNING cashback_cents`,
-        [organizationId, accountId, cashbackUsedCents],
+    if (input.useCashback && accountId) {
+      const redemption = await redeemCashbackForOrderWithClient(
+        client,
+        organizationId,
+        accountId,
+        order.id,
+        eligibleAfterCoupon,
       )
-      await client.query(
-        `UPDATE sf_orders SET cashback_used_cents = $3 WHERE organization_id = $1 AND id = $2`,
-        [organizationId, id, cashbackUsedCents],
-      )
-      await client.query(
-        `INSERT INTO sf_cashback_ledger (organization_id, customer_id, order_id, kind, amount_cents, balance_after_cents)
-         VALUES ($1, $2, $3, 'redeem', $4, $5)`,
-        [organizationId, accountId, id, -cashbackUsedCents, updated.rows[0].cashback_cents],
-      )
+      cashbackRedeemedPoints = redemption.points
+      cashbackDiscount = redemption.amount
+      total = money(Math.max(0, eligibleAfterCoupon - cashbackDiscount) + deliveryFee)
+      order.cashbackRedeemedPoints = cashbackRedeemedPoints
+      order.cashbackDiscount = cashbackDiscount
+      order.total = total
+
+      if (cashbackRedeemedPoints > 0) {
+        await client.query(
+          `
+            UPDATE sf_orders
+            SET cashback_redeemed_points = $3,
+                cashback_discount = $4,
+                total = $5,
+                updated_at = now()
+            WHERE organization_id = $1
+              AND id = $2
+          `,
+          [organizationId, order.id, cashbackRedeemedPoints, cashbackDiscount, total],
+        )
+      }
     }
 
     for (
@@ -1045,7 +1055,12 @@ async function createTenantCheckoutOrderInScope(
           quantity: item.quantity,
           optionConsumptions: (item.modifiers || []).map((modifier) => ({
             optionId: modifier.optionId,
-            quantity: (modifierGroups.get(item.productId) || []).find((group) => group.id === modifier.groupId)?.selectionMode === "bundle" ? 1 : item.quantity,
+            quantity:
+              (modifierGroups.get(item.productId) || []).find(
+                (group: ProductModifierGroup) => group.id === modifier.groupId,
+              )?.selectionMode === "bundle"
+                ? 1
+                : item.quantity,
           })),
         })),
       )
@@ -1102,16 +1117,6 @@ async function createTenantCheckoutOrderInScope(
       )
     }
 
-    // A notificação acompanha a transação do pedido; falha da integração não impede a compra.
-    await client.query("SAVEPOINT whatsapp_confirmation")
-    try {
-      const { queueWhatsAppOrder } = await import("@/lib/whatsapp-inbox")
-      await queueWhatsAppOrder(client, organizationId, order, settings.storeName)
-      await client.query("RELEASE SAVEPOINT whatsapp_confirmation")
-    } catch (notificationError) {
-      await client.query("ROLLBACK TO SAVEPOINT whatsapp_confirmation")
-      console.error("[whatsapp:order-confirmation]", notificationError)
-    }
     await client.query("COMMIT")
 
     return {

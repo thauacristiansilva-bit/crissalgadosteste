@@ -248,8 +248,11 @@ export interface Order {
   subtotal: number
   discount: number
   couponCode?: string
-  deliveryFee: number
+  cashbackRedeemedPoints?: number
+  cashbackDiscount?: number
+  /** Compatibilidade: valor em reais de cashback usado no pedido. */
   cashbackUsed?: number
+  deliveryFee: number
   total: number
   paymentStatus: PaymentStatus
   paymentMethod: PaymentMethod
@@ -286,6 +289,7 @@ export interface CustomerAccount {
   defaultLatitude: number | null
   defaultLongitude: number | null
   loyaltyPoints: number
+  /** Saldo monetário derivado da carteira de fidelidade, quando exposto pelo backend. */
   cashbackCents?: number
   active: boolean
   createdAt: string

@@ -3,7 +3,7 @@ import type { TenantAdminSession } from "@/lib/tenant-access"
 
 const ticketStatuses = new Set(["new", "open", "waiting_customer", "resolved", "closed"])
 const priorities = new Set(["low", "normal", "high", "urgent"])
-const campaignAudiences = new Set(["all", "trial", "monthly", "semiannual", "annual", "inactive"])
+const campaignAudiences = new Set(["all", "new", "repeat", "frequent", "elite", "active", "sleeping", "inactive", "never"])
 const campaignChannels = new Set(["email", "whatsapp", "both", "in_app"])
 
 function cleanText(value: unknown, max = 5000) {

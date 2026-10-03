@@ -1,8 +1,11 @@
-# Hotfix — Cabeçalho da loja
+# Hotfix TypeScript - tenant checkout
 
-Corrige a sobreposição entre o nome da empresa e o selo de status (Aberto / Fechado · aceitando agendamentos / Pedidos pausados).
+Corrige o erro TS7006 no parâmetro `group` de `lib/tenant-checkout.ts`.
 
-Arquivo alterado:
-- components/store/storefront.tsx
+Não altera a lógica de cashback, pedidos ou consumo de ingredientes.
 
-Não requer migration, SQL, npm install ou alteração de variáveis.
+Depois de extrair na raiz do projeto:
+
+```bash
+npm run build
+```

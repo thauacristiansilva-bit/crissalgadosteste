@@ -4,10 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, PackageCheck, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
-import { isStoreOpenNow, isWithinBusinessDay, zonedDateString, zonedDateTime } from "@/lib/operations"
-import { categoryIncludes, categoryShortName, parentCategoryName, sortedCategories } from "@/lib/category-hierarchy"
-import { isPricedFlavorGroup, pricedFlavorStartingPrice } from "@/lib/product-composition"
-import { whatsappOrderText } from "@/lib/order-summary"
+import { isStoreOpenNow, zonedDateString, zonedDateTime } from "@/lib/operations"
 import { IMMEDIATE_DELIVERY_MIN_MINUTES, IMMEDIATE_DELIVERY_MAX_MINUTES, MAX_SCHEDULING_DAYS } from "@/lib/order-timing"
 import { geocodeGoogleAddress, reverseGeocodeGoogle, type GoogleAddress } from "@/lib/google-maps-client"
 import { DeliveryLocationMap } from "@/components/store/delivery-location-map"
@@ -46,7 +43,7 @@ type CartItem = {
 type CustomerPublic = {
   id: number; cpfLast4: string; name: string; phone: string; email: string
   defaultAddress: string; defaultNumber: string; defaultDistrict: string; defaultCity: string; defaultState: string; defaultZipCode: string; defaultComplement: string
-  defaultLatitude: number | null; defaultLongitude: number | null; loyaltyPoints: number; cashbackCents?: number
+  defaultLatitude: number | null; defaultLongitude: number | null; loyaltyPoints: number
 }
 type Checkout = {
   name: string; phone: string; type: "pickup" | "delivery"; timing: "now" | "scheduled"; scheduleDate: string; scheduleTime: string
@@ -69,7 +66,7 @@ function externalUrl(value: string) { const clean = value.trim(); if (!clean) re
 export function Storefront({
   products,
   categories,
-  settings: originalSettings,
+  settings,
   deliveryZones,
   openNow,
   organization,
@@ -90,8 +87,6 @@ export function Storefront({
     publicOrderingEnabled?: boolean
   }
 }) {
-  const settings = { ...originalSettings, primaryColor: originalSettings.menuPrimaryColor || originalSettings.primaryColor, secondaryColor: originalSettings.menuSecondaryColor || originalSettings.secondaryColor, backgroundColor: originalSettings.menuBackgroundColor || originalSettings.backgroundColor }
-  const menuLayout = ["grid", "cards", "list"].includes(settings.menuLayout || "") ? settings.menuLayout : "grid"
   const router = useRouter()
   const cartStorageKey = organization?.slug
     ? `saborflow_cart_v2:${organization.slug}`
@@ -122,14 +117,11 @@ export function Storefront({
   const cartLoadedKeyRef = useRef("")
   const [cartOpen, setCartOpen] = useState(false)
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
-  const [editingCartKey, setEditingCartKey] = useState<string | null>(null)
-  const [editingQuantity, setEditingQuantity] = useState(1)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutStep, setCheckoutStep] = useState<1 | 2 | 3>(1)
   const [accountOpen, setAccountOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const [customer, setCustomer] = useState<CustomerPublic | null>(null)
-  const [redeemCashback, setRedeemCashback] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const [addressNotice, setAddressNotice] = useState("")
@@ -144,6 +136,7 @@ export function Storefront({
   const [couponBusy, setCouponBusy] = useState(false)
   const [couponDiscount, setCouponDiscount] = useState(0)
   const [couponMessage, setCouponMessage] = useState("")
+  const [useCashback, setUseCashback] = useState(false)
   const [promotionNotice, setPromotionNotice] = useState("")
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null)
   const [lastOrder, setLastOrder] = useState<Order | null>(null)
@@ -251,6 +244,12 @@ export function Storefront({
   useEffect(() => { fetch("/api/client/me", { cache: "no-store" }).then((r) => r.json()).then((data) => { if (data.customer) setCustomer(data.customer) }).catch(() => undefined) }, [])
 
   useEffect(() => {
+    if (!settings.loyaltyEnabled || !customer || customer.loyaltyPoints <= 0) {
+      setUseCashback(false)
+    }
+  }, [customer, settings.loyaltyEnabled])
+
+  useEffect(() => {
     let disposed = false
     let intervalId: number | null = null
 
@@ -310,18 +309,18 @@ export function Storefront({
     try {
       const saved = window.localStorage.getItem(cartStorageKey)
       if (saved) {
-        const parsed = JSON.parse(saved) as Array<{ key?: string; productId?: number; quantity?: number; optionIds?: number[] }>
+        const parsed = JSON.parse(saved) as Array<{ productId?: number; quantity?: number; optionIds?: number[] }>
         if (Array.isArray(parsed)) {
           const restored = parsed.flatMap((entry) => {
             const product = products.find((item) => item.id === Number(entry.productId))
             if (!product || !product.active) return []
             const optionIds = Array.isArray(entry.optionIds) ? entry.optionIds.map(Number) : []
+            const pricing = validateCartCustomization(product, optionIds)
+            if (!pricing) return []
             let quantity = Math.max(1, Math.floor(Number(entry.quantity || 1)))
             if (product.trackStock) quantity = Math.min(quantity, product.stock)
-            const pricing = validateCartCustomization(product, optionIds, quantity)
-            if (!pricing) return []
             return quantity > 0 ? [{
-              key: typeof entry.key === "string" && entry.key.startsWith(`${product.id}:`) ? entry.key : modifierSelectionKey(product.id, optionIds),
+              key: modifierSelectionKey(product.id, optionIds),
               product,
               quantity,
               optionIds,
@@ -350,7 +349,6 @@ export function Storefront({
       JSON.stringify(
         cart.map((item) => ({
           productId: item.product.id,
-          key: item.key,
           quantity: item.quantity,
           optionIds: item.optionIds,
         })),
@@ -386,7 +384,7 @@ export function Storefront({
       .filter(
         (p) =>
           category === "Todos" ||
-          (parentCategoryName(category) ? p.category === category : categoryIncludes(category, p.category)),
+          p.category === category,
       )
       .filter(
         (p) =>
@@ -424,17 +422,11 @@ export function Storefront({
           ),
       )
   }, [products, search, category])
-  const activeCategories = useMemo(() => sortedCategories(categories.filter((item) => item.active)), [categories])
-  const currentRoot = parentCategoryName(category) || category
-  const currentChildren = activeCategories.filter((item) => parentCategoryName(item.name) === currentRoot)
   const categoryCounts = useMemo(() => {
     const activeProducts = products.filter((product) => product.active)
     const counts = new Map<string, number>()
     counts.set("Todos", activeProducts.length)
     for (const product of activeProducts) counts.set(product.category, (counts.get(product.category) || 0) + 1)
-    for (const root of categories.filter((item) => !parentCategoryName(item.name))) {
-      counts.set(root.name, activeProducts.filter((product) => categoryIncludes(root.name, product.category)).length)
-    }
     return counts
   }, [products])
   const selectedDate = checkout.timing === "scheduled" ? checkout.scheduleDate : ""
@@ -461,7 +453,7 @@ export function Storefront({
     for (let value = start; value <= end; value += settings.slotIntervalMinutes) {
       const text = minutesToTime(value)
       const date = zonedDateTime(selectedDate, text, organizationTimeZone)
-      if (date.getTime() >= minimum && isWithinBusinessDay(schedule, text)) result.push(text)
+      if (date.getTime() >= minimum) result.push(text)
     }
     return result
   }, [checkout.timing, checkout.type, selectedDate, settings.businessHours, settings.deliveryMinMinutes, settings.pickupLeadMinutes, settings.slotIntervalMinutes, organizationTimeZone])
@@ -545,26 +537,23 @@ export function Storefront({
     ],
   )
   const totalItems = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart])
-  const recommendations = useMemo(() => {
-    const selected = new Set(cart.map((item) => item.product.id))
-    const ids = [...new Set(cart.flatMap((item) => item.product.recommendationIds || []))]
-    return ids.map((id) => products.find((product) => product.id === id))
-      .filter((product): product is Product => Boolean(product && product.active && !selected.has(product.id) && product.ingredientStockAvailable !== false && (!product.trackStock || product.stock > 0)))
-      .slice(0, 4)
-  }, [cart, products])
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
-  const amountBeforeCashback = Math.max(0, subtotal - couponDiscount) + deliveryFee
-  const cashbackUsed = redeemCashback && settings.cashbackEnabled && customer ? Math.min((customer.cashbackCents || 0) / 100, amountBeforeCashback) : 0
-  const total = Math.max(0, amountBeforeCashback - cashbackUsed)
+  const cashbackBalance = settings.loyaltyEnabled && customer
+    ? Number((Math.max(0, customer.loyaltyPoints) / 100).toFixed(2))
+    : 0
+  const cashbackEligibleAmount = Math.max(0, subtotal - couponDiscount)
+  const cashbackDiscount = useCashback
+    ? Math.min(cashbackBalance, cashbackEligibleAmount)
+    : 0
+  const total = Math.max(0, cashbackEligibleAmount - cashbackDiscount) + deliveryFee
 
-  function validateCartCustomization(product: Product, optionIds: number[], quantity = 1) {
+  function validateCartCustomization(product: Product, optionIds: number[]) {
     const result = validateAndPriceModifierSelection(
       {
         ...product,
         price: productPriceForTiming(product, checkout.timing),
       },
       optionIds,
-      quantity,
     )
     return result.ok ? result : null
   }
@@ -677,7 +666,6 @@ export function Storefront({
     setCart((current) => {
       const target = current.find((item) => item.key === key)
       if (!target) return current
-      if (target.product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active)) return current
       let next = quantity
       if (target.product.trackStock) {
         const otherQuantity = current
@@ -690,42 +678,27 @@ export function Storefront({
     })
   }
 
-  function editCombo(item: CartItem, nextQuantity = item.quantity) {
-    setEditingCartKey(item.key)
-    setEditingQuantity(nextQuantity)
-    setCustomizingProduct(item.product)
-    setCartOpen(false)
-  }
-
   function addCustomizedProduct(product: Product, customization: ProductCustomization) {
-    const bundle = product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active)
-    const key = bundle ? `${product.id}:${crypto.randomUUID()}` : modifierSelectionKey(product.id, customization.optionIds)
+    const key = modifierSelectionKey(product.id, customization.optionIds)
     setCart((current) => {
-      if (editingCartKey) {
-        const otherQuantity = current.filter((item) => item.product.id === product.id && item.key !== editingCartKey).reduce((sum, item) => sum + item.quantity, 0)
-        if (product.trackStock && otherQuantity + customization.quantity > product.stock) return current
-        return current.map((item) => item.key === editingCartKey ? { ...item, product, quantity: customization.quantity, optionIds: customization.optionIds, unitPrice: customization.unitPrice, modifiers: customization.modifiers } : item)
-      }
       const currentProductQuantity = current
         .filter((item) => item.product.id === product.id)
         .reduce((sum, item) => sum + item.quantity, 0)
-      if (product.trackStock && currentProductQuantity + customization.quantity > product.stock) return current
+      if (product.trackStock && currentProductQuantity >= product.stock) return current
       const existing = current.find((item) => item.key === key)
       if (existing) {
-        return current.map((item) => item.key === key ? { ...item, quantity: item.quantity + customization.quantity } : item)
+        return current.map((item) => item.key === key ? { ...item, quantity: item.quantity + 1 } : item)
       }
       return [...current, {
         key,
         product,
-        quantity: customization.quantity,
+        quantity: 1,
         optionIds: customization.optionIds,
         unitPrice: customization.unitPrice,
         modifiers: customization.modifiers,
       }]
     })
-    setEditingCartKey(null)
     setCustomizingProduct(null)
-    setCartOpen(true)
   }
 
   function quantityFor(productId: number) { return totalProductQuantity(productId) }
@@ -962,7 +935,11 @@ export function Storefront({
   }
 
   function whatsappOrderUrl(order: Order) {
-    const text = whatsappOrderText(order, settings.storeName, settings.timeZone)
+    const items = order.items.map((item) => {
+      const modifiers = (item.modifiers || []).map((modifier) => `  + ${modifier.optionName}${modifier.included ? " (incluído)" : modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`).join("\n")
+      return `${item.quantity}x ${item.name} - ${money(item.subtotal)}${modifiers ? `\n${modifiers}` : ""}`
+    }).join("\n")
+    const text = `Olá! Acabei de fazer o pedido ${order.code} (${order.reference}).\n\n${items}\n\nTotal: ${money(order.total)}\nRecebimento: ${new Date(order.requestedFor).toLocaleString("pt-BR")}\nTipo: ${order.type === "delivery" ? "Delivery" : "Retirada"}`
     return `https://wa.me/${settings.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`
   }
 
@@ -1020,13 +997,18 @@ export function Storefront({
       const requestedFor = checkout.timing === "scheduled"
         ? zonedDateTime(date, time, organizationTimeZone).toISOString()
         : undefined
-      const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: checkout.type, timing: checkout.timing, requestedFor, paymentMethod: checkout.paymentMethod, changeFor: checkout.paymentMethod === "cash" ? checkout.changeFor : "", notes: checkout.notes, couponCode: checkout.couponCode.trim() || undefined, redeemCashback, customer: { name: checkout.name, phone: checkout.phone, address: checkout.address, number: checkout.number, district: checkout.district, city: checkout.city, state: checkout.state, zipCode: checkout.zipCode, complement: checkout.complement, latitude: checkout.latitude, longitude: checkout.longitude }, items: cart.map((item) => ({
+      const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: checkout.type, timing: checkout.timing, requestedFor, paymentMethod: checkout.paymentMethod, changeFor: checkout.paymentMethod === "cash" ? checkout.changeFor : "", notes: checkout.notes, couponCode: checkout.couponCode.trim() || undefined, useCashback, customer: { name: checkout.name, phone: checkout.phone, address: checkout.address, number: checkout.number, district: checkout.district, city: checkout.city, state: checkout.state, zipCode: checkout.zipCode, complement: checkout.complement, latitude: checkout.latitude, longitude: checkout.longitude }, items: cart.map((item) => ({
         productId: item.product.id,
         quantity: item.quantity,
         modifierOptionIds: item.optionIds,
       })) }) })
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível enviar o pedido.")
       if (customer) await fetch("/api/client/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: checkout.name, phone: checkout.phone, defaultAddress: checkout.address, defaultNumber: checkout.number, defaultDistrict: checkout.district, defaultCity: checkout.city, defaultState: checkout.state, defaultZipCode: checkout.zipCode, defaultComplement: checkout.complement, defaultLatitude: checkout.latitude, defaultLongitude: checkout.longitude }) }).catch(() => null)
+      if (customer) {
+        const refreshed = await fetch("/api/client/me", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+        if (refreshed?.customer) setCustomer(refreshed.customer)
+      }
+      setUseCashback(false)
       localStorage.setItem(lastOrderStorageKey, data.order.reference); localStorage.removeItem("saborflow_last_order"); localStorage.removeItem("cris_last_order"); localStorage.removeItem("crisflow_cart_v1"); localStorage.removeItem(cartStorageKey); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order); setLastOrder(data.order)
       if (settings.checkoutAfterSubmit === "whatsapp") router.push(`${orderPath(data.order.reference)}#whatsapp`)
       else if (settings.checkoutAfterSubmit === "site") router.push(orderPath(data.order.reference))
@@ -1083,7 +1065,7 @@ export function Storefront({
             <a href={directOrderPath} className={`hidden h-10 items-center rounded-xl px-3 text-xs font-black sm:inline-flex ${pageMode === "order" ? "text-white" : "text-gray-600 hover:bg-gray-100"}`} style={pageMode === "order" ? { backgroundColor: settings.primaryColor } : undefined}>Fazer pedido</a>
             {lastOrder && <a href={orderPath(lastOrder.reference)} className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-black shadow-sm ${["completed", "cancelled"].includes(lastOrder.status) ? "border-gray-200 bg-white text-gray-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}><PackageCheck className="h-4 w-4"/><span>{["completed", "cancelled"].includes(lastOrder.status) ? "Último pedido" : "Meu pedido"}</span><span className="hidden rounded-full bg-white/80 px-2 py-0.5 text-[10px] sm:inline">{compactOrderStatus[lastOrder.status]}</span></a>}
             {settings.clientAccountsEnabled && (
-              <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{customer.loyaltyPoints} pts</span>}</button>
+              <button onClick={() => setAccountOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 shadow-sm"><UserRound className="h-4 w-4" /><span>{customer ? customer.name.split(" ")[0] : "Entrar"}</span>{customer && settings.loyaltyEnabled && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700">{money(customer.loyaltyPoints / 100)} cashback</span>}</button>
             )}
           </div>
         </div>
@@ -1152,26 +1134,23 @@ export function Storefront({
         <section className="sticky top-14 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
             <label className="relative min-w-[190px] max-w-xs flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="O que você procura?" className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-orange-100"/></label>
-            <div className="flex gap-1">{["Todos", ...activeCategories.filter((item) => !parentCategoryName(item.name)).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={currentRoot === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`flex h-11 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm font-black ${currentRoot === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}><span>{item}</span><span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{categoryCounts.get(item) || 0}</span></button>)}</div>
+            <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={category === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`flex h-11 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm font-black ${category === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}><span>{item}</span><span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{categoryCounts.get(item) || 0}</span></button>)}</div>
           </div>
         </section>
 
-        {currentChildren.length > 0 && <nav aria-label={`Subcategorias de ${currentRoot}`} className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => setCategory(currentRoot)} className={`rounded-full px-4 py-2 text-sm font-bold ${category === currentRoot ? "bg-gray-950 text-white" : "bg-white text-gray-700 ring-1 ring-gray-200"}`}>Todos de {currentRoot}</button>{currentChildren.map((child) => <button type="button" key={child.id} onClick={() => setCategory(child.name)} className={`rounded-full px-4 py-2 text-sm font-bold ${category === child.name ? "bg-gray-950 text-white" : "bg-white text-gray-700 ring-1 ring-gray-200"}`}>{categoryShortName(child.name)}</button>)}</nav>}
-
         <section className="mt-5">
-          <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : categoryShortName(category)}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
-          <div className={menuLayout === "list" ? "grid grid-cols-1 gap-4 sm:grid-cols-2" : menuLayout === "cards" ? "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4" : "grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}>
+          <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : category}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {filtered.map((product) => {
               const quantity = quantityFor(product.id)
               const hasModifiers = productHasModifiers(product)
-              const pricedFlavors = product.modifierGroups?.some(isPricedFlavorGroup)
               const unavailable =
                 (product.trackStock && product.stock <= 0) ||
                 product.ingredientStockAvailable === false
 
               return (
-                <article key={product.id} className={`group min-w-0 ${menuLayout === "cards" ? "rounded-2xl border border-gray-100 bg-white p-2 shadow-sm" : menuLayout === "list" ? "flex items-center gap-4 rounded-2xl border border-gray-100 bg-white p-3 shadow-sm" : ""}`}>
-                  <div className={`relative aspect-square overflow-hidden rounded-2xl bg-gray-50 ring-1 ring-black/5 ${menuLayout === "list" ? "w-28 shrink-0 sm:w-36" : ""}`}>
+                <article key={product.id} className="group min-w-0">
+                  <div className="relative aspect-square overflow-hidden rounded-2xl bg-gray-50 ring-1 ring-black/5">
                     {product.image ? (
                       <img src={product.image} alt={product.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                     ) : (
@@ -1185,7 +1164,7 @@ export function Storefront({
                         style={{ backgroundColor: settings.primaryColor }}
                         className="absolute bottom-2 right-2 flex h-10 items-center justify-center gap-1 rounded-xl px-3 text-xs font-black text-white shadow-lg"
                       >
-                        <Plus className="h-4 w-4" /> {pricedFlavors ? "Escolher sabor" : "Montar"}
+                        <Plus className="h-4 w-4" /> Montar
                       </button>
                     )}
 
@@ -1226,12 +1205,12 @@ export function Storefront({
                         {product.promotion.highlight && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">{product.promotion.label || "Oferta"} · hoje</span>}
                       </span>
                     ) : (
-                      <strong className="text-base">{pricedFlavors ? "A partir de " : ""}{money(pricedFlavors ? pricedFlavorStartingPrice(product) : product.price)}</strong>
+                      <strong className="text-base">{money(product.price)}</strong>
                     )}
-                    {hasModifiers && !pricedFlavors && <span className="ml-1 text-[10px] font-bold text-gray-400">+ adicionais</span>}
+                    {hasModifiers && <span className="ml-1 text-[10px] font-bold text-gray-400">+ adicionais</span>}
                     <h3 className="mt-1 line-clamp-2 text-sm font-bold leading-snug">{product.name}</h3>
                     {product.description && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{product.description}</p>}
-                    {!unavailable && <span className="mt-1.5 inline-block text-[11px] font-black" style={{ color: settings.primaryColor }}>{pricedFlavors ? "Escolher sabor" : hasModifiers ? "Ver opções" : "Ver detalhes"}</span>}
+                    {!unavailable && <span className="mt-1.5 inline-block text-[11px] font-black" style={{ color: settings.primaryColor }}>{hasModifiers ? "Ver opções" : "Ver detalhes"}</span>}
                   </button>
                 </article>
               )
@@ -1264,20 +1243,20 @@ export function Storefront({
                       {item.product.image ? <img src={item.product.image} alt="" className="h-full w-full object-cover" /> : "🥟"}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-bold">{item.quantity}x {item.product.name}</p>
+                      <p className="font-bold">{item.product.name}</p>
                       <p className="text-xs text-gray-500">{money(cartItemUnitPrice(item))} cada</p>
                     </div>
-                    {item.product.modifierGroups?.some((group) => group.selectionMode === "bundle" && group.active) ? <div className="flex flex-col items-end gap-1"><button type="button" onClick={() => editCombo(item)} className="rounded-xl bg-orange-50 px-2 py-2 text-xs font-bold text-orange-700">Editar sabores / quantidade</button><button type="button" onClick={() => setCart((current) => current.filter((candidate) => candidate.key !== item.key))} className="text-xs text-red-600">Remover</button></div> : <div className="flex items-center gap-2 rounded-xl bg-gray-100 p-1">
+                    <div className="flex items-center gap-2 rounded-xl bg-gray-100 p-1">
                       <button onClick={() => setCartItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-4 w-4" /></button>
                       <strong className="min-w-5 text-center text-sm">{item.quantity}</strong>
                       <button onClick={() => setCartItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-4 w-4" /></button>
-                    </div>}
+                    </div>
                     <strong className="w-20 text-right text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong>
                   </div>
                   {item.modifiers.length > 0 && (
                     <div className="ml-[60px] mt-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                      {item.modifiers.map((modifier, index) => (
-                        <p key={`${modifier.groupId}-${modifier.optionId}-${index}`}>
+                      {item.modifiers.map((modifier) => (
+                        <p key={`${modifier.groupId}-${modifier.optionId}`}>
                           <span className="font-bold">{modifier.groupName}:</span> {modifier.optionName}
                           {modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : modifier.included ? " (incluído)" : ""}
                         </p>
@@ -1287,7 +1266,6 @@ export function Storefront({
                 </div>
               ))}
             </div>
-            {recommendations.length > 0 && <section className="mt-5 rounded-2xl bg-orange-50 p-4"><h3 className="text-sm font-black">Combine com seu pedido</h3><div className="mt-3 space-y-2">{recommendations.map((product) => <div key={product.id} className="flex items-center justify-between gap-2 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{product.name}</p><p className="text-xs text-gray-600">{money(product.price)}</p></div><button type="button" className="shrink-0 rounded-xl bg-orange-600 px-3 py-2 text-xs font-black text-white" onClick={() => { if (productHasModifiers(product)) { setCustomizingProduct(product); setCartOpen(false) } else setSimpleProductQuantity(product, totalProductQuantity(product.id) + 1) }}>Adicionar</button></div>)}</div></section>}
             <div className="my-5 flex items-center justify-between border-t border-gray-100 pt-4"><span className="font-semibold text-gray-500">Subtotal</span><strong className="text-xl">{money(subtotal)}</strong></div>
             <button disabled={!settings.acceptingOrders} onClick={openCheckout} style={{ backgroundColor: settings.primaryColor }} className="h-12 w-full rounded-xl font-black text-white disabled:opacity-50">{!settings.acceptingOrders ? "Pedidos temporariamente pausados" : isOpen ? "Escolher recebimento" : "Agendar pedido"}</button>
           </div>
@@ -1350,15 +1328,18 @@ export function Storefront({
             {checkoutStep === 2 && <div className="space-y-5">
               <section><h3 className="mb-1 text-lg font-black">Como você vai pagar?</h3><p className="mb-3 text-sm text-gray-500">Escolha a forma de pagamento disponível na loja.</p><div className="grid gap-2 sm:grid-cols-3">{activePaymentMethods.map(([value, label]) => <button type="button" key={value} onClick={() => setCheckout({ ...checkout, paymentMethod: value })} className={`rounded-xl border px-3 py-4 text-sm font-bold ${checkout.paymentMethod === value ? "border-orange-400 bg-orange-50 text-orange-800" : "border-gray-200"}`}>{checkout.paymentMethod === value ? "✓ " : ""}{label}</button>)}</div>{checkout.paymentMethod === "cash" && <label className="mt-3 block"><span className="mb-1 block text-[11px] font-black uppercase text-gray-500">Precisa de troco?</span><input value={checkout.changeFor} onChange={(e) => setCheckout({ ...checkout, changeFor: e.target.value })} placeholder="Ex.: troco para R$ 100" className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm"/></label>}</section>
               <details className="rounded-2xl border border-gray-200 bg-gray-50 p-4"><summary className="cursor-pointer list-none font-black">Cupom de desconto <span className="ml-1 text-xs font-normal text-gray-500">(opcional)</span></summary><div className="mt-3 flex gap-2"><input value={checkout.couponCode} onChange={(e) => { setCheckout({ ...checkout, couponCode: e.target.value.toUpperCase() }); setCouponDiscount(0); setCouponMessage("") }} placeholder="Ex.: BEMVINDO10" className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-sm uppercase"/><button type="button" onClick={applyCoupon} disabled={couponBusy || !checkout.couponCode.trim()} className="rounded-xl bg-white px-4 text-sm font-black ring-1 ring-gray-200">{couponBusy ? "..." : "Aplicar"}</button></div>{couponMessage && <p className={`mt-2 text-xs font-bold ${couponDiscount > 0 ? "text-emerald-700" : "text-red-600"}`}>{couponMessage}</p>}</details>
+              {settings.loyaltyEnabled && <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4">
+                <div className="flex items-start justify-between gap-4"><div><p className="font-black text-violet-950">Seu cashback</p><p className="mt-1 text-xs text-violet-700">O saldo é vinculado à sua conta identificada pelo CPF.</p></div><strong className="whitespace-nowrap text-lg text-violet-800">{money(cashbackBalance)}</strong></div>
+                {customer ? <div className="mt-3"><label className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${cashbackBalance > 0 ? "cursor-pointer border-violet-200 bg-white" : "border-violet-100 bg-violet-50"}`}><span><strong className="block text-sm">Usar meu cashback</strong><small className="text-gray-500">{cashbackBalance > 0 ? `Pode descontar até ${money(Math.min(cashbackBalance, cashbackEligibleAmount))} deste pedido.` : "Seu saldo está zerado. Você pode acumular cashback em pedidos concluídos."}</small></span><input type="checkbox" checked={useCashback} disabled={cashbackBalance <= 0 || cashbackEligibleAmount <= 0} onChange={(event) => setUseCashback(event.target.checked)} className="h-5 w-5 accent-violet-600" /></label></div> : <button type="button" onClick={() => setAccountOpen(true)} className="mt-3 h-10 w-full rounded-xl bg-white text-sm font-black text-violet-800 ring-1 ring-violet-200">Entrar com CPF para consultar cashback</button>}
+              </section>}
               <details className="rounded-2xl border border-gray-200 bg-gray-50 p-4"><summary className="cursor-pointer list-none font-black">Observações do pedido <span className="ml-1 text-xs font-normal text-gray-500">(opcional)</span></summary><textarea value={checkout.notes} onChange={(e) => setCheckout({ ...checkout, notes: e.target.value })} placeholder="Ex.: tocar o interfone, retirar molho..." rows={3} className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm"/></details>
-              <div className="rounded-2xl border border-gray-200 bg-white p-4"><p className="text-xs font-black uppercase tracking-wide text-gray-400">Resumo até aqui</p><div className="mt-2 flex justify-between text-sm"><span>{totalItems} item(ns)</span><strong>{money(subtotal)}</strong></div>{checkout.type === "delivery" && <div className="mt-1 flex justify-between text-sm text-gray-500"><span>Entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}</div>
+              <div className="rounded-2xl border border-gray-200 bg-white p-4"><p className="text-xs font-black uppercase tracking-wide text-gray-400">Resumo até aqui</p><div className="mt-2 flex justify-between text-sm"><span>{totalItems} item(ns)</span><strong>{money(subtotal)}</strong></div>{couponDiscount > 0 && <div className="mt-1 flex justify-between text-sm text-emerald-700"><span>Cupom</span><span>-{money(couponDiscount)}</span></div>}{cashbackDiscount > 0 && <div className="mt-1 flex justify-between text-sm text-violet-700"><span>Cashback</span><span>-{money(cashbackDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-1 flex justify-between text-sm text-gray-500"><span>Entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}<div className="mt-2 flex justify-between border-t border-gray-100 pt-2 text-sm"><span>Total</span><strong>{money(total)}</strong></div></div>
             </div>}
 
             {checkoutStep === 3 && <div className="space-y-5">
               <section><div className="flex items-center justify-between"><div><h3 className="text-lg font-black">Revise seu pedido</h3><p className="text-sm text-gray-500">Nada será enviado antes de você confirmar.</p></div><button type="button" onClick={() => { setCheckoutOpen(false); setCartOpen(true) }} className="text-xs font-black text-orange-600">Editar itens</button></div><div className="mt-4 space-y-2">{cart.map((item) => <div key={item.key} className="rounded-xl border border-gray-100 p-3"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm">{item.quantity}x {item.product.name}</strong>{item.modifiers.length > 0 && <div className="mt-1 text-xs text-gray-500">{item.modifiers.map((modifier) => modifier.optionName).join(" · ")}</div>}</div><strong className="whitespace-nowrap text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong></div></div>)}</div></section>
               <section className="rounded-2xl bg-gray-50 p-4"><p className="text-xs font-black uppercase tracking-wide text-gray-400">Recebimento</p><p className="mt-2 text-sm font-bold">{checkout.type === "delivery" ? "Delivery" : "Retirada"} · {checkout.timing === "now" ? "para agora" : `${checkout.scheduleDate.split("-").reverse().join("/")} às ${selectedTime}`}</p>{checkout.type === "delivery" && <p className="mt-1 text-sm text-gray-600">{checkout.address}, {checkout.number}{checkout.district ? ` · ${checkout.district}` : ""}</p>}<p className="mt-1 text-sm text-gray-600">Pagamento: {checkout.paymentMethod === "pix" ? "PIX" : checkout.paymentMethod === "cash" ? "Dinheiro" : "Cartão na entrega"}</p></section>
-              {settings.cashbackEnabled && customer && (customer.cashbackCents || 0) > 0 && <label className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-900"><input type="checkbox" checked={redeemCashback} onChange={(event) => setRedeemCashback(event.target.checked)} className="h-5 w-5" /> Usar cashback disponível: {money((customer.cashbackCents || 0) / 100)}</label>}
-              <section className="rounded-2xl bg-gray-950 p-4 text-white"><div className="flex justify-between text-sm text-gray-300"><span>Produtos</span><span>{money(subtotal)}</span></div>{couponDiscount > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Desconto</span><span>-{money(couponDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-2 flex justify-between text-sm text-gray-300"><span>Taxa de entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}{cashbackUsed > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Cashback</span><span>-{money(cashbackUsed)}</span></div>}<div className="mt-3 flex justify-between border-t border-white/10 pt-3"><strong>Total</strong><strong className="text-xl">{money(total)}</strong></div></section>
+              <section className="rounded-2xl bg-gray-950 p-4 text-white"><div className="flex justify-between text-sm text-gray-300"><span>Produtos</span><span>{money(subtotal)}</span></div>{couponDiscount > 0 && <div className="mt-2 flex justify-between text-sm text-emerald-300"><span>Cupom</span><span>-{money(couponDiscount)}</span></div>}{cashbackDiscount > 0 && <div className="mt-2 flex justify-between text-sm text-violet-300"><span>Cashback usado</span><span>-{money(cashbackDiscount)}</span></div>}{checkout.type === "delivery" && <div className="mt-2 flex justify-between text-sm text-gray-300"><span>Taxa de entrega</span><span>{deliveryQuote ? money(deliveryFee) : "A calcular"}</span></div>}<div className="mt-3 flex justify-between border-t border-white/10 pt-3"><strong>Total</strong><strong className="text-xl">{money(total)}</strong></div></section>
               <p className="text-center text-[11px] leading-5 text-gray-400">Seus dados serão utilizados para processar e acompanhar este pedido. Consulte o <a href="/privacidade" target="_blank" className="font-bold text-gray-500 underline">Aviso de Privacidade</a>.</p>
             </div>}
           </div>
@@ -1432,7 +1413,7 @@ export function Storefront({
                   const active = item.day === todayDay
                   return <div key={item.day} style={active ? { backgroundColor: `${settings.primaryColor}12`, color: settings.primaryColor } : undefined} className={`flex items-center justify-between gap-4 rounded-lg px-3 py-2.5 text-sm ${active ? "font-black" : "text-gray-700"}`}>
                     <span>{item.label}</span>
-                    <span className="flex items-center gap-2 whitespace-nowrap"><Clock3 className="h-4 w-4"/>{item.enabled ? item.pauseStart && item.pauseEnd ? `${item.open}–${item.pauseStart} · ${item.pauseEnd}–${item.close}` : `${item.open}–${item.close}` : "Fechado"}</span>
+                    <span className="flex items-center gap-2 whitespace-nowrap"><Clock3 className="h-4 w-4"/>{item.enabled ? `${item.open} – ${item.close}` : "Fechado"}</span>
                   </div>
                 })}
               </div>
@@ -1453,9 +1434,7 @@ export function Storefront({
             : null
         }
         primaryColor={settings.primaryColor}
-        initialOptionIds={editingCartKey ? cart.find((item) => item.key === editingCartKey)?.optionIds : undefined}
-        initialQuantity={editingCartKey ? editingQuantity : 1}
-        onClose={() => { setCustomizingProduct(null); setEditingCartKey(null) }}
+        onClose={() => setCustomizingProduct(null)}
         onConfirm={(customization) => {
           if (customizingProduct) addCustomizedProduct(customizingProduct, customization)
         }}
