@@ -1,0 +1,12 @@
+HOTFIX — TUTORIAL STEP POSSIBLY NULL
+
+Corrige o erro TypeScript:
+components/admin/tutorial-system.tsx(400,29): error TS18047: 'step' is possibly 'null'.
+
+O ajuste apenas estabiliza a referência da etapa ativa antes das funções internas do destaque visual.
+Não altera o comportamento do tutorial, feedback, dados ou banco.
+
+APLICAR
+1. Extraia este ZIP na raiz do projeto e aceite substituir.
+2. Rode: npm run build
+3. Se passar: git add . && git commit -m "Corrige tipagem do tutorial interativo" && git push

@@ -1,0 +1,33 @@
+ETAPA 7B — TUTORIAIS COM DESTAQUES MÚLTIPLOS + EXPLICAÇÕES + FEEDBACK
+
+O que muda:
+- O restante da tela fica levemente escurecido durante o tutorial.
+- Cada área relacionada à etapa recebe um quadrado laranja destacado.
+- Quando a etapa envolve mais de um ponto, todos são marcados simultaneamente e numerados.
+- Os passos principais ganharam explicações mais detalhadas: o que observar, por que importa e cuidados antes de salvar.
+- O tutorial continua usando a tela real e NUNCA apaga/reset dados já cadastrados.
+- A pessoa pode pular qualquer passo sem alterar nada.
+- Ao concluir, aparece uma avaliação OPCIONAL de 1 a 5 estrelas, utilidade e comentário.
+- O feedback fica salvo por empresa em tabela própria, separado das avaliações de pedidos.
+
+ARQUIVOS
+- components/admin/tutorial-system.tsx
+- app/api/admin/tutorial-feedback/route.ts
+- database/migrations/045_tutorial_feedback.sql
+
+COMO APLICAR
+1. Extraia o ZIP na raiz do projeto e aceite substituir.
+2. Rode:
+   npm run build
+3. Se passar:
+   git add .
+   git commit -m "Melhora tutoriais com destaques e feedback"
+   git push
+4. Após o deploy, no Railway rode:
+   node scripts/migrate-multiempresa.mjs
+
+MIGRATION NOVA
+045_tutorial_feedback.sql
+
+OBSERVAÇÃO
+O feedback é opcional: o usuário pode clicar em "Agora não" e continuar normalmente.
