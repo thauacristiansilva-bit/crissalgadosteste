@@ -122,31 +122,44 @@ async function dispatchWhatsApp(input: ProviderDispatchInput): Promise<ProviderD
   if (!/^v\d+\.\d+$/.test(apiVersion)) throw new Error("Versão da Graph API inválida.")
   const countryCode = text(input.settings.defaultCountryCode)
   const to = e164(input.recipient, countryCode).replace(/^\+/, "")
-  const isReply = input.payload?.whatsappReply === true
-  if (isReply && !input.payload?.inboundMessageId) throw new Error("Resposta sem mensagem recebida de referência.")
-  const templateName = isReply ? "" : required(input.settings.templateName, "Template aprovado do WhatsApp")
-  const languageCode = isReply ? "" : required(input.settings.languageCode, "Idioma do template do WhatsApp")
+
+  const isFreeReply = input.payload?.whatsappReply === true
+  const requestBody = isFreeReply
+    ? {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "text",
+        text: { preview_url: false, body: input.message },
+      }
+    : (() => {
+        const templateName = required(input.payload?.templateName || input.settings.templateName, "Template aprovado do WhatsApp")
+        const languageCode = required(input.payload?.languageCode || input.settings.languageCode, "Idioma do template do WhatsApp")
+        const parameters = Array.isArray(input.payload?.templateParameters)
+          ? input.payload.templateParameters.map((value) => text(value)).filter(Boolean).slice(0, 20)
+          : [input.message]
+        return {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to,
+          type: "template",
+          template: {
+            name: templateName,
+            language: { code: languageCode },
+            ...(parameters.length
+              ? { components: [{ type: "body", parameters: parameters.map((value) => ({ type: "text", text: value })) }] }
+              : {}),
+          },
+        }
+      })()
+
   const response = await fetch(`https://graph.facebook.com/${apiVersion}/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${accessToken}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      ...(isReply ? { type: "text", text: { preview_url: false, body: input.message } } : { type: "template", template: {
-        name: templateName,
-        language: { code: languageCode },
-        components: [
-          {
-            type: "body",
-            parameters: [{ type: "text", text: input.message }],
-          },
-        ],
-      } }),
-    }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(15_000),
   })
   const raw = await response.text()

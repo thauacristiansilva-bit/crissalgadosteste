@@ -55,6 +55,88 @@ type ConversationRow = {
   updated_at: Date
 }
 
+export type WhatsAppMessageTemplate = {
+  id: string
+  connectionId: string
+  name: string
+  label: string
+  languageCode: string
+  category: "utility" | "marketing" | "authentication"
+  status: "draft" | "submitted" | "approved" | "rejected" | "paused" | "disabled"
+  body: string
+  useCase: string | null
+  variableCount: number
+  metaTemplateId: string | null
+  rejectionReason: string | null
+  updatedAt: string
+}
+
+export type WhatsAppInternalNote = {
+  id: string
+  connectionId: string
+  contactPhone: string
+  body: string
+  authorName: string
+  createdAt: string
+}
+
+export type WhatsAppConversationEvent = {
+  id: string
+  connectionId: string
+  contactPhone: string
+  eventType: string
+  actorType: "ai" | "user" | "system"
+  actorName: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
+function templateVariableCount(body: string) {
+  const indexes = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((match) => Number(match[1])).filter(Number.isFinite)
+  return indexes.length ? Math.max(...indexes) : 0
+}
+
+function renderTemplateBody(body: string, parameters: string[]) {
+  return body.replace(/\{\{(\d+)\}\}/g, (_match, index) => parameters[Number(index) - 1] || `{{${index}}}`)
+}
+
+async function logConversationEvent(input: {
+  organizationId: string
+  connectionId: string
+  contactPhone: string
+  eventType: string
+  actorType: "ai" | "user" | "system"
+  actorUserId?: string | null
+  metadata?: Record<string, unknown>
+}) {
+  await getPostgresPool().query(
+    `INSERT INTO sf_whatsapp_conversation_events (
+       organization_id, connection_id, contact_phone, event_type, actor_type, actor_user_id, metadata
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+    [input.organizationId, input.connectionId, input.contactPhone, input.eventType, input.actorType, input.actorUserId || null, JSON.stringify(input.metadata || {})],
+  )
+}
+
+function automaticLabelsForText(text: string) {
+  const labels: string[] = []
+  if (/\b(pedido|comprar|card[aá]pio|combo|produto|sabor)\b/i.test(text)) labels.push("Pedido")
+  if (/\b(reclama[cç][aã]o|reclamar|problema|ruim|errado|cancelar|cancelamento|estorno|reembolso)\b/i.test(text)) labels.push("Reclamação")
+  if (/\b(pagamento|pix|cart[aã]o|boleto|cobran[cç]a|pagar|valor)\b/i.test(text)) labels.push("Financeiro")
+  if (/\b(entrega|entregador|motoboy|endere[cç]o|retirada|atraso)\b/i.test(text)) labels.push("Entrega")
+  if (/\b(ajuda|suporte|atendente|humano|falar com algu[eé]m)\b/i.test(text)) labels.push("Suporte")
+  return [...new Set(labels)].slice(0, 6)
+}
+
+async function mergeAutomaticLabels(organizationId: string, connectionId: string, contactPhone: string, labels: string[]) {
+  if (!labels.length) return
+  await getPostgresPool().query(
+    `UPDATE sf_whatsapp_conversations
+     SET labels = ARRAY(SELECT DISTINCT value FROM unnest(labels || $4::text[]) AS u(value)), updated_at=now()
+     WHERE organization_id=$1 AND connection_id=$2 AND contact_phone=$3`,
+    [organizationId, connectionId, contactPhone, labels],
+  )
+}
+
 async function ensureConversation(input: {
   organizationId: string
   connectionId: string
@@ -108,7 +190,7 @@ async function ensureConversation(input: {
 }
 
 async function assertActiveWhatsAppConnection(organizationId: string, connectionId: string) {
-  const result = await getPostgresPool().query<{ settings: { defaultCountryCode?: string; templateName?: string } }>(
+  const result = await getPostgresPool().query<{ settings: { defaultCountryCode?: string; templateName?: string; languageCode?: string } }>(
     `SELECT settings FROM sf_integration_connections
      WHERE organization_id = $1 AND id = $2 AND provider = 'whatsapp_meta' AND status = 'active' LIMIT 1`,
     [organizationId, connectionId],
@@ -231,6 +313,70 @@ export async function listWhatsAppInbox(organizationId: string) {
     ordersByPhone.set(normalized, list)
   }
 
+  const [templateResult, noteResult, eventResult] = await Promise.all([
+    getPostgresPool().query<{
+      id: string; connection_id: string; name: string; label: string; language_code: string; category: WhatsAppMessageTemplate["category"];
+      status: WhatsAppMessageTemplate["status"]; body: string; use_case: string | null; variable_count: number; meta_template_id: string | null;
+      rejection_reason: string | null; updated_at: Date
+    }>(
+      `SELECT id, connection_id, name, label, language_code, category, status, body, use_case,
+              variable_count, meta_template_id, rejection_reason, updated_at
+       FROM sf_whatsapp_message_templates WHERE organization_id=$1 ORDER BY label, updated_at DESC`,
+      [organizationId],
+    ),
+    getPostgresPool().query<{
+      id: string; connection_id: string; contact_phone: string; body: string; created_at: Date; author_name: string | null
+    }>(
+      `SELECT n.id, n.connection_id, n.contact_phone, n.body, n.created_at, u.name AS author_name
+       FROM sf_whatsapp_internal_notes n LEFT JOIN sf_users u ON u.id=n.created_by_user_id
+       WHERE n.organization_id=$1 ORDER BY n.created_at DESC LIMIT 500`,
+      [organizationId],
+    ),
+    getPostgresPool().query<{
+      id: string; connection_id: string; contact_phone: string; event_type: string; actor_type: WhatsAppConversationEvent["actorType"];
+      metadata: Record<string, unknown>; created_at: Date; actor_name: string | null
+    }>(
+      `SELECT e.id, e.connection_id, e.contact_phone, e.event_type, e.actor_type, e.metadata, e.created_at, u.name AS actor_name
+       FROM sf_whatsapp_conversation_events e LEFT JOIN sf_users u ON u.id=e.actor_user_id
+       WHERE e.organization_id=$1 ORDER BY e.created_at DESC LIMIT 700`,
+      [organizationId],
+    ),
+  ])
+
+  const templates: WhatsAppMessageTemplate[] = templateResult.rows.map(row => ({
+    id: row.id,
+    connectionId: row.connection_id,
+    name: row.name,
+    label: row.label,
+    languageCode: row.language_code,
+    category: row.category,
+    status: row.status,
+    body: row.body,
+    useCase: row.use_case,
+    variableCount: Number(row.variable_count || 0),
+    metaTemplateId: row.meta_template_id,
+    rejectionReason: row.rejection_reason,
+    updatedAt: new Date(row.updated_at).toISOString(),
+  }))
+  const notes: WhatsAppInternalNote[] = noteResult.rows.map(row => ({
+    id: row.id,
+    connectionId: row.connection_id,
+    contactPhone: row.contact_phone,
+    body: row.body,
+    authorName: row.author_name || "Equipe",
+    createdAt: new Date(row.created_at).toISOString(),
+  }))
+  const activity: WhatsAppConversationEvent[] = eventResult.rows.map(row => ({
+    id: row.id,
+    connectionId: row.connection_id,
+    contactPhone: row.contact_phone,
+    eventType: row.event_type,
+    actorType: row.actor_type,
+    actorName: row.actor_name,
+    metadata: row.metadata || {},
+    createdAt: new Date(row.created_at).toISOString(),
+  }))
+
   const contacts = [...rawContacts.values()].map(contact => {
     const conversation = conversationMap.get(`${contact.connectionId}:${contact.phone}`)
     const lastReadAt = conversation?.last_read_at ? new Date(conversation.last_read_at).getTime() : 0
@@ -258,7 +404,7 @@ export async function listWhatsAppInbox(organizationId: string) {
     }
   }).sort((a, b) => b.lastAt.localeCompare(a.lastAt))
 
-  return { contacts, incoming, outgoing }
+  return { contacts, incoming, outgoing, templates, notes, activity }
 }
 
 export async function updateWhatsAppConversation(session: { organizationId: string; userId: string }, connectionId: string, recipient: string, action: string, labels?: string[]) {
@@ -315,7 +461,120 @@ export async function updateWhatsAppConversation(session: { organizationId: stri
   } else {
     throw new Error("Ação de conversa inválida.")
   }
+  const eventNames: Record<string, string> = {
+    takeover: "human_takeover",
+    resume_ai: "ai_resumed",
+    close: "conversation_closed",
+    reopen: "conversation_reopened",
+    waiting: "waiting_customer",
+    mark_read: "conversation_read",
+    labels: "labels_updated",
+  }
+  if (action !== "mark_read") {
+    await logConversationEvent({
+      organizationId: session.organizationId,
+      connectionId,
+      contactPhone: number,
+      eventType: eventNames[action] || action,
+      actorType: "user",
+      actorUserId: session.userId,
+      metadata: action === "labels" ? { labels: labels || [] } : {},
+    })
+  }
   return { ok: true }
+}
+
+export async function addWhatsAppInternalNote(
+  session: { organizationId: string; userId: string },
+  connectionId: string,
+  recipient: string,
+  body: string,
+) {
+  await assertDemoActionAllowed(session.organizationId, "dangerous-integration")
+  const settings = await assertActiveWhatsAppConnection(session.organizationId, connectionId)
+  const number = phone(recipient, settings.defaultCountryCode || "55")
+  const clean = body.trim().slice(0, 2000)
+  if (!clean) throw new Error("Escreva uma nota interna.")
+  await ensureConversation({ organizationId: session.organizationId, connectionId, contactPhone: number })
+  const result = await getPostgresPool().query<{ id: string }>(
+    `INSERT INTO sf_whatsapp_internal_notes (organization_id, connection_id, contact_phone, body, created_by_user_id)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    [session.organizationId, connectionId, number, clean, session.userId],
+  )
+  await logConversationEvent({
+    organizationId: session.organizationId,
+    connectionId,
+    contactPhone: number,
+    eventType: "internal_note_added",
+    actorType: "user",
+    actorUserId: session.userId,
+  })
+  return { id: result.rows[0]?.id || null }
+}
+
+export async function upsertWhatsAppTemplate(
+  session: { organizationId: string; userId: string },
+  input: {
+    id?: string
+    connectionId: string
+    name: string
+    label: string
+    languageCode?: string
+    category?: string
+    status?: string
+    body: string
+    useCase?: string
+    metaTemplateId?: string
+    rejectionReason?: string
+  },
+) {
+  await assertDemoActionAllowed(session.organizationId, "dangerous-integration")
+  await assertActiveWhatsAppConnection(session.organizationId, input.connectionId)
+  const name = input.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 180)
+  const label = input.label.trim().slice(0, 120)
+  const body = input.body.trim().slice(0, 4096)
+  const languageCode = (input.languageCode || "pt_BR").trim().slice(0, 20)
+  const allowedCategories = new Set(["utility", "marketing", "authentication"])
+  const allowedStatuses = new Set(["draft", "submitted", "approved", "rejected", "paused", "disabled"])
+  const category = allowedCategories.has(input.category || "") ? input.category! : "utility"
+  const status = allowedStatuses.has(input.status || "") ? input.status! : "draft"
+  if (!name || !label || !body) throw new Error("Informe nome, título e conteúdo do modelo.")
+  const variableCount = templateVariableCount(body)
+  const result = input.id
+    ? await getPostgresPool().query<{ id: string }>(
+        `UPDATE sf_whatsapp_message_templates SET name=$4, label=$5, language_code=$6, category=$7, status=$8,
+         body=$9, use_case=$10, variable_count=$11, meta_template_id=$12, rejection_reason=$13, updated_at=now()
+         WHERE id=$3 AND organization_id=$1 AND connection_id=$2 RETURNING id`,
+        [session.organizationId, input.connectionId, input.id, name, label, languageCode, category, status, body,
+         (input.useCase || "").trim().slice(0, 80) || null, variableCount, (input.metaTemplateId || "").trim().slice(0, 180) || null,
+         (input.rejectionReason || "").trim().slice(0, 500) || null],
+      )
+    : await getPostgresPool().query<{ id: string }>(
+        `INSERT INTO sf_whatsapp_message_templates (
+           organization_id, connection_id, name, label, language_code, category, status, body, use_case,
+           variable_count, meta_template_id, rejection_reason, created_by_user_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (organization_id, connection_id, name, language_code) DO UPDATE SET
+           label=EXCLUDED.label, category=EXCLUDED.category, status=EXCLUDED.status, body=EXCLUDED.body,
+           use_case=EXCLUDED.use_case, variable_count=EXCLUDED.variable_count, meta_template_id=EXCLUDED.meta_template_id,
+           rejection_reason=EXCLUDED.rejection_reason, updated_at=now()
+         RETURNING id`,
+        [session.organizationId, input.connectionId, name, label, languageCode, category, status, body,
+         (input.useCase || "").trim().slice(0, 80) || null, variableCount, (input.metaTemplateId || "").trim().slice(0, 180) || null,
+         (input.rejectionReason || "").trim().slice(0, 500) || null, session.userId],
+      )
+  if (!result.rowCount) throw new Error("Modelo não encontrado.")
+  return { id: result.rows[0].id, variableCount }
+}
+
+export async function deleteWhatsAppTemplate(session: { organizationId: string; userId: string }, templateId: string) {
+  await assertDemoActionAllowed(session.organizationId, "dangerous-integration")
+  const result = await getPostgresPool().query(
+    `DELETE FROM sf_whatsapp_message_templates WHERE organization_id=$1 AND id=$2`,
+    [session.organizationId, templateId],
+  )
+  if (!result.rowCount) throw new Error("Modelo não encontrado.")
+  return { deleted: true }
 }
 
 export async function queueWhatsAppOrder(client: PoolClient, organizationId: string, order: Order, storeName: string) {
@@ -377,23 +636,66 @@ export async function queueWhatsAppReply(session: { organizationId: string; user
        WHERE organization_id=$1 AND connection_id=$2 AND contact_phone=$3`,
       [session.organizationId, connectionId, number, session.userId],
     )
+    await logConversationEvent({
+      organizationId: session.organizationId,
+      connectionId,
+      contactPhone: number,
+      eventType: "staff_reply_queued",
+      actorType: "user",
+      actorUserId: session.userId,
+    })
+  } else if (sourceId && result.rowCount) {
+    await logConversationEvent({
+      organizationId: session.organizationId,
+      connectionId,
+      contactPhone: number,
+      eventType: sourceId.startsWith("handoff:") ? "handoff_message_queued" : "ai_reply_queued",
+      actorType: "ai",
+    })
   }
   return { queued: Boolean(result.rowCount) }
 }
 
-export async function queueWhatsAppTemplate(session: { organizationId: string; userId: string }, connectionId: string, recipient: string, message: string) {
+export async function queueWhatsAppTemplate(
+  session: { organizationId: string; userId: string },
+  connectionId: string,
+  recipient: string,
+  templateId: string,
+  parameters: string[] = [],
+) {
   await assertDemoActionAllowed(session.organizationId, "dangerous-integration")
   await assertMessagingEntitlement(session.organizationId)
-  const clean = message.trim()
-  if (!clean || clean.length > 1000) throw new Error("Escreva a informação do modelo com até 1000 caracteres.")
   const settings = await assertActiveWhatsAppConnection(session.organizationId, connectionId)
-  if (!settings.templateName) throw new Error("Configure primeiro um modelo aprovado do WhatsApp.")
   const number = phone(recipient, settings.defaultCountryCode || "55")
+  const templateResult = await getPostgresPool().query<{
+    name: string; label: string; language_code: string; status: string; body: string; variable_count: number
+  }>(
+    `SELECT name, label, language_code, status, body, variable_count FROM sf_whatsapp_message_templates
+     WHERE organization_id=$1 AND connection_id=$2 AND id=$3 LIMIT 1`,
+    [session.organizationId, connectionId, templateId],
+  )
+  const template = templateResult.rows[0]
+  if (!template) throw new Error("Modelo não encontrado para esta conexão.")
+  if (template.status !== "approved") throw new Error("Este modelo ainda não está marcado como aprovado na Meta.")
+  const cleanParameters = parameters.map(value => value.trim().slice(0, 1000)).slice(0, 20)
+  if (cleanParameters.length < Number(template.variable_count || 0)) {
+    throw new Error(`Preencha ${template.variable_count} variável(is) do modelo.`)
+  }
+  const rendered = renderTemplateBody(template.body, cleanParameters)
   await ensureConversation({ organizationId: session.organizationId, connectionId, contactPhone: number })
   const result = await getPostgresPool().query(
     `INSERT INTO sf_integration_outbox (organization_id, connection_id, recipient_key, channel, recipient, message, payload, idempotency_key)
      VALUES ($1,$2,$3,'whatsapp',$3,$4,$5::jsonb,$6)`,
-    [session.organizationId, connectionId, number, clean, JSON.stringify({ kind: "staff_template", whatsappReply: false }), `whatsapp:template:${crypto.randomUUID()}`],
+    [session.organizationId, connectionId, number, rendered,
+     JSON.stringify({
+       kind: "staff_template",
+       whatsappReply: false,
+       templateId,
+       templateName: template.name,
+       languageCode: template.language_code,
+       templateParameters: cleanParameters.slice(0, Number(template.variable_count || 0)),
+     }),
+     `whatsapp:template:${crypto.randomUUID()}`],
   )
   await getPostgresPool().query(
     `UPDATE sf_whatsapp_conversations SET ai_mode='human', status='open', assigned_user_id=$4,
@@ -401,6 +703,15 @@ export async function queueWhatsAppTemplate(session: { organizationId: string; u
      WHERE organization_id=$1 AND connection_id=$2 AND contact_phone=$3`,
     [session.organizationId, connectionId, number, session.userId],
   )
+  await logConversationEvent({
+    organizationId: session.organizationId,
+    connectionId,
+    contactPhone: number,
+    eventType: "template_queued",
+    actorType: "user",
+    actorUserId: session.userId,
+    metadata: { templateId, templateName: template.name, label: template.label },
+  })
   return { queued: Boolean(result.rowCount) }
 }
 
@@ -412,6 +723,14 @@ async function requestHumanHandoff(organizationId: string, connectionId: string,
      WHERE organization_id=$1 AND connection_id=$2 AND contact_phone=$3`,
     [organizationId, connectionId, recipient, reason.slice(0, 240)],
   )
+  await logConversationEvent({
+    organizationId,
+    connectionId,
+    contactPhone: recipient,
+    eventType: "handoff_requested",
+    actorType: "system",
+    metadata: { reason: reason.slice(0, 240) },
+  })
 }
 
 // Called from the existing authenticated integrations worker, never from the public webhook.
@@ -440,6 +759,18 @@ export async function processWhatsAppAutoReplies(limit = 5) {
       await ensureConversation({ organizationId: event.organization_id, connectionId: event.connection_id, contactPhone: number, inboundAt })
 
       const text = inbound.text.body
+      const automaticLabels = automaticLabelsForText(text)
+      await mergeAutomaticLabels(event.organization_id, event.connection_id, number, automaticLabels)
+      if (automaticLabels.length) {
+        await logConversationEvent({
+          organizationId: event.organization_id,
+          connectionId: event.connection_id,
+          contactPhone: number,
+          eventType: "automatic_labels",
+          actorType: "system",
+          metadata: { labels: automaticLabels },
+        })
+      }
       if (HUMAN_REQUEST_RE.test(text)) {
         const result = await queueWhatsAppReply(
           { organizationId: event.organization_id },

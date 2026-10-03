@@ -4,6 +4,7 @@ import { canAccessIntegrations } from "@/lib/integrations-db"
 import { integrationsRequestIsSameOrigin } from "@/lib/integrations-request"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
 import {
+  addWhatsAppInternalNote,
   listWhatsAppInbox,
   queueWhatsAppReply,
   queueWhatsAppTemplate,
@@ -39,6 +40,9 @@ export async function POST(request: Request) {
     recipient?: string
     message?: string
     labels?: string[]
+    note?: string
+    templateId?: string
+    templateParameters?: string[]
   } | null
   if (!body?.connectionId || !body.recipient || !body.action) return NextResponse.json({ error: "Dados inválidos." }, { status: 400 })
 
@@ -55,7 +59,11 @@ export async function POST(request: Request) {
       if (!contact) throw new Error("Conversa não encontrada.")
 
       if (action === "reply") return queueWhatsAppReply(session, connectionId, recipient, message)
-      if (action === "template") return queueWhatsAppTemplate(session, connectionId, recipient, message)
+      if (action === "template") {
+        if (!body.templateId) throw new Error("Selecione um modelo aprovado.")
+        return queueWhatsAppTemplate(session, connectionId, recipient, body.templateId, body.templateParameters || [])
+      }
+      if (action === "note") return addWhatsAppInternalNote(session, connectionId, recipient, body.note || "")
       if (action === "suggest") {
         const latest = inbox.incoming.filter(item => item.connectionId === connectionId && item.from === recipient).sort((a, b) => b.at.localeCompare(a.at))[0]
         if (!latest) throw new Error("Não há mensagem recebida para responder.")
