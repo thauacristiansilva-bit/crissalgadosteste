@@ -8,6 +8,7 @@ import {
   Copy,
   Download,
   ImagePlus,
+  Instagram,
   MessageCircle,
   Palette,
   Plus,
@@ -818,7 +819,7 @@ export function MarketingPublicationsPanel({ settings }: { settings: StoreSettin
                 <article key={item.id} className="rounded-xl border border-gray-200 p-3">
                   <div className="flex items-start gap-3">
                     <div className="rounded-lg bg-gray-100 p-2 text-gray-600">
-                      {item.channel === "whatsapp_status" ? <MessageCircle className="h-4 w-4" /> : <ImagePlus className="h-4 w-4" />}
+                      {item.channel === "whatsapp_status" ? <MessageCircle className="h-4 w-4" /> : <Instagram className="h-4 w-4" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">

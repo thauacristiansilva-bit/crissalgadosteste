@@ -1,10 +1,20 @@
-# Hotfix Etapa 4 - Build Railway
+# Hotfix — Etapa 12 / ícone Instagram
 
-Corrige o erro TypeScript em `app/admin/page.tsx` ao acessar `session.userId` em uma união que também admite sessão `legacy`.
+Corrige o erro de build em `components/admin/marketing-publications-panel.tsx` causado pelo import de `Instagram` em uma versão do `lucide-react` que não disponibiliza esse export.
 
-A checagem de aceite legal agora é executada apenas em sessões `tenant`, que possuem `userId`.
+## Aplicar
 
-- Sem migration
-- Sem dependência nova
-- Sem alteração de banco
-- Sem alteração de Google Login
+Na raiz do projeto:
+
+```powershell
+node APLICAR-HOTFIX-ETAPA-12-ICONE-INSTAGRAM.js
+npm run build
+```
+
+Depois, se passar:
+
+```powershell
+git add .
+git commit -m "Hotfix Etapa 12 - icone Instagram"
+git push origin main
+```
