@@ -1,0 +1,144 @@
+import { getPostgresPool } from "@/lib/postgres"
+import {
+  decryptMetaToken,
+  encryptMetaToken,
+  type MetaInstagramAccount,
+} from "@/lib/meta-instagram"
+
+type ConnectionRow = {
+  organization_id: string
+  page_id: string
+  page_name: string
+  instagram_user_id: string
+  instagram_username: string
+  account_type: string
+  access_token_encrypted: string
+  token_expires_at: Date | string | null
+  active: boolean
+  connected_at: Date | string
+  updated_at: Date | string
+}
+
+function iso(value: Date | string | null) {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null
+}
+
+export async function getMetaInstagramConnection(
+  organizationId: string,
+) {
+  try {
+    const result = await getPostgresPool().query<ConnectionRow>(`
+      SELECT
+        organization_id,
+        page_id,
+        page_name,
+        instagram_user_id,
+        instagram_username,
+        account_type,
+        access_token_encrypted,
+        token_expires_at,
+        active,
+        connected_at,
+        updated_at
+      FROM sf_meta_instagram_connections
+      WHERE organization_id = $1
+      LIMIT 1
+    `, [organizationId])
+
+    const row = result.rows[0]
+    if (!row) return null
+
+    return {
+      organizationId: row.organization_id,
+      pageId: row.page_id,
+      pageName: row.page_name,
+      instagramUserId: row.instagram_user_id,
+      username: row.instagram_username,
+      accountType: row.account_type,
+      accessToken: decryptMetaToken(row.access_token_encrypted),
+      tokenExpiresAt: iso(row.token_expires_at),
+      active: Boolean(row.active),
+      connectedAt: iso(row.connected_at),
+      updatedAt: iso(row.updated_at),
+    }
+  } catch (error) {
+    if ((error as { code?: string })?.code === "42P01") return null
+    throw error
+  }
+}
+
+export async function getMetaInstagramConnectionPublic(
+  organizationId: string,
+) {
+  const connection = await getMetaInstagramConnection(organizationId)
+  if (!connection) return null
+
+  return {
+    connected: connection.active,
+    pageName: connection.pageName,
+    username: connection.username,
+    accountType: connection.accountType,
+    tokenExpiresAt: connection.tokenExpiresAt,
+    connectedAt: connection.connectedAt,
+  }
+}
+
+export async function saveMetaInstagramConnection(
+  organizationId: string,
+  account: MetaInstagramAccount,
+  tokenExpiresAt: string | null,
+) {
+  await getPostgresPool().query(`
+    INSERT INTO sf_meta_instagram_connections (
+      organization_id,
+      page_id,
+      page_name,
+      instagram_user_id,
+      instagram_username,
+      account_type,
+      access_token_encrypted,
+      token_expires_at,
+      active,
+      connected_at,
+      updated_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, true, now(), now()
+    )
+    ON CONFLICT (organization_id)
+    DO UPDATE SET
+      page_id = EXCLUDED.page_id,
+      page_name = EXCLUDED.page_name,
+      instagram_user_id = EXCLUDED.instagram_user_id,
+      instagram_username = EXCLUDED.instagram_username,
+      account_type = EXCLUDED.account_type,
+      access_token_encrypted = EXCLUDED.access_token_encrypted,
+      token_expires_at = EXCLUDED.token_expires_at,
+      active = true,
+      connected_at = now(),
+      updated_at = now()
+  `, [
+    organizationId,
+    account.pageId,
+    account.pageName,
+    account.instagramUserId,
+    account.username,
+    account.accountType,
+    encryptMetaToken(account.pageAccessToken),
+    tokenExpiresAt,
+  ])
+}
+
+export async function disconnectMetaInstagram(
+  organizationId: string,
+) {
+  await getPostgresPool().query(`
+    UPDATE sf_meta_instagram_connections
+    SET
+      active = false,
+      access_token_encrypted = '',
+      updated_at = now()
+    WHERE organization_id = $1
+  `, [organizationId])
+}

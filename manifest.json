@@ -1,0 +1,14 @@
+{
+  "lib/meta-instagram.ts": "payload/lib__meta-instagram.ts.txt",
+  "lib/meta-instagram-db.ts": "payload/lib__meta-instagram-db.ts.txt",
+  "lib/marketing-auto-publisher.ts": "payload/lib__marketing-auto-publisher.ts.txt",
+  "app/api/meta/instagram/status/route.ts": "payload/app__api__meta__instagram__status__route.ts.txt",
+  "app/api/meta/instagram/connect/route.ts": "payload/app__api__meta__instagram__connect__route.ts.txt",
+  "app/api/meta/instagram/callback/route.ts": "payload/app__api__meta__instagram__callback__route.ts.txt",
+  "app/api/meta/instagram/disconnect/route.ts": "payload/app__api__meta__instagram__disconnect__route.ts.txt",
+  "app/api/cron/marketing-publications/route.ts": "payload/app__api__cron__marketing-publications__route.ts.txt",
+  "components/admin/meta-instagram-connection-card.tsx": "payload/components__admin__meta-instagram-connection-card.tsx.txt",
+  "scripts/process-marketing-publications.cjs": "payload/scripts__process-marketing-publications.cjs.txt",
+  "database/migrations/ETAPA_12C_meta_instagram_auto_publish.sql": "payload/database__migrations__ETAPA_12C_meta_instagram_auto_publish.sql.txt",
+  "APLICAR-MIGRATION-ETAPA-12C.cjs": "payload/APLICAR-MIGRATION-ETAPA-12C.cjs.txt"
+}
