@@ -1,0 +1,37 @@
+ETAPA 8 — CENTRAL WHATSAPP: IA + ATENDENTE HUMANO
+
+O QUE ESTA ETAPA ADICIONA
+- Caixa de entrada em três colunas, semelhante a um painel de WhatsApp.
+- Busca e filtros: abertas, não lidas, humano, IA, aguardando e finalizadas.
+- Pausa da IA por conversa. As outras conversas continuam automáticas.
+- Quando o cliente pede atendente/humano, a conversa entra em handoff e a IA é pausada só ali.
+- Botão "Assumir atendimento" registra o usuário responsável.
+- Botão "Reativar IA" devolve aquela conversa ao atendimento automático.
+- Finalização e reabertura de atendimento, com registro de quem finalizou.
+- Etiquetas: Pedido, Reclamação, Financeiro, Entrega, VIP e Suporte.
+- Exibição do pedido mais recente encontrado pelo telefone do WhatsApp.
+- Não lidas por conversa.
+- Janela de atendimento de 24 horas calculada a partir da última mensagem do cliente.
+- Fora das 24 horas, envio por modelo aprovado já configurado na conexão Meta.
+- Mensagens de imagem, áudio, vídeo, documento, figurinha e localização aparecem como indicadores no histórico.
+
+IMPORTANTE SOBRE O WHATSAPP
+O painel mostra mensagens recebidas pelo webhook da Meta e envios feitos pelo SaborFlow. Ele não copia automaticamente todo o histórico antigo de um WhatsApp comum. A conexão simplificada para cada cliente deve ser feita pelo Embedded Signup oficial da Meta; isso depende da aprovação/configuração do aplicativo Meta da plataforma.
+
+INSTALAÇÃO
+1. Extraia este ZIP na raiz atual do SaborFlow e aceite substituir os arquivos.
+2. Rode: npm run build
+3. Se passar: git add . && git commit -m "Adiciona central WhatsApp com IA e atendimento humano" && git push
+4. No Railway, rode: node scripts/migrate-multiempresa.mjs
+5. A migration nova é: 046_whatsapp_conversation_management.sql
+
+TESTE RECOMENDADO
+1. Envie uma mensagem real para o número conectado.
+2. Confira se a conversa aparece no painel.
+3. Envie "quero falar com um atendente".
+4. Confirme que só essa conversa passa para atendimento humano.
+5. Clique em Assumir atendimento e responda.
+6. Finalize a conversa.
+7. Clique em Reativar IA.
+8. Teste etiquetas e associação com pedido.
+9. Teste a indicação da janela de 24h.
