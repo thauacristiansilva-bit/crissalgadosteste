@@ -16,6 +16,7 @@ import {
 import type { SuperadminSnapshot } from "@/lib/superadmin-db"
 import type { PlatformFinanceSnapshot } from "@/lib/platform-finance"
 import { HelpCenterAdminPanel } from "@/components/superadmin/help-center-admin-panel"
+import { PlatformOperationsPanel } from "@/components/superadmin/platform-operations-panel"
 
 function money(cents: number | null, currency = "BRL") {
   if (cents === null) return "—"
@@ -39,6 +40,7 @@ function currentDate() {
 
 const tabs = [
   "Visão geral",
+  "Operação SaaS",
   "Cadastros",
   "Empresas",
   "Contas",
@@ -57,7 +59,7 @@ type Tab = (typeof tabs)[number]
 type ActionFn = (payload: Record<string, unknown>) => Promise<void>
 
 const navigationGroups: Array<{ label: string; items: Tab[] }> = [
-  { label: "Geral", items: ["Visão geral"] },
+  { label: "Geral", items: ["Visão geral", "Operação SaaS"] },
   { label: "Clientes", items: ["Cadastros", "Empresas", "Contas"] },
   { label: "Comercial", items: ["Planos", "Pagamentos", "Cupons", "Demos/Trials"] },
   { label: "Financeiro", items: ["DRE SaborFlow"] },
@@ -67,6 +69,7 @@ const navigationGroups: Array<{ label: string; items: Tab[] }> = [
 
 const tabDescriptions: Record<Tab, string> = {
   "Visão geral": "Resumo da saúde comercial e operacional da plataforma.",
+  "Operação SaaS": "Contratos, WhatsApp, chamados, campanhas e filas técnicas em um só lugar.",
   "Cadastros": "Validação e acompanhamento de novos cadastros comerciais.",
   "Empresas": "Empresas clientes e situação das lojas cadastradas.",
   "Contas": "Contas contratantes, planos, bloqueios e limites especiais.",
@@ -464,11 +467,13 @@ export function SuperadminDashboard({ access, initialData }: { access: { email: 
           </div>
         )}
 
+        {tab === "Operação SaaS" && <PlatformOperationsPanel />}
+
         {tab === "Cadastros" && <div className="space-y-3">{data.registrations.length === 0 && <p className="rounded-xl border border-white/10 bg-white/[0.04] p-5 text-sm text-stone-400">Nenhum cadastro comercial na fila.</p>}{data.registrations.map((registration) => <RegistrationReviewCard key={registration.id} registration={registration} busy={busy} onApply={action} />)}</div>}
 
         {tab === "Contas" && <div className="space-y-3">{data.accounts.map((account) => <article key={account.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-black">{account.ownerEmail || "Sem e-mail"}</p><p className="text-xs text-stone-500">{account.id}</p><p className="mt-2 text-sm text-stone-300">{account.planName || "Sem plano"} · assinatura {account.subscriptionStatus || "—"} · {account.organizations} loja(s)</p></div><div className="flex flex-wrap gap-2"><button disabled={busy || account.status === "active"} onClick={() => action({ action: "set-account-status", accountId: account.id, status: "active" })} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-300 disabled:opacity-40">Desbloquear</button><button disabled={busy || account.status === "suspended"} onClick={() => action({ action: "set-account-status", accountId: account.id, status: "suspended" })} className="rounded-lg bg-red-500/15 px-3 py-2 text-xs font-black text-red-300 disabled:opacity-40">Suspender</button>{account.subscriptionId && plans.length > 0 && <select disabled={busy} value={account.planId || ""} onChange={(event) => action({ action: "change-plan", subscriptionId: account.subscriptionId, planId: event.target.value })} className="rounded-lg border border-white/10 bg-stone-900 px-3 py-2 text-xs font-bold">{plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select>}</div></div><div className="mt-4 flex flex-wrap gap-2 text-xs text-stone-400"><span>Status conta: {account.status}</span><span>•</span><span>Provider: {account.provider || "—"}</span><span>•</span><span>Vence: {date(account.currentPeriodEnd)}</span></div><EntitlementOverride accountId={account.id} busy={busy} onApply={action} /></article>)}</div>}
 
-        {tab === "Planos" && <div className="grid gap-3 lg:grid-cols-3">{data.plans.map((plan) => <article key={plan.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><p className="text-xs font-black uppercase tracking-wider text-orange-400">{plan.code}</p><h2 className="mt-2 text-xl font-black">{plan.name}</h2><p className="mt-3 text-sm text-stone-300">Mensal: {money(plan.monthlyPriceCents)}<br />Semestral: {money(plan.semiannualPriceCents)}<br />Anual: {money(plan.annualPriceCents)}</p><div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-black/20 p-3 text-xs"><div><span className="text-stone-500">Ativas</span><strong className="block text-lg text-white">{plan.activeSubscriptions}</strong></div><div><span className="text-stone-500">MRR</span><strong className="block text-lg text-white">{money(plan.mrrCents)}</strong></div></div><p className="mt-3 text-xs text-stone-500">{plan.internal ? "interno" : "comercial"} · checkout {plan.checkoutEnabled ? "ativo" : "inativo"} · plano {plan.active ? "ativo" : "inativo"}</p></article>)}</div>}
+        {tab === "Planos" && <div className="grid gap-3 lg:grid-cols-3">{data.plans.map((plan) => <article key={plan.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"><p className="text-xs font-black uppercase tracking-wider text-orange-400">{plan.code}</p><h2 className="mt-2 text-xl font-black">{plan.name}</h2><p className="mt-3 text-sm text-stone-300">Mensal: {money(plan.monthlyPriceCents)}<br />Anual: {money(plan.annualPriceCents)}</p><div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-black/20 p-3 text-xs"><div><span className="text-stone-500">Ativas</span><strong className="block text-lg text-white">{plan.activeSubscriptions}</strong></div><div><span className="text-stone-500">MRR</span><strong className="block text-lg text-white">{money(plan.mrrCents)}</strong></div></div><p className="mt-3 text-xs text-stone-500">{plan.internal ? "interno" : "comercial"} · checkout {plan.checkoutEnabled ? "ativo" : "inativo"} · plano {plan.active ? "ativo" : "inativo"}</p></article>)}</div>}
 
         {tab === "DRE SaborFlow" && <FinancePanel accessRole={access.role} />}
 
