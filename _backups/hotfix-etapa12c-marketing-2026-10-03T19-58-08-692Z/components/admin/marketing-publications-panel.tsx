@@ -16,7 +16,6 @@ import {
   Sparkles,
 } from "lucide-react"
 import type { StoreSettings } from "@/lib/types"
-import { MetaInstagramConnectionCard } from "@/components/admin/meta-instagram-connection-card"
 
 type Channel = "instagram_feed" | "instagram_story" | "whatsapp_status"
 type Recurrence = "none" | "daily" | "weekly"
@@ -565,8 +564,6 @@ export function MarketingPublicationsPanel({ settings }: { settings: StoreSettin
   }
 
   return (
-    <div className="space-y-5">
-      <MetaInstagramConnectionCard />
     <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
@@ -855,6 +852,5 @@ export function MarketingPublicationsPanel({ settings }: { settings: StoreSettin
         </div>
       </div>
     </section>
-    </div>
   )
 }

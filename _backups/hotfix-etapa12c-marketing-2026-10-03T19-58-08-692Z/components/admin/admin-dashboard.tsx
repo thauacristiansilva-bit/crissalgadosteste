@@ -128,7 +128,7 @@ const navItems: NavItem[] = [
   { key: "categories", label: "Categorias", icon: FolderTree, group: "catalogo" },
   { key: "inventory", label: "Estoque", icon: PackageSearch, group: "catalogo" },
   { key: "customers", label: "Clientes", icon: Users, group: "clientes" },
-  { key: "marketing", label: "Marketing e divulgações", icon: Megaphone, group: "clientes" },
+  { key: "marketing", label: "Cupons e campanhas", icon: Megaphone, group: "clientes" },
   { key: "reviews", label: "Avaliações", icon: Star, group: "clientes" },
   { key: "links", label: "Link da loja", icon: Link2, group: "clientes" },
   { key: "communication", label: "Central de comunicação", icon: Bell, group: "atendimento" },
