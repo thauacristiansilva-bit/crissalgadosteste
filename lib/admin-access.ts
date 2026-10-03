@@ -19,6 +19,7 @@ export type AdminSection =
   | "marketing"
   | "reviews"
   | "links"
+  | "communication"
   | "whatsapp"
   | "chatbot"
   | "connections"
@@ -43,6 +44,7 @@ const sectionPermission: Record<AdminSection, OperationalPermission> = {
   marketing: "marketing.manage",
   reviews: "marketing.view",
   links: "settings.view",
+  communication: "customers.view",
   whatsapp: "integrations.manage",
   chatbot: "marketing.manage",
   connections: "integrations.manage",

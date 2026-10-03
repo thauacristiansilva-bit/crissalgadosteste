@@ -2,6 +2,7 @@ import type { PoolClient } from "pg"
 import { getPostgresPool } from "@/lib/postgres"
 import { getTenantSettings } from "@/lib/organization-db"
 import { generateGeminiText } from "@/lib/ai/gemini"
+import { createOrganizationNotification } from "@/lib/communication-center"
 import { whatsappOrderText } from "@/lib/order-summary"
 import type { Order } from "@/lib/types"
 import { getBillingSnapshotForOrganization } from "@/lib/billing-db"
@@ -731,6 +732,16 @@ async function requestHumanHandoff(organizationId: string, connectionId: string,
     actorType: "system",
     metadata: { reason: reason.slice(0, 240) },
   })
+  await createOrganizationNotification({
+    organizationId,
+    type: "whatsapp_handoff",
+    title: "Cliente pediu atendimento humano",
+    body: `${recipient} · ${reason.slice(0, 240)}`,
+    severity: "warning",
+    linkSection: "whatsapp",
+    sourceEntityType: "whatsapp_conversation",
+    sourceEntityId: recipient,
+  }).catch(() => undefined)
 }
 
 // Called from the existing authenticated integrations worker, never from the public webhook.

@@ -77,6 +77,7 @@ import { AiStoreSetupPanel } from "@/components/admin/ai-store-setup-panel"
 import { SecurityPanel } from "@/components/admin/security-panel"
 import { HelpCenterPanel } from "@/components/admin/help-center-panel"
 import { WhatsAppCenterPanel } from "@/components/admin/whatsapp-center-panel"
+import { CommunicationCenterPanel } from "@/components/admin/communication-center-panel"
 import { getAllowedAdminSections, type AdminSection } from "@/lib/admin-access"
 import type { OrganizationRole } from "@/lib/tenant-context"
 import { permissionListHas, type OperationalPermission } from "@/lib/operational-permissions"
@@ -130,6 +131,7 @@ const navItems: NavItem[] = [
   { key: "marketing", label: "Cupons e campanhas", icon: Megaphone, group: "clientes" },
   { key: "reviews", label: "Avaliações", icon: Star, group: "clientes" },
   { key: "links", label: "Link da loja", icon: Link2, group: "clientes" },
+  { key: "communication", label: "Central de comunicação", icon: Bell, group: "atendimento" },
   { key: "whatsapp", label: "WhatsApp", icon: MessageCircle, group: "atendimento" },
   { key: "team", label: "Equipe e acessos", icon: Users, group: "gestao" },
   { key: "settings", label: "Configurações da loja", icon: Settings, group: "gestao" },
@@ -664,6 +666,7 @@ export function AdminDashboard({ initialData, adminEmail, adminRole, operational
           {section === "marketing" && <MarketingPanel products={products} coupons={coupons} customers={customers} settings={settings} onSettingsChanged={setSettings} />}
           {section === "reviews" && <ReviewsPanel feedbacks={feedbacks} settings={settings} />}
           {section === "links" && <LinksPanel settings={settings} organizationSlug={organizationSlug} demoMode={Boolean(demoEnvironment && !demoEnvironment.basicMode)} />}
+          {section === "communication" && <CommunicationCenterPanel />}
           {section === "whatsapp" && <WhatsAppCenterPanel />}
           {section === "team" && <TeamPanel staffMembers={staffMembers} canManageTeam={permissionListHas(operationalPermissions, "team.manage")} canManageAccess={permissionListHas(operationalPermissions, "access.manage")} />}
           {section === "settings" && demoEnvironment?.basicMode && <BasicTrialSettings settings={settings} onSettingsChanged={setSettings} />}
