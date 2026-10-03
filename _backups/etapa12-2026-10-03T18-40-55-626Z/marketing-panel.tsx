@@ -28,7 +28,6 @@ import type {
   ProductPromotion,
   StoreSettings,
 } from "@/lib/types"
-import { MarketingPublicationsPanel } from "@/components/admin/marketing-publications-panel"
 
 type PromotionProduct = {
   id: number
@@ -715,7 +714,6 @@ export function MarketingPanel({
 
   return (
     <div className="space-y-5">
-      <MarketingPublicationsPanel settings={settings} />
       <section className="rounded-2xl border border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 p-5 shadow-sm">
         <div className="flex items-start gap-3">
           <div className="rounded-xl bg-orange-600 p-2 text-white">
