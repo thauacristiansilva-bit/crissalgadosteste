@@ -143,8 +143,8 @@ export function OrdersPanel({
   }
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+    <section data-tutorial="orders-root" className="space-y-4">
+      <div data-tutorial="orders-filters" className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Pedidos</h2>
           <p className="text-sm text-gray-500">Acompanhe e atualize o fluxo dos pedidos em tempo real.</p>
@@ -181,12 +181,12 @@ export function OrdersPanel({
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      <div className={`rounded-xl border px-4 py-3 text-sm ${settings.orderAcceptanceMode === "manual" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
+      <div data-tutorial="orders-acceptance" className={`rounded-xl border px-4 py-3 text-sm ${settings.orderAcceptanceMode === "manual" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
         <strong>{settings.orderAcceptanceMode === "manual" ? "Aceite manual ativo." : "Aceite automático ativo."}</strong>{" "}
         {settings.orderAcceptanceMode === "manual" ? "Novos pedidos aguardam confirmação da equipe antes do preparo." : "Novos pedidos online já entram como aceitos."}
       </div>
 
-      <div className="space-y-3">
+      <div data-tutorial="orders-list" className="space-y-3">
         {filteredOrders.map((order) => {
           const TypeIcon = order.type === "delivery" ? Bike : ShoppingBag
           const actionableStatus: OrderStatus | undefined =
@@ -264,7 +264,7 @@ export function OrdersPanel({
                     <div className="mt-3 space-y-2 border-t border-gray-200 pt-3">
                       {order.items.map((item, index) => (
                         <div key={`${order.id}-${item.productId}-${index}`} className="flex items-start justify-between gap-3 text-sm">
-                          <div className="text-gray-600"><span><strong className="text-gray-900">{item.quantity}x</strong> {item.name}</span>{item.modifiers?.length ? <div className="mt-1 space-y-0.5 pl-4">{item.modifiers.map((modifier, modifierIndex) => <p key={`${modifier.groupId}-${modifier.optionId}-${modifierIndex}`} className="text-xs text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${formatCurrency(modifier.priceDelta)}` : ""}</p>)}</div> : null}</div>
+                          <div className="text-gray-600"><span><strong className="text-gray-900">{item.quantity}x</strong> {item.name}</span>{item.modifiers?.length ? <div className="mt-1 space-y-0.5 pl-4">{item.modifiers.map((modifier) => <p key={`${modifier.groupId}-${modifier.optionId}`} className="text-xs text-gray-500">+ {modifier.optionName}{modifier.included ? " · incluído" : modifier.priceDelta > 0 ? ` · + ${formatCurrency(modifier.priceDelta)}` : ""}</p>)}</div> : null}</div>
                           <span className="font-semibold text-gray-900">{formatCurrency(item.subtotal)}</span>
                         </div>
                       ))}
@@ -336,14 +336,14 @@ export function OrdersPanel({
                     <Download className="h-4 w-4" /> Baixar ticket PDF
                   </a>
 
-                  {settings.fiscalEnabled && settings.fiscalProviderUrl?.startsWith("https://") && (
+                  {settings.fiscalEnabled && settings.fiscalProviderUrl && (
                     <a
                       href={settings.fiscalProviderUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700"
                     >
-                      <FileText className="h-4 w-4" /> Abrir emissor de notas
+                      <FileText className="h-4 w-4" /> Emitir nota fiscal
                     </a>
                   )}
 

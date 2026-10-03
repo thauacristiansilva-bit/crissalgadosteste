@@ -1,13 +1,10 @@
 "use client"
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react"
-import { CircleDollarSign, PackagePlus, Pencil, Plus, Power, Save, Trash2, Upload, X } from "lucide-react"
+import { ChangeEvent, FormEvent, useMemo, useState } from "react"
+import { CircleDollarSign, Image as ImageIcon, PackagePlus, Pencil, Power, Save, Trash2, Upload, X } from "lucide-react"
 import type { Category, Product } from "@/lib/types"
 import { ProductCompositionEditor } from "@/components/admin/product-composition-editor"
 import { HelpTip } from "@/components/admin/help-tip"
-import { categoryIncludes, categoryShortName, parentCategoryName, sortedCategories } from "@/lib/category-hierarchy"
-import { isPricedFlavorGroup, PRICED_FLAVOR_DESCRIPTION } from "@/lib/product-composition"
-import type { ProductComposition, ProductModifierGroup } from "@/lib/types"
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 
@@ -24,106 +21,32 @@ type ProductDraft = {
 }
 
 const emptyDraft: ProductDraft = { name: "", description: "", category: "Salgados", price: "", image: "", featured: false, trackStock: false, stock: "0", minStock: "0" }
-type FlavorDraft = { key: string; name: string; price: string; active?: boolean }
-const emptyFlavors = (): FlavorDraft[] => [{ key: crypto.randomUUID(), name: "", price: "" }, { key: crypto.randomUUID(), name: "", price: "" }]
-type QuickChoice = { key: string; name: string; extra: string }
-const emptyQuickChoices = (): QuickChoice[] => [{ key: crypto.randomUUID(), name: "", extra: "" }, { key: crypto.randomUUID(), name: "", extra: "" }]
 
-export function ProductsPanel({ products, categories, onProductsChanged, onCategoriesChanged }: { products: Product[]; categories: Category[]; onProductsChanged: (products: Product[]) => void; onCategoriesChanged: (categories: Category[]) => void }) {
+export function ProductsPanel({ products, categories, onProductsChanged }: { products: Product[]; categories: Category[]; onProductsChanged: (products: Product[]) => void }) {
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft)
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [pendingFlavorProductId, setPendingFlavorProductId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState("")
   const [compositionProduct, setCompositionProduct] = useState<Product | null>(null)
-  const [newCategory, setNewCategory] = useState("")
-  const [showCategoryForm, setShowCategoryForm] = useState(false)
-  const [categoryParent, setCategoryParent] = useState("")
-  const [priceByFlavor, setPriceByFlavor] = useState(false)
-  const [flavors, setFlavors] = useState<FlavorDraft[]>(emptyFlavors)
-  const [quickGroup, setQuickGroup] = useState(false)
-  const [quickGroupName, setQuickGroupName] = useState("Escolha os sabores")
-  const [quickChoices, setQuickChoices] = useState<QuickChoice[]>(emptyQuickChoices)
-  const [quickRequired, setQuickRequired] = useState(true)
-  const [quickMode, setQuickMode] = useState<"unique" | "bundle">("unique")
-  const [quickMin, setQuickMin] = useState("1")
-  const [quickMax, setQuickMax] = useState("1")
-  const activeCategories = useMemo(() => sortedCategories(categories.filter((category) => category.active)), [categories])
-  const [selectedCategory, setSelectedCategory] = useState("")
-  const categoryNames = useMemo(() => [...new Set([...activeCategories.map((category) => category.name), ...products.map((product) => product.category)])].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" })), [activeCategories, products])
-  const currentCategory = categoryNames.includes(selectedCategory) ? selectedCategory : categoryNames[0] || ""
-  const visibleProducts = useMemo(() => products.filter((product) => parentCategoryName(currentCategory) ? product.category === currentCategory : categoryIncludes(currentCategory, product.category)).sort((a, b) => a.category.localeCompare(b.category, "pt-BR", { numeric: true, sensitivity: "base" }) || a.name.localeCompare(b.name, "pt-BR", { numeric: true, sensitivity: "base" }) || a.id - b.id), [products, currentCategory])
-  const startingPrice = flavors.map((flavor) => Number(flavor.price.replace(",", "."))).filter((price) => Number.isFinite(price) && price > 0).sort((a, b) => a - b)[0]
-
-  useEffect(() => {
-    if (currentCategory && !selectedCategory && !editingId) {
-      setDraft((current) => current.name ? current : { ...current, category: currentCategory })
-    }
-  }, [currentCategory, selectedCategory, editingId])
-
-  useEffect(() => {
-    if (!compositionProduct) return
-    document.getElementById("complementos-do-produto")?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [compositionProduct])
-
-  async function addCategory(event: FormEvent) {
-    event.preventDefault()
-    if (!newCategory.trim()) return
-    setBusy(true)
-    setError("")
-    try {
-      const response = await fetch("/api/categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCategory.trim(), parent: categoryParent }),
-      })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || "Não foi possível criar a categoria.")
-      onCategoriesChanged([...categories, data.category])
-      setDraft((current) => ({ ...current, category: data.category.name }))
-      setSelectedCategory(data.category.name)
-      setNewCategory("")
-      setCategoryParent("")
-      setShowCategoryForm(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao criar categoria.")
-    } finally {
-      setBusy(false)
-    }
-  }
+  const activeCategories = useMemo(() => categories.filter((category) => category.active), [categories])
 
   function beginEdit(product: Product) {
     setEditingId(product.id)
-    setPendingFlavorProductId(null)
     setDraft({ name: product.name, description: product.description, category: product.category, price: String(product.price).replace(".", ","), image: product.image || "", featured: product.featured, trackStock: product.trackStock, stock: String(product.stock), minStock: String(product.minStock) })
-    const group = product.modifierGroups?.find(isPricedFlavorGroup)
-    setPriceByFlavor(Boolean(group))
-    setFlavors(group ? group.options.map((option) => ({ key: String(option.id), name: option.name, price: String(Number((product.price + option.priceDelta).toFixed(2))).replace(".", ","), active: option.active })) : emptyFlavors())
     setError("")
   }
 
-  function clearForm(category = currentCategory) {
+  function clearForm() {
     setEditingId(null)
-    setPendingFlavorProductId(null)
-    setDraft({ ...emptyDraft, category: category || activeCategories[0]?.name || "Salgados" })
-    setPriceByFlavor(false)
-    setFlavors(emptyFlavors())
-    setQuickGroup(false)
-    setQuickGroupName("Escolha os sabores")
-    setQuickChoices(emptyQuickChoices())
-    setQuickRequired(true)
-    setQuickMode("unique")
-    setQuickMin("1")
-    setQuickMax("1")
+    setDraft({ ...emptyDraft, category: activeCategories[0]?.name || "Salgados" })
     setError("")
   }
 
   async function refreshProducts() {
     const response = await fetch("/api/dashboard", { cache: "no-store" })
     const data = await response.json()
-    if (!response.ok) throw new Error(data.error || "Não foi possível atualizar os produtos.")
-    onProductsChanged(data.products)
+    if (response.ok) onProductsChanged(data.products)
   }
 
   async function uploadImage(event: ChangeEvent<HTMLInputElement>) {
@@ -146,120 +69,22 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
     }
   }
 
-  async function saveFlavorComposition(productId: number, basePrice: number, entries: { key: string; name: string; price: number; active?: boolean }[]) {
-    const loaded = await fetch(`/api/products/${productId}/composition`, { cache: "no-store" })
-    const loadedData = await loaded.json()
-    if (!loaded.ok) throw new Error(loadedData.error || "Não foi possível carregar os sabores.")
-    const composition = loadedData.composition as ProductComposition
-    const oldFlavors = composition.modifierGroups.find(isPricedFlavorGroup)?.options || []
-    const groups = composition.modifierGroups.filter((group) => !isPricedFlavorGroup(group)).map((group: ProductModifierGroup) =>
-      (group.usedByProducts || 0) > 1 ? { existingGroupId: group.id } : {
-        name: group.name, description: group.description, required: group.required,
-        minSelect: group.minSelect, maxSelect: group.maxSelect, selectionMode: group.selectionMode || "unique",
-        includedQuantity: group.includedQuantity, active: group.active, sortOrder: group.sortOrder,
-        options: group.options.map((option) => ({
-          name: option.name, description: option.description, priceDelta: option.priceDelta,
-          includedEligible: option.includedEligible, active: option.active, sortOrder: option.sortOrder,
-          ingredients: (option.ingredients || []).map((row) => ({ ingredientId: row.ingredientId, quantity: row.quantity })),
-        })),
-      },
-    )
-    const flavorGroup = {
-      name: "Escolha o sabor", description: PRICED_FLAVOR_DESCRIPTION, required: true,
-      minSelect: 1, maxSelect: 1, selectionMode: "unique" as const, includedQuantity: 0,
-      active: true, sortOrder: groups.length,
-      options: entries.map((entry, index) => {
-        const previous = oldFlavors.find((option) => String(option.id) === entry.key)
-        return { name: entry.name, description: previous?.description || "", priceDelta: Number((entry.price - basePrice).toFixed(2)), includedEligible: false, active: entry.active !== false, sortOrder: index,
-          ingredients: (previous?.ingredients || []).map((row) => ({ ingredientId: row.ingredientId, quantity: row.quantity })) }
-      }),
-    }
-    const response = await fetch(`/api/products/${productId}/composition`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ price: basePrice, recipe: composition.recipe.map((row) => ({ ingredientId: row.ingredientId, quantity: row.quantity })), modifierGroups: [...groups, flavorGroup] }),
-    })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || "Não foi possível salvar os sabores.")
-  }
-
-  async function saveQuickComposition(productId: number, choices: Array<{ name: string; extra: number }>) {
-    const response = await fetch(`/api/products/${productId}/composition`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipe: [],
-        modifierGroups: [{
-          name: quickGroupName.trim(), description: "", required: quickRequired,
-          minSelect: Number(quickMin), maxSelect: Number(quickMax),
-          selectionMode: quickMode, includedQuantity: quickMode === "bundle" ? Number(quickMax) : 0,
-          active: true, sortOrder: 0,
-          options: choices.map((choice, index) => ({
-            name: choice.name, description: "", priceDelta: choice.extra,
-            includedEligible: false, active: true, sortOrder: index, ingredients: [],
-          })),
-        }],
-      }),
-    })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || "Produto criado, mas as escolhas não foram salvas. Edite os sabores antes de ativar o produto.")
-  }
-
   async function submit(event: FormEvent) {
     event.preventDefault()
     setBusy(true)
     setError("")
-    let createdProductForRecovery: Product | null = null
     try {
-      const priced = priceByFlavor ? flavors.map((flavor) => ({ key: flavor.key, name: flavor.name.trim(), price: Number(flavor.price.replace(",", ".")), active: flavor.active })) : []
-      if (priceByFlavor && (priced.length === 0 || !priced.some((flavor) => flavor.active !== false) || priced.some((flavor, index) => !flavor.name || !/^\d+(?:[,.]\d{1,2})?$/.test(flavors[index].price.trim()) || !Number.isFinite(flavor.price) || flavor.price <= 0) || new Set(priced.map((flavor) => flavor.name.toLocaleLowerCase("pt-BR"))).size !== priced.length)) {
-        throw new Error("Preencha cada sabor com um nome único e um preço em reais (ex.: 12,50).")
-      }
-      const price = priceByFlavor ? Number(Math.min(...priced.map((flavor) => flavor.price)).toFixed(2)) : Number(draft.price.replace(",", "."))
-      if (!Number.isFinite(price) || price <= 0) throw new Error("Informe um preço válido.")
-      const choices = quickGroup && !editingId && !priceByFlavor ? quickChoices.map((choice) => ({ name: choice.name.trim(), extra: Number(choice.extra.trim().replace(",", ".") || 0) })) : []
-      if (quickGroup && !editingId && !priceByFlavor) {
-        const minimum = Number(quickMin), maximum = Number(quickMax)
-        if (!quickGroupName.trim() || choices.length < 1 || choices.some((choice) => !choice.name || !Number.isFinite(choice.extra) || choice.extra < 0) ||
-            new Set(choices.map((choice) => choice.name.toLocaleLowerCase("pt-BR"))).size !== choices.length ||
-            !Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < (quickRequired ? 1 : 0) || maximum < 1 || minimum > maximum ||
-            (quickMode === "unique" && maximum > choices.length) || (quickMode === "bundle" && choices.some((choice) => choice.extra !== 0))) {
-          throw new Error("Confira as opções, os preços e o mínimo/máximo. Em combos, os sabores não têm preço adicional.")
-        }
-      }
+      const price = Number(draft.price.replace(",", "."))
       const response = await fetch(editingId ? `/api/products/${editingId}` : "/api/products", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: draft.name, description: draft.description, category: categories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name, ...(!priceByFlavor || !editingId ? { price } : {}), ...(!editingId && (priceByFlavor || choices.length) ? { active: false } : {}), image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
+        body: JSON.stringify({ name: draft.name, description: draft.description, category: draft.category, price, image: draft.image, featured: draft.featured, trackStock: draft.trackStock, stock: Number(draft.stock || 0), minStock: Number(draft.minStock || 0) }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível salvar o produto.")
-      if (!editingId && choices.length) createdProductForRecovery = data.product as Product
-      if (priceByFlavor) {
-        const productId = Number(data.product.id)
-        if (!editingId) { setEditingId(productId); setPendingFlavorProductId(productId) }
-        await saveFlavorComposition(productId, price, priced)
-        if (!editingId || pendingFlavorProductId === productId) {
-          const activated = await fetch(`/api/products/${productId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true }) })
-          if (!activated.ok) throw new Error("Sabores salvos. Clique em salvar novamente para ativar o produto.")
-          setPendingFlavorProductId(null)
-        }
-      }
-      if (choices.length && !editingId) {
-        const productId = Number(data.product.id)
-        await saveQuickComposition(productId, choices)
-        const activated = await fetch(`/api/products/${productId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true }) })
-        if (!activated.ok) throw new Error("As escolhas foram salvas. Ative o produto na lista para publicá-lo.")
-      }
       await refreshProducts()
-      const savedCategory = data.product?.category || draft.category
-      setSelectedCategory(savedCategory)
-      clearForm(savedCategory)
-      setCompositionProduct(priceByFlavor || choices.length ? null : data.product || products.find((product) => product.id === editingId) || null)
+      clearForm()
     } catch (err) {
-      if (createdProductForRecovery) {
-        setCompositionProduct(createdProductForRecovery)
-        await refreshProducts().catch(() => undefined)
-      }
       setError(err instanceof Error ? err.message : "Erro ao salvar produto.")
     } finally {
       setBusy(false)
@@ -287,63 +112,43 @@ export function ProductsPanel({ products, categories, onProductsChanged, onCateg
 
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,.6fr)]">
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="border-b border-gray-100 px-5 py-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-900">Produtos por categoria</h2><p className="text-sm text-gray-500">Escolha uma categoria para ver e editar seus produtos.</p></div><span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{visibleProducts.length} produtos</span></div><label className="mt-4 block text-xs font-bold text-gray-600">Categoria<select aria-label="Filtrar produtos por categoria" value={currentCategory} onChange={(event) => { const name = event.target.value; setSelectedCategory(name); setCompositionProduct(null); clearForm(name) }} className="mt-1 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 sm:max-w-sm">{categoryNames.map((name) => <option key={name} value={name}>{parentCategoryName(name) ? `↳ ${categoryShortName(name)} (${parentCategoryName(name)})` : name} ({products.filter((product) => parentCategoryName(name) ? product.category === name : categoryIncludes(name, product.category)).length})</option>)}</select></label></div>
+      <div data-tutorial="products-list" className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4"><div><h2 className="text-lg font-bold text-gray-900">Produtos</h2><p className="text-sm text-gray-500">Itens exibidos no cardápio público.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{products.filter((product) => product.active).length} ativos</span></div>
         <div className="divide-y divide-gray-100">
-          {visibleProducts.map((product) => {
+          {products.map((product) => {
             const outOfStock = product.trackStock && product.stock <= 0
             return <div key={product.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <div className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-xl ${product.active ? "bg-amber-50" : "bg-gray-100 grayscale"}`}>{product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" /> : "🥟"}</div>
-              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-gray-900">{product.name}</h3><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{product.category}</span>{product.featured && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">Destaque</span>}{!product.active && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">Inativo</span>}{outOfStock && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Sem estoque</span>}{Boolean(product.modifierGroups?.length) && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Com sabores ou extras</span>}{product.ingredientStockAvailable === false && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">Ingrediente indisponível</span>}</div><p className="mt-0.5 text-sm text-gray-500">{product.description || "Sem descrição"}</p>{product.trackStock && <p className="mt-1 text-xs font-medium text-gray-400">Estoque: {product.stock}</p>}</div>
-              <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end"><strong className="min-w-24 text-right text-base text-gray-950">{formatCurrency(product.price)}</strong><button onClick={() => setCompositionProduct(product)} type="button" className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100" aria-label={`Sabores e extras de ${product.name}`}><PackagePlus className="h-4 w-4" /> Sabores e extras</button><button onClick={() => beginEdit(product)} type="button" className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700" aria-label={`Editar ${product.name}`}><Pencil className="h-4 w-4" /></button><button onClick={() => product.active ? remove(product) : changeActive(product, true)} disabled={busy} type="button" className={`rounded-lg p-2 ${product.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`} aria-label={product.active ? `Desativar ${product.name}` : `Ativar ${product.name}`}>{product.active ? <Trash2 className="h-4 w-4" /> : <Power className="h-4 w-4" />}</button></div>
+              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-gray-900">{product.name}</h3><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{product.category}</span>{product.featured && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">Destaque</span>}{!product.active && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">Inativo</span>}{outOfStock && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Sem estoque</span>}{Boolean(product.modifierGroups?.length) && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Montagem</span>}{product.ingredientStockAvailable === false && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">Ingrediente indisponível</span>}</div><p className="mt-0.5 text-sm text-gray-500">{product.description || "Sem descrição"}</p>{product.trackStock && <p className="mt-1 text-xs font-medium text-gray-400">Estoque: {product.stock}</p>}</div>
+              <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end"><strong className="min-w-24 text-right text-base text-gray-950">{formatCurrency(product.price)}</strong><button onClick={() => setCompositionProduct(product)} type="button" className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100" data-tutorial="product-composition" aria-label={`Montagem e ficha técnica de ${product.name}`}><PackagePlus className="h-4 w-4" /> Montagem</button><button onClick={() => beginEdit(product)} type="button" className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700" data-tutorial="product-edit" aria-label={`Editar ${product.name}`}><Pencil className="h-4 w-4" /></button><button onClick={() => product.active ? remove(product) : changeActive(product, true)} disabled={busy} type="button" className={`rounded-lg p-2 ${product.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`} aria-label={product.active ? `Desativar ${product.name}` : `Ativar ${product.name}`}>{product.active ? <Trash2 className="h-4 w-4" /> : <Power className="h-4 w-4" />}</button></div>
             </div>
           })}
-          {!visibleProducts.length && <p className="px-5 py-10 text-center text-sm text-gray-500">Ainda não há produtos nesta categoria.</p>}
         </div>
       </div>
 
-      <div className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="mb-5 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Salve o produto. Em seguida, escolha os sabores ou extras que o cliente poderá pedir.</div>
-      <form onSubmit={submit}>
-        <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Preencha nome, categoria e preço.</p></div>{editingId && <button type="button" onClick={() => clearForm()} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
+      <form data-tutorial="products-form" onSubmit={submit} className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm xl:sticky xl:top-20">
+        <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Preço, imagem, categoria e estoque. Complementos e ficha técnica ficam no botão “Montagem”.</p></div>{editingId && <button type="button" onClick={clearForm} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</div>}
 
         <div className="space-y-4">
-          <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Nome *</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ex.: Coxinha de frango" className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
+          <label data-tutorial="product-name" className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Nome *</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ex.: Coxinha de frango" className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
           <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Descrição</span><textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Descrição curta" rows={3} className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><div><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Categoria *</span><select required value={activeCategories.some((category) => category.name === draft.category) ? draft.category : activeCategories[0]?.name || ""} onChange={(e) => setDraft({ ...draft, category: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">{activeCategories.map((category) => <option key={category.id} value={category.name}>{parentCategoryName(category.name) ? `↳ ${categoryShortName(category.name)} (${parentCategoryName(category.name)})` : category.name}</option>)}</select></label><button type="button" onClick={() => setShowCategoryForm((current) => !current)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700"><Plus className="h-3.5 w-3.5" /> Nova categoria</button></div><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">{priceByFlavor ? "A partir de" : "Preço *"}</span><div className="relative"><CircleDollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required={!priceByFlavor} readOnly={priceByFlavor} inputMode="decimal" value={priceByFlavor ? startingPrice ? String(startingPrice).replace(".", ",") : "" : draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} placeholder={priceByFlavor ? "Calculado pelos sabores" : "1,25"} className="h-11 w-full rounded-xl border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></div></label></div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><label data-tutorial="product-category" className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Categoria *</span><select required value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">{activeCategories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label><label data-tutorial="product-price" className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Preço *</span><div className="relative"><CircleDollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input required inputMode="decimal" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} placeholder="1,25" className="h-11 w-full rounded-xl border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></div></label></div>
 
-          <label className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-900"><input type="checkbox" checked={priceByFlavor} disabled={Boolean(editingId && products.find((product) => product.id === editingId)?.modifierGroups?.some(isPricedFlavorGroup))} onChange={(event) => setPriceByFlavor(event.target.checked)} className="h-5 w-5" /> Cada sabor tem seu preço</label>
-          {priceByFlavor && <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-sm font-bold text-blue-900">Sabores de {draft.name || "este produto"}</p><p className="mt-1 text-xs text-blue-800">Ex.: Coca-Cola R$ 12,00; Guaraná R$ 10,00. O cliente escolhe um sabor antes de comprar.</p><div className="mt-3 space-y-2">{flavors.map((flavor) => <div key={flavor.key} className="flex gap-2"><input aria-label="Nome do sabor" value={flavor.name} onChange={(event) => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, name: event.target.value } : item))} placeholder="Sabor" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"/><input aria-label={`Preço de ${flavor.name || "sabor"}`} value={flavor.price} onChange={(event) => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, price: event.target.value } : item))} placeholder="R$ 0,00" inputMode="decimal" className="h-10 w-28 rounded-lg border border-blue-200 bg-white px-2 text-sm"/>{flavor.active === false && <button type="button" onClick={() => setFlavors((items) => items.map((item) => item.key === flavor.key ? { ...item, active: true } : item))} className="text-xs font-bold text-amber-700">Ativar</button>}<button type="button" onClick={() => setFlavors((items) => items.filter((item) => item.key !== flavor.key))} aria-label={`Remover ${flavor.name || "sabor"}`} className="rounded-lg p-2 text-red-600"><X className="h-4 w-4" /></button></div>)}</div><button type="button" onClick={() => setFlavors((items) => [...items, { key: crypto.randomUUID(), name: "", price: "" }])} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-700"><Plus className="h-4 w-4"/> Adicionar sabor</button></div>}
-
-          {!editingId && !priceByFlavor && <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
-            <label className="flex items-center gap-2 font-bold text-blue-950"><input type="checkbox" checked={quickGroup} onChange={(event) => setQuickGroup(event.target.checked)} className="h-5 w-5" />Adicionar sabores ou complementos agora</label>
-            {quickGroup && <div className="mt-4 space-y-3"><label className="block text-sm font-bold text-blue-900">Pergunta para o cliente<input value={quickGroupName} onChange={(event) => setQuickGroupName(event.target.value)} placeholder="Ex.: Escolha os sabores" className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-3 font-normal" /></label>
-              <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm font-bold text-blue-900">Tipo de escolha<select value={quickMode} onChange={(event) => { const next = event.target.value as "unique" | "bundle"; setQuickMode(next); if (next === "bundle") setQuickChoices((items) => items.map((item) => ({ ...item, extra: "" }))) }} className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-2"><option value="unique">Extras ou opções</option><option value="bundle">Sabores de um combo</option></select></label><label className="flex items-center gap-2 self-end rounded-xl bg-white p-3 text-sm font-bold text-blue-900"><input type="checkbox" checked={quickRequired} onChange={(event) => { setQuickRequired(event.target.checked); if (!event.target.checked) setQuickMin("0"); else if (Number(quickMin) < 1) setQuickMin("1") }} />Escolha obrigatória</label></div>
-              <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm font-bold text-blue-900">Mínimo<input type="number" min={quickRequired ? 1 : 0} value={quickMin} onChange={(event) => setQuickMin(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-3" /></label><label className="text-sm font-bold text-blue-900">Máximo por produto<input type="number" min={1} value={quickMax} onChange={(event) => setQuickMax(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-blue-200 bg-white px-3" /></label></div>
-              {quickMode === "bundle" && <p className="text-xs text-blue-800">Se comprar 2 unidades, o máximo dobra. O mesmo sabor pode ser repetido.</p>}
-              <p className="text-sm font-bold text-blue-950">Opções que aparecerão no produto</p>{quickChoices.map((choice, index) => <div key={choice.key} className="flex gap-2"><input aria-label={`Opção ${index + 1}`} value={choice.name} onChange={(event) => setQuickChoices((items) => items.map((item) => item.key === choice.key ? { ...item, name: event.target.value } : item))} placeholder="Ex.: Frango" className="h-10 min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-sm" />{quickMode === "unique" && <input aria-label={`Preço extra da opção ${index + 1}`} value={choice.extra} onChange={(event) => setQuickChoices((items) => items.map((item) => item.key === choice.key ? { ...item, extra: event.target.value } : item))} placeholder="+ R$ 0,00" inputMode="decimal" className="h-10 w-28 rounded-xl border border-blue-200 bg-white px-2 text-sm" />}<button type="button" onClick={() => setQuickChoices((items) => items.filter((item) => item.key !== choice.key))} aria-label={`Remover opção ${index + 1}`} className="rounded-lg px-2 text-red-700"><X className="h-4 w-4" /></button></div>)}<button type="button" onClick={() => setQuickChoices((items) => [...items, { key: crypto.randomUUID(), name: "", extra: "" }])} className="text-sm font-bold text-blue-800">+ Adicionar opção</button>
-            </div>}
-          </div>}
-
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-3">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Foto do produto</span>
+          <div data-tutorial="product-image" className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-3">
+            <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Foto do salgado</span>
             {draft.image && <div className="mb-3 flex items-center gap-3 rounded-xl bg-white p-2"><img src={draft.image} alt="Prévia" className="h-20 w-20 rounded-lg object-cover" /><div className="min-w-0"><p className="text-sm font-bold text-gray-800">Imagem selecionada</p><p className="truncate text-xs text-gray-400">{draft.image}</p><button type="button" onClick={() => setDraft({ ...draft, image: "" })} className="mt-1 text-xs font-bold text-red-600">Remover foto</button></div></div>}
             <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-bold text-blue-700 ring-1 ring-gray-200 hover:bg-blue-50"><Upload className="h-4 w-4" />{uploadingImage ? "Enviando imagem..." : "Escolher do celular ou computador"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadImage} disabled={uploadingImage} className="hidden" /></label>
             <p className="mt-2 text-center text-[11px] text-gray-400">JPG, PNG ou WEBP · máximo 5 MB</p>
           </div>
 
-          <details className="rounded-xl border border-gray-200 p-3"><summary className="cursor-pointer text-sm font-bold text-gray-700">Mais opções do produto</summary><div className="mt-3 space-y-3">
           <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><strong className="block text-sm text-gray-800">Produto em destaque</strong><small className="text-xs text-gray-500">Aparece primeiro no cardápio.</small></span><input type="checkbox" checked={draft.featured} onChange={(e) => setDraft({ ...draft, featured: e.target.checked })} className="h-5 w-5" /></label>
           <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><span><span className="flex items-center gap-1.5"><strong className="block text-sm text-gray-800">Controlar estoque</strong><HelpTip helpKey="products.readyStock" /></span><small className="text-xs text-gray-500">Impede venda acima do saldo.</small></span><input type="checkbox" checked={draft.trackStock} onChange={(e) => setDraft({ ...draft, trackStock: e.target.checked })} className="h-5 w-5" /></label>
           {draft.trackStock && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1"><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Quantidade em estoque</span><input type="number" min="0" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Estoque mínimo / alerta</span><input type="number" min="0" value={draft.minStock} onChange={(e) => setDraft({ ...draft, minStock: e.target.value })} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label></div>}
-          </div></details>
         </div>
-        <button disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : quickGroup && !priceByFlavor ? "Salvar produto e opções" : "Adicionar produto"}</button>
+        <button data-tutorial="product-save" disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
       </form>
-      {showCategoryForm && <form onSubmit={addCategory} className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><label className="block text-xs font-bold text-blue-900">Dentro de<select value={categoryParent} onChange={(event) => setCategoryParent(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Nenhuma: categoria principal</option>{activeCategories.filter((category) => !parentCategoryName(category.name)).map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label><label htmlFor="quick-category" className="mt-3 block text-xs font-bold text-blue-900">Nome da nova categoria</label><div className="mt-2 flex gap-2"><input id="quick-category" required maxLength={100} value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Ex.: Refri 2L" className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-3 text-sm" /><button type="submit" disabled={busy} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-50">Criar</button></div></form>}
-      </div>
-      {compositionProduct && <div className="xl:col-span-2"><ProductCompositionEditor product={compositionProduct} catalogProducts={products} reusableGroups={[...new Map(products.flatMap((item) => item.modifierGroups || []).filter((group) => group.active && group.options.length).map((group) => [group.id, group])).values()]} embedded onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} /></div>}
+      <ProductCompositionEditor product={compositionProduct} onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} />
     </section>
   )
 }

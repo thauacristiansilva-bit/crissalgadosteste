@@ -1,0 +1,63 @@
+ETAPA 7 — TUTORIAIS INTERATIVOS FIXOS DO SABORFLOW
+
+OBJETIVO
+Substituir o modelo de ajuda baseado em vídeo por tutoriais que funcionam em cima das telas reais do sistema.
+
+O QUE MUDA
+- Botão "Tutorial" fixo no painel administrativo.
+- Central de Ajuda passa a priorizar tutoriais interativos.
+- O usuário escolhe o que quer aprender e o SaborFlow abre a aba correspondente.
+- A área explicada recebe destaque visual.
+- Cada passo mostra o que fazer e por que aquela configuração é importante.
+- Botões Voltar, Pular e Próximo.
+- O usuário pode repetir os tutoriais quantas vezes quiser.
+- O progresso de tutoriais concluídos fica salvo no navegador.
+
+SEGURANÇA DOS DADOS
+- O tutorial NÃO apaga produtos, categorias, pedidos ou configurações.
+- O tutorial NÃO cria dados fictícios.
+- Avançar ou pular uma etapa NÃO salva nenhuma alteração.
+- Uma alteração só acontece quando o usuário modifica a tela real e clica no botão de salvar da própria função.
+- Produtos já cadastrados continuam na lista; o tutorial orienta clicar em Editar para carregar nome, preço, categoria e demais dados existentes.
+
+TUTORIAIS INCLUÍDOS
+- Conhecendo o painel
+- Produtos, preços e complementos
+- Categorias do cardápio
+- Receber e acompanhar pedidos
+- Fazer uma venda no PDV
+- Configurações da loja
+- Logo, cores e layout
+- Localização, retirada e delivery
+- Pagamentos do cardápio
+- Impressora e tickets
+- Clientes e histórico
+- Cupons e campanhas
+- Link e presença da loja
+- Equipe e acessos
+- Estoque
+- Cozinha e produção
+- Atendimento automático
+- Plano e cobrança
+
+ARQUIVOS ALTERADOS/CRIADOS
+- components/admin/tutorial-system.tsx (novo)
+- components/admin/help-center-panel.tsx
+- components/admin/admin-dashboard.tsx
+- components/admin/products-panel.tsx
+- components/admin/categories-panel.tsx
+- components/admin/orders-panel.tsx
+- components/admin/pdv-panel.tsx
+- components/admin/settings-panel.tsx
+
+COMO APLICAR
+1. Extraia este ZIP na raiz do projeto.
+2. Aceite substituir os arquivos existentes.
+3. Rode:
+   npm run build
+4. Se passar:
+   git add .
+   git commit -m "Adiciona tutoriais interativos no painel"
+   git push
+
+NÃO PRECISA RODAR MIGRATION NESTA ETAPA.
