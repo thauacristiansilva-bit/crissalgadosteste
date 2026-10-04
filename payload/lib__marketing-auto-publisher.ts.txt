@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { getPostgresPool } from "@/lib/postgres"
+import { runWithRlsBypass } from "@/lib/rls-context"
 import {
   getMetaInstagramConnection,
   updateMetaInstagramToken,
@@ -525,52 +526,56 @@ export async function publishOneMarketingPublication(
 export async function runDueMarketingPublications(
   limit = 15,
 ) {
-  const claimed =
-    await claimDuePublications(
-      limit,
-    )
-
-  let published = 0
-  let failed = 0
-
-  const errors: Array<{
-    id: string
-    error: string
-  }> = []
-
-  for (
-    const publication of claimed
-  ) {
-    try {
-      await publishOneMarketingPublication(
-        publication,
+  // O cron é um backend privilegiado: ele precisa enxergar publicações
+  // de todas as empresas. Sem bypass, o RLS retorna zero linhas.
+  return runWithRlsBypass(async () => {
+    const claimed =
+      await claimDuePublications(
+        limit,
       )
 
-      published += 1
-    } catch (error) {
-      failed += 1
+    let published = 0
+    let failed = 0
 
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Falha desconhecida na publicacao."
+    const errors: Array<{
+      id: string
+      error: string
+    }> = []
 
-      errors.push({
-        id: publication.id,
-        error: message,
-      })
+    for (
+      const publication of claimed
+    ) {
+      try {
+        await publishOneMarketingPublication(
+          publication,
+        )
 
-      await markFailure(
-        publication,
-        message,
-      )
+        published += 1
+      } catch (error) {
+        failed += 1
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Falha desconhecida na publicacao."
+
+        errors.push({
+          id: publication.id,
+          error: message,
+        })
+
+        await markFailure(
+          publication,
+          message,
+        )
+      }
     }
-  }
 
-  return {
-    claimed: claimed.length,
-    published,
-    failed,
-    errors,
-  }
+    return {
+      claimed: claimed.length,
+      published,
+      failed,
+      errors,
+    }
+  })
 }

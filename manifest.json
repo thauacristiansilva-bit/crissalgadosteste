@@ -1,8 +1,5 @@
 {
-  "lib/meta-instagram.ts": "payload/lib__meta-instagram.ts.txt",
-  "lib/meta-instagram-db.ts": "payload/lib__meta-instagram-db.ts.txt",
-  "lib/marketing-auto-publisher.ts": "payload/lib__marketing-auto-publisher.ts.txt",
-  "app/api/meta/instagram/callback/route.ts": "payload/app__api__meta__instagram__callback__route.ts.txt",
-  "app/api/meta/instagram/status/route.ts": "payload/app__api__meta__instagram__status__route.ts.txt",
-  "components/admin/meta-instagram-connection-card.tsx": "payload/components__admin__meta-instagram-connection-card.tsx.txt"
+  "components/admin/marketing-publications-panel.tsx": "payload/components__admin__marketing-publications-panel.tsx.txt",
+  "app/api/marketing-publications/assets/route.ts": "payload/app__api__marketing-publications__assets__route.ts.txt",
+  "lib/marketing-auto-publisher.ts": "payload/lib__marketing-auto-publisher.ts.txt"
 }
