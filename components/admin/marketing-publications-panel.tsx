@@ -15,6 +15,7 @@ import {
   Save,
   Upload,
 } from "lucide-react"
+import { PublicationImageEditor } from "@/components/admin/publication-image-editor"
 import type { StoreSettings } from "@/lib/types"
 import { MetaInstagramConnectionCard } from "@/components/admin/meta-instagram-connection-card"
 
@@ -80,8 +81,6 @@ const dayOptions = [
   [6, "Sab"],
 ] as const
 
-const MAX_INPUT_BYTES = 15 * 1024 * 1024
-
 function localDateString() {
   const now = new Date()
   const offset = now.getTimezoneOffset() * 60_000
@@ -141,86 +140,6 @@ function targetForChannel(channel: Channel) {
   }
 }
 
-async function imageFromFile(file: File) {
-  const url = URL.createObjectURL(file)
-
-  try {
-    return await new Promise<HTMLImageElement>((resolve, reject) => {
-      const image = new Image()
-      image.onload = () => resolve(image)
-      image.onerror = () => reject(new Error("Não foi possível ler essa imagem."))
-      image.src = url
-    })
-  } finally {
-    // Revogado depois que a imagem já foi decodificada pelo navegador.
-    setTimeout(() => URL.revokeObjectURL(url), 1_000)
-  }
-}
-
-async function normalizeArtwork(file: File, channel: Channel) {
-  const allowed = new Set([
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-  ])
-
-  if (!allowed.has(file.type)) {
-    throw new Error("Use uma arte em JPG, PNG ou WEBP.")
-  }
-
-  if (file.size <= 0 || file.size > MAX_INPUT_BYTES) {
-    throw new Error("A arte deve ter no máximo 15 MB.")
-  }
-
-  const image = await imageFromFile(file)
-  const target = targetForChannel(channel)
-
-  if (!image.naturalWidth || !image.naturalHeight) {
-    throw new Error("A imagem enviada não possui dimensões válidas.")
-  }
-
-  const ratio = image.naturalWidth / image.naturalHeight
-  const difference = Math.abs(ratio - target.ratio) / target.ratio
-
-  if (difference > 0.025) {
-    throw new Error(
-      `${channelLabel(channel)} precisa estar no formato ${target.label}. ` +
-      `Use ${target.example}. Sua imagem é ${image.naturalWidth} × ${image.naturalHeight} px.`,
-    )
-  }
-
-  const canvas = document.createElement("canvas")
-  canvas.width = target.width
-  canvas.height = target.height
-
-  const ctx = canvas.getContext("2d")
-  if (!ctx) {
-    throw new Error("Seu navegador não conseguiu preparar a imagem.")
-  }
-
-  // Evita transparência incompatível ao converter PNG/WEBP para JPEG.
-  ctx.fillStyle = "#ffffff"
-  ctx.fillRect(0, 0, target.width, target.height)
-  ctx.drawImage(image, 0, 0, target.width, target.height)
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (value) => {
-        if (value) resolve(value)
-        else reject(new Error("Não foi possível converter a arte para JPG."))
-      },
-      "image/jpeg",
-      0.94,
-    )
-  })
-
-  return new File(
-    [blob],
-    `publicacao-${channel}-${Date.now()}.jpg`,
-    { type: "image/jpeg" },
-  )
-}
-
 export function MarketingPublicationsPanel({
   settings,
 }: {
@@ -232,6 +151,8 @@ export function MarketingPublicationsPanel({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
 
   async function loadPublications() {
     try {
@@ -265,12 +186,11 @@ export function MarketingPublicationsPanel({
 
   async function uploadArtwork(file: File) {
     setBusy(true)
-    setMessage("Validando e enviando a arte...")
+    setMessage("Enviando a imagem ajustada...")
 
     try {
-      const normalized = await normalizeArtwork(file, draft.channel)
       const form = new FormData()
-      form.set("file", normalized)
+      form.set("file", file)
 
       const response = await fetch(
         "/api/marketing-publications/assets",
@@ -282,7 +202,7 @@ export function MarketingPublicationsPanel({
 
       const data = await response.json()
 
-      if (!response.ok) {
+      if (!response.ok || typeof data.mediaUrl !== "string" || !data.mediaUrl) {
         throw new Error(data.error || "Erro ao enviar a arte.")
       }
 
@@ -295,12 +215,14 @@ export function MarketingPublicationsPanel({
         `Arte pronta para ${channelLabel(draft.channel)} em ` +
         `${targetForChannel(draft.channel).example}.`,
       )
+      return true
     } catch (error) {
       setMessage(
         error instanceof Error
           ? error.message
           : "Erro ao enviar a arte.",
       )
+      return false
     } finally {
       setBusy(false)
     }
@@ -311,7 +233,8 @@ export function MarketingPublicationsPanel({
     event.target.value = ""
 
     if (!file) return
-    void uploadArtwork(file)
+    setSourceFile(file)
+    setEditorOpen(true)
   }
 
   function scheduledIso() {
@@ -411,6 +334,8 @@ export function MarketingPublicationsPanel({
 
       setEditingId(null)
       setDraft(emptyDraft(settings.storeName))
+      setSourceFile(null)
+      setEditorOpen(false)
       setMessage("Publicação agendada com sucesso.")
     } catch (error) {
       setMessage(
@@ -480,6 +405,8 @@ export function MarketingPublicationsPanel({
             .slice(0, 16)
         : ""
 
+    setSourceFile(null)
+    setEditorOpen(false)
     setEditingId(item.id)
     setDraft({
       title: item.title,
@@ -525,6 +452,7 @@ export function MarketingPublicationsPanel({
   return (
     <div className="space-y-5">
       <MetaInstagramConnectionCard />
+      {editorOpen && sourceFile && <PublicationImageEditor key={`${sourceFile.name}-${sourceFile.lastModified}-${draft.channel}`} file={sourceFile} channel={draft.channel} onApply={uploadArtwork} onCancel={() => setEditorOpen(false)} />}
 
       <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -543,8 +471,8 @@ export function MarketingPublicationsPanel({
               </h2>
 
               <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-                Crie sua arte no Canva, IA, Google Flow ou onde preferir.
-                Aqui você apenas anexa a imagem pronta, escolhe o canal e programa o horário.
+                Escolha onde publicar, anexe uma foto ou arte e ajuste o enquadramento.
+                Confira a prévia antes de programar o horário.
               </p>
             </div>
           </div>
@@ -586,13 +514,11 @@ export function MarketingPublicationsPanel({
                 </span>
                 <select
                   value={draft.channel}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      channel: event.target.value as Channel,
-                      mediaUrl: "",
-                    })
-                  }
+                  disabled={busy}
+                  onChange={(event) => {
+                    setDraft({ ...draft, channel: event.target.value as Channel, mediaUrl: "" })
+                    if (sourceFile) setEditorOpen(true)
+                  }}
                   className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"
                 >
                   <option value="instagram_feed">
@@ -615,9 +541,9 @@ export function MarketingPublicationsPanel({
                     Arte pronta
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-gray-500">
-                    Formato exigido: <strong>{target.label}</strong> · recomendado{" "}
+                    Formato final: <strong>{target.label}</strong> · recomendado{" "}
                     <strong>{target.example}</strong>. JPG, PNG ou WEBP.
-                    O Sabor Flow converte automaticamente para JPG antes de enviar.
+                    Não precisa vir no tamanho certo: ajuste a imagem aqui antes de enviar.
                   </p>
                 </div>
 
@@ -634,6 +560,7 @@ export function MarketingPublicationsPanel({
                 </label>
               </div>
 
+              {sourceFile && <button type="button" disabled={busy} onClick={() => setEditorOpen(true)} className="mt-3 rounded-xl border border-violet-200 px-3 py-2 text-sm font-bold text-violet-700">Ajustar imagem</button>}
               {draft.mediaUrl ? (
                 <div className="mt-4">
                   <div className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-700">
@@ -666,7 +593,7 @@ export function MarketingPublicationsPanel({
                   <div className="p-5">
                     <ImagePlus className="mx-auto h-8 w-8 text-gray-300" />
                     <p className="mt-2 text-xs font-bold text-gray-400">
-                      Anexe uma arte {target.label}
+                      Anexe uma foto ou arte para ajustar
                     </p>
                   </div>
                 </div>
@@ -821,6 +748,8 @@ export function MarketingPublicationsPanel({
                   onClick={() => {
                     setEditingId(null)
                     setDraft(emptyDraft(settings.storeName))
+      setSourceFile(null)
+      setEditorOpen(false)
                   }}
                   className="h-11 rounded-xl border border-gray-200 px-4 text-sm font-black text-gray-600"
                 >
