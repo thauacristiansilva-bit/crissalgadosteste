@@ -1,0 +1,53 @@
+PEDIDOS NO WHATSAPP E AVISOS NO ACOMPANHAMENTO
+
+Esta etapa usa o projeto enviado em 13/10, COM a correção anterior de categorias/montagem/WhatsApp aplicada.
+
+1. Extraia o ZIP e copie a pasta contato-pedidos para dentro da pasta original do projeto (onde está package.json).
+2. No VS Code, abra o terminal nessa pasta e execute:
+
+node contato-pedidos/APLICAR-CONTATO-PEDIDOS.cjs
+npm run typecheck
+
+3. Se os dois comandos terminarem sem erro:
+
+git add components/store/storefront.tsx components/admin/settings-panel.tsx components/admin/orders-panel.tsx components/store/order-tracker.tsx lib/order-summary.ts lib/order-contact.ts
+git commit -m "Adiciona WhatsApp no checkout e pedidos e avisos no acompanhamento"
+git push origin main
+
+Aguarde o deploy no Railway. Não precisa instalar pacotes nem executar SQL.
+O instalador faz backup fora da pasta do projeto e verifica a versão antes de alterar os arquivos.
+
+ATIVAR WHATSAPP APÓS FINALIZAR
+Admin > Configurações > Login e experiência do cliente > Depois de finalizar.
+Selecione Abrir WhatsApp com pedido pronto e salve.
+Confira o número do WhatsApp da empresa.
+Após o cliente finalizar, o pedido é salvo no sistema e o navegador abre o WhatsApp com o resumo completo. O cliente toca em Enviar.
+Se o aplicativo não abrir, a confirmação mantém o botão para abrir novamente e o botão para acompanhar no site. Não é necessário refazer o pedido.
+
+ENVIAR AO CLIENTE PELO DASHBOARD
+Admin > Pedidos > Enviar pedido ao cliente.
+Revise o texto, faça ajustes e clique Abrir WhatsApp para enviar.
+Editar a mensagem não muda produtos, valores ou dados do pedido.
+Avisar status ao cliente prepara uma mensagem conforme o status atual.
+Ao marcar Saiu para entrega, depois que o servidor confirmar a mudança, a mensagem de saída é preparada automaticamente. Você revisa e envia.
+O número é o do CLIENTE cadastrado no pedido, não o da loja.
+O envio ocorre apenas quando você toca em Enviar no WhatsApp. Não se registra como enviado apenas por abrir a conversa.
+
+AVISOS NO SITE
+Com a página de acompanhamento aberta, aparece um aviso quando o status muda: aceito, preparando, pronto, saiu para entrega, entregue/retirado ou cancelado.
+A página verifica atualizações a cada 5 segundos enquanto está visível. Ao retornar para ela, verifica novamente.
+O aviso não é uma notificação push e não funciona com o site fechado ou celular bloqueado. Push no celular exige uma etapa própria, com permissão do cliente e suporte do navegador.
+A confirmação entregue/retirado corresponde ao status marcado pela equipe no sistema.
+O resumo completo também passa a ser usado no botão WhatsApp da página de acompanhamento.
+
+TESTE APÓS O DEPLOY
+1. Ative Abrir WhatsApp com pedido pronto. Faça um pedido de teste e confira destinatário, sabores e valores. O pedido deve existir no dashboard antes do envio.
+2. No admin, use Enviar pedido ao cliente: deve abrir o número do cliente.
+3. Marque um delivery pronto como Saiu para entrega. Confira a mensagem preparada.
+4. Mantenha o acompanhamento aberto em outra aba. Mude o status no admin e volte à aba: o aviso deve aparecer.
+5. Confira que retiradas recebem mensagens de retirada, não de entrega.
+
+VALIDAÇÃO
+TypeScript completo aprovado. Testes de telefone/DDD, codificação da mensagem, status de entrega/retirada, saída com entregador e finalização (salvar antes de abrir WhatsApp, falha sem redirecionar, modos site/opções e número ausente) aprovados.
+Sem teste de navegador, aplicativo WhatsApp, banco de produção ou envio real nesta etapa.
+As notificações automáticas via API da Meta e seus modelos permanecem como antes.

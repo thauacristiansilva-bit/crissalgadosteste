@@ -1,0 +1,41 @@
+RESTAURAÇÃO DO CADASTRO E RESUMO DO WHATSAPP
+
+1. Extraia o ZIP. Copie a pasta restaurar-cadastro-whatsapp para DENTRO da sua pasta original do projeto, onde está package.json.
+2. No VS Code, abra a pasta original e o terminal. Execute:
+
+node restaurar-cadastro-whatsapp/APLICAR-CORRECAO.cjs
+npm run typecheck
+
+3. Se os dois comandos terminarem sem erro, execute:
+
+git add components/admin/products-panel.tsx components/admin/product-composition-editor.tsx components/store/storefront.tsx lib/order-summary.ts
+git commit -m "Restaura categorias e importacao de sabores e completa resumo WhatsApp"
+git push origin main
+
+Aguarde o deploy do Railway. Não precisa instalar pacotes nem executar SQL.
+
+O QUE FOI CORRIGIDO
+- Produtos: filtro por categoria, produtos e categorias em ordem alfabética com números em ordem natural. Abre na primeira categoria; Todas as categorias fica disponível.
+- Montagem: voltou a receber o catálogo completo e os grupos existentes. A seção Importar sabores e bebidas abre visível.
+- Grupo pronto: usa as opções e preços já cadastrados no outro produto.
+- Categoria: copia produtos com seus preços, ou sem preço extra para sabores incluídos no combo. Pode importar salgados e bebidas no mesmo combo.
+- WhatsApp do cliente: resumo com empresa, número/referência, cliente, data, horário, escolhas, endereço completo, valores, pagamento e observações. Escolhas repetidas são agrupadas com quantidade.
+
+COMO IMPORTAR
+Produtos e sabores > selecione a categoria > Montagem do combo.
+Em Importar sabores e bebidas, escolha a lista pronta e clique Usar esta lista.
+Ou escolha uma categoria, Sem preço extra / Com preço, e clique Copiar.
+Confira obrigatoriedade, mínimo e máximo. Salve a montagem.
+Os grupos compartilhados mantêm suas regras; a importação por categoria é uma cópia, sem vínculo automático com estoque nem atualizações futuras de preços.
+
+CONFIRA APÓS O DEPLOY
+1. Selecione Bebidas: somente os produtos dessa categoria devem aparecer.
+2. Abra a montagem de um combo: devem aparecer listas e categorias de outros produtos.
+3. Importe bebida com preço, salve e confira na página pública.
+4. Faça um pedido com sabores, bebida e observação; clique Enviar resumo no WhatsApp.
+
+A correção altera apenas quatro arquivos. Faz backup fora da pasta do projeto e recusa versões incompatíveis. Não modifica produtos ou pedidos no banco por conta própria. Cadastros anteriores não precisam ser reimportados.
+O resumo completo foi aplicado ao botão que abre o WhatsApp. A notificação automática via API continua sujeita ao modelo aprovado e ao limite de 1.000 caracteres já existente; esta etapa não altera esse envio automático.
+
+VALIDAÇÃO
+TypeScript do projeto completo aprovado. Testes de separação por categoria, ordenação numérica, preços das listas, catálogo completo para importação e resumos de entrega/retirada aprovados. Instalação e proteção de versão verificadas. Sem teste de navegador, banco real ou envio real ao WhatsApp nesta etapa.

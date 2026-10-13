@@ -1,0 +1,38 @@
+AJUSTE DE IMAGENS PARA PUBLICAÇÕES — SABORFLOW
+
+1. Extraia este ZIP e copie a pasta ajuste-publicacoes para dentro da pasta ORIGINAL do projeto (a que contém package.json).
+2. Abra a pasta original no VS Code. Abra Terminal > Novo terminal.
+3. Execute:
+
+node ajuste-publicacoes/APLICAR-AJUSTE-IMAGENS.cjs
+npm run typecheck
+
+4. Somente se os dois comandos acima terminarem sem erro, execute:
+
+git add components/admin/marketing-publications-panel.tsx components/admin/publication-image-editor.tsx lib/publication-image-layout.ts
+git commit -m "Adiciona ajuste de imagens antes de agendar publicacoes"
+git push origin main
+
+O Railway conectado à main inicia o deploy conforme sua configuração atual.
+Não precisa executar migration ou instalar pacotes.
+O instalador faz backup FORA da pasta do projeto. Mostra o caminho no terminal.
+Esta etapa usa como base o HOTFIX-PUBLICACOES-SIMPLES-FORMATOS-CRON.
+Se a tela estiver em outra versão, o instalador para sem substituir arquivos. Nesse caso, envie o arquivo components/admin/marketing-publications-panel.tsx para adaptar.
+
+COMO USAR APÓS O DEPLOY
+Publicações > Onde publicar > Anexar arte.
+A prévia abre automaticamente.
+Imagem inteira: mantém a arte e preenche o espaço restante com a cor escolhida.
+Preencher com corte: ajuste zoom e posições pelos controles.
+Usar esta imagem: envia o JPG preparado. Depois programe a publicação como antes.
+Feed: 1080 x 1080. Story e Status: 1080 x 1920.
+Ao mudar o canal, a mesma imagem anexada nesta edição pode ser ajustada novamente.
+A original fica disponível enquanto a edição está aberta; após recarregar ou editar uma publicação antiga, anexe o arquivo novamente para recortar.
+JPG, PNG e WEBP até 15 MB e 40 megapixels. Vídeos não fazem parte deste editor.
+Esta etapa prepara imagens e preserva o fluxo de publicação existente; não cria nova integração com Instagram ou WhatsApp.
+
+VERIFICAÇÃO REALIZADA
+TypeScript dos componentes e do helper: aprovado em verificação isolada.
+648 cenários de proporção e enquadramento: aprovados.
+Instalação, backup, reaplicação e bloqueio de versão incompatível: verificados.
+Não foi realizado teste em navegador ou publicação real nesta etapa. Confira uma imagem quadrada e uma horizontal na prévia após o deploy.

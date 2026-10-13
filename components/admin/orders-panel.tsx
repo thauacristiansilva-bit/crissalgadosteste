@@ -21,7 +21,7 @@ import {
 } from "lucide-react"
 import type { Courier, Order, OrderStatus, PaymentStatus, StoreSettings } from "@/lib/types"
 import { whatsappOrderText } from "@/lib/order-summary"
-import { whatsappMessageUrl, whatsappStatusText } from "@/lib/order-contact"
+import { googleReviewLink, whatsappMessageUrl, whatsappReviewText, whatsappStatusText } from "@/lib/order-contact"
 import { printOrder } from "@/lib/print-order"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
@@ -103,10 +103,10 @@ export function OrdersPanel({
     document.body.style.overflow = "hidden"
     return () => { document.body.style.overflow = overflow; messageTrigger.current?.focus() }
   }, [messageOrder])
-  function prepareMessage(order: Order, kind: "summary" | "status") {
+  function prepareMessage(order: Order, kind: "summary" | "status" | "review") {
     messageTrigger.current = document.activeElement as HTMLElement | null
     setMessageOrder(order)
-    setMessageDraft(kind === "summary" ? whatsappOrderText(order, settings.storeName, settings.timeZone) : whatsappStatusText(order, settings.storeName))
+    setMessageDraft(kind === "summary" ? whatsappOrderText(order, settings.storeName, settings.timeZone) : kind === "review" ? whatsappReviewText(order, settings.storeName, settings.googleReviewUrl) : whatsappStatusText(order, settings.storeName))
   }
   const pendingCount = orders.filter((order) => order.status === "pending").length
 
@@ -137,6 +137,7 @@ export function OrdersPanel({
       if (!response.ok) throw new Error(data.error || "Não foi possível atualizar o pedido.")
       onOrderUpdated(data.order)
       if (patch.status === "in-route") prepareMessage(data.order, "status")
+      if (patch.status === "completed" && googleReviewLink(settings.googleReviewUrl)) prepareMessage(data.order, "review")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao atualizar pedido.")
     } finally {
@@ -354,6 +355,9 @@ export function OrdersPanel({
 
                   <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "summary")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white disabled:opacity-50"><MessageCircle className="h-4 w-4" /> Enviar pedido ao cliente</button>
                   <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "status")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 text-xs font-bold text-emerald-700 disabled:opacity-50"><MessageCircle className="h-4 w-4" /> {order.status === "in-route" ? "Avisar saída para entrega" : "Avisar status ao cliente"}</button>
+                  {order.status === "completed" && googleReviewLink(settings.googleReviewUrl) && (
+                    <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "review")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-800 disabled:opacity-50"><MessageCircle className="h-4 w-4" /> Pedir avaliação no Google</button>
+                  )}
 
                   <button
                     type="button"

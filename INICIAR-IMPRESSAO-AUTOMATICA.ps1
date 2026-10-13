@@ -72,8 +72,8 @@ public sealed class SaborFlowReceiptPrinter {
     using (var border = new Pen(Color.Black, 1.5f)) {
       while (nextLine < lines.Count) {
         var line = lines[nextLine];
-        bool important = line.Style == "Title" || line.Style == "Alert";
-        var font = important ? large : line.Style == "Normal" || line.Style == "Sub" ? normal : bold;
+        bool important = false; // Sem destaque nas informacoes secundarias
+        var font = (line.Style == "Client" || line.Style == "Item" || line.Style == "DeliveryType") ? bold : normal;
         float inset = line.Style == "Sub" ? 12 : 0;
         float textWidth = available - inset - (important ? 10 : 0);
         var format = new StringFormat(StringFormat.GenericTypographic);
@@ -109,8 +109,8 @@ function Build-Ticket(
   Add-Line "PEDIDO $($order.code)" 'Title'
   if ($order.createdAtLocal) { Add-Line "FEITO EM: $($order.createdAtLocal)" 'Section' }
   Add-Line "RECEBER EM: $receive" 'Alert'
-  Add-Line $(if ($order.type -eq 'delivery') { 'ENTREGA' } else { 'RETIRADA' }) 'Alert'
-  Add-Line "CLIENTE: $($order.customer.name)" 'Section'
+  Add-Line $(if ($order.type -eq 'delivery') { 'ENTREGA' } else { 'RETIRADA' }) 'DeliveryType'
+  Add-Line "CLIENTE: $($order.customer.name)" 'Client'
   if ($order.customer.phone) { Add-Line "Telefone: $($order.customer.phone)" }
 
   if ($order.type -eq 'delivery') {

@@ -135,13 +135,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const timeZone = settings.timeZone || "America/Sao_Paulo"
   const mode = new URL(request.url).searchParams.get("mode") === "kitchen" ? "kitchen" : "customer"
   const lines: Array<{ text: string; bold?: boolean; size?: number }> = [
-    { text: settings.storeName.toUpperCase(), bold: true, size: 12 },
-    { text: order.code, bold: true, size: 18 },
+    { text: settings.storeName.toUpperCase(), size: 12 },
+    { text: order.code, size: 18 },
     { text: order.reference, size: 7 },
     { text: "--------------------------------------" },
-    { text: `RECEBER: ${stamp(order.requestedFor, timeZone)}`, bold: true, size: 11 },
+    { text: `RECEBER: ${stamp(order.requestedFor, timeZone)}`, size: 11 },
     { text: `${order.type === "delivery" ? "DELIVERY" : "RETIRADA"} - ${order.scheduled ? "AGENDADO" : "IMEDIATO"}`, bold: true },
-    { text: `Cliente: ${order.customer.name}` },
+    { text: `Cliente: ${order.customer.name}`, bold: true },
   ]
   if (order.customer.phone) lines.push({ text: `Telefone: ${order.customer.phone}` })
   if (order.type === "delivery") {
@@ -154,7 +154,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   lines.push({ text: "--------------------------------------" })
   order.items.forEach((item) => {
-    lines.push({ text: `${item.quantity}x ${item.name}${mode === "customer" ? `  ${money(item.subtotal)}` : ""}`, bold: mode === "kitchen" })
+    lines.push({ text: `${item.quantity}x ${item.name}${mode === "customer" ? `  ${money(item.subtotal)}` : ""}`, bold: true })
     for (const modifier of item.modifiers || []) {
       lines.push({
         text: `   ${modifier.groupName}: ${modifier.optionName}${mode === "customer" && !modifier.included && modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`,
@@ -162,13 +162,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       })
     }
   })
-  if (order.notes) lines.push({ text: "--------------------------------------" }, { text: `OBS: ${order.notes}`, bold: true })
+  if (order.notes) lines.push({ text: "--------------------------------------" }, { text: `OBS: ${order.notes}` })
   if (mode === "customer") {
     lines.push({ text: "--------------------------------------" }, { text: `Subtotal: ${money(order.subtotal)}` })
     if (order.cashbackUsed) lines.push({ text: `Cashback: -${money(order.cashbackUsed)}` })
     if (order.discount > 0) lines.push({ text: `Desconto${order.couponCode ? ` (${order.couponCode})` : ""}: -${money(order.discount)}` })
     if (order.deliveryFee > 0) lines.push({ text: `Entrega: ${money(order.deliveryFee)}` })
-    lines.push({ text: `TOTAL: ${money(order.total)}`, bold: true, size: 12 }, { text: `Pagamento: ${order.paymentMethod === "pix" ? "PIX" : order.paymentMethod === "cash" ? "DINHEIRO" : "CARTAO"}` })
+    lines.push({ text: `TOTAL: ${money(order.total)}`, size: 12 }, { text: `Pagamento: ${order.paymentMethod === "pix" ? "PIX" : order.paymentMethod === "cash" ? "DINHEIRO" : "CARTAO"}` })
   }
   lines.push({ text: "--------------------------------------" })
   if (settings.address) lines.push({ text: settings.address, size: 7 })

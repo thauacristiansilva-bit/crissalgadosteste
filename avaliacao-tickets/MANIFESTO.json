@@ -1,0 +1,72 @@
+{
+  "files": [
+    {
+      "path": "components/admin/products-panel.tsx",
+      "allowed": [
+        "6299fb65f4294dee6e0b7db321c082cdd4d41599aab99b897049aa4b8e0209da",
+        "59599ddf28b069f79137f0676d6c589abc7ac76e5b3f330ce54c7a2c2fd5baf2"
+      ],
+      "result": "6299fb65f4294dee6e0b7db321c082cdd4d41599aab99b897049aa4b8e0209da"
+    },
+    {
+      "path": "components/admin/product-composition-editor.tsx",
+      "allowed": [
+        "8a5b207076b2ed95ff22f7bfea4fb90f7917cee7a844c24108921f3838aa0fe1",
+        "bd1c44eb9f5db448f7b3d0ef326c75d0fb9e25997f79c79468ec44457fd18a5c"
+      ],
+      "result": "8a5b207076b2ed95ff22f7bfea4fb90f7917cee7a844c24108921f3838aa0fe1"
+    },
+    {
+      "path": "components/store/storefront.tsx",
+      "allowed": [
+        "3251468ffa68ed5177a672bcd197dae2cd2959033fd85a0eabc49e16684f75bc",
+        "221559dff9062da651aed12944f81f0694e80f20b424bb964aa1b493eb268373",
+        "49a1f51218091242bfd3f4871d1fc6194ffb17852c601cfa3c185182d97ca28e"
+      ],
+      "result": "221559dff9062da651aed12944f81f0694e80f20b424bb964aa1b493eb268373"
+    },
+    {
+      "path": "lib/order-summary.ts",
+      "allowed": [
+        "6b08d78cc46ebadabdea582c1fe9f49d2563ff29570603f11372321bb76abc9f",
+        "d4d06722e42cb286f03a7b4f8a03e3baa11cccdda0a93ac3fc80209d42d567a2"
+      ],
+      "result": "6b08d78cc46ebadabdea582c1fe9f49d2563ff29570603f11372321bb76abc9f"
+    },
+    {
+      "path": "components/admin/settings-panel.tsx",
+      "allowed": [
+        "ddee21a090531aec2a7c0479cddad4bf694a1b11ec5067026478fa0df2136014",
+        "566d2fb84c3a7ed8102cbbbd759a7f2fbc11d2b59c786c30f06351c65b4d9dd6"
+      ],
+      "result": "ddee21a090531aec2a7c0479cddad4bf694a1b11ec5067026478fa0df2136014"
+    },
+    {
+      "path": "components/admin/orders-panel.tsx",
+      "allowed": [
+        "2fa71c4cb6954fb7adf8c0e54f9d2b1db978beee6ef98f9e7be5ce58d97dad6c",
+        "ed6134ef84762e2bb705c72c7ca56ccf0fd6e1825862410e047358ddbd1d3c17",
+        "6604bea85e3e153e584f0602146b2d555f90ecba689ff08534ffbc9a396b6420"
+      ],
+      "result": "6604bea85e3e153e584f0602146b2d555f90ecba689ff08534ffbc9a396b6420"
+    },
+    {
+      "path": "components/store/order-tracker.tsx",
+      "allowed": [
+        "a71d8dc715cca2e1ad703bc5b4e2d39c5ba7df945ea63e75d5a81a70ee1348f2",
+        "fc2b946f598acc21b12f5c9bbbd61844ba896c7915de64ca50f815772db73b39",
+        "3caac54b730aa5deb2eb110655483f645c7c3e80cad3ab66983b19e59bd8be40"
+      ],
+      "result": "fc2b946f598acc21b12f5c9bbbd61844ba896c7915de64ca50f815772db73b39"
+    },
+    {
+      "path": "lib/order-contact.ts",
+      "allowed": [
+        null,
+        "3aef1dc009bd569f7dfa0614fd4175db8fbef5b5cb6c8a3a7b149493f8617df4",
+        "5707af724d651384d8a8c7252a27b2bb3d6fb2c75d70d6138cc1c92bfb061cf9"
+      ],
+      "result": "5707af724d651384d8a8c7252a27b2bb3d6fb2c75d70d6138cc1c92bfb061cf9"
+    }
+  ]
+}

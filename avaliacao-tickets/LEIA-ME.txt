@@ -1,0 +1,50 @@
+SABORFLOW — AVALIAÇÃO GOOGLE APÓS CONCLUSÃO + TICKETS COM MENOS NEGRITO
+Versão de referência: correções de 13/10/2026
+
+COMO INSTALAR (VS CODE)
+1. Extraia este ZIP. Copie a pasta "avaliacao-tickets" inteira para DENTRO da pasta original do SaborFlow (a mesma onde existe package.json).
+2. Abra a pasta do SaborFlow no VS Code e execute no terminal:
+
+node avaliacao-tickets/APLICAR-AVALIACAO-TICKETS.cjs
+npm run typecheck
+
+3. SOMENTE se o typecheck terminar sem erros, execute:
+
+git add components/admin/products-panel.tsx components/admin/product-composition-editor.tsx components/store/storefront.tsx components/admin/settings-panel.tsx components/admin/orders-panel.tsx components/store/order-tracker.tsx lib/order-summary.ts lib/order-contact.ts lib/print-order.ts "app/api/orders/[id]/ticket-pdf/route.ts" INICIAR-IMPRESSAO-AUTOMATICA.ps1
+git commit -m "Adiciona convite Google ao concluir e economiza tinta nos tickets"
+git push origin main
+
+O Railway fará o deploy conforme a configuração do repositório. Não é necessário SQL nem instalar bibliotecas novas.
+
+O QUE MUDA
+1. Ao marcar pedido como CONCLUÍDO no painel, seja entrega ou retirada, se existir um link Google válido nas configurações, abre-se um rascunho de agradecimento com o link de avaliação, direcionado ao WhatsApp do cliente. A equipe revisa e toca em "Enviar" no WhatsApp. O sistema NÃO envia automaticamente nem afirma que a mensagem foi enviada.
+2. Após concluir o pedido, existe botão "Pedir avaliação no Google" na aba Pedidos. É possível reenviar manualmente, se necessário.
+3. Na página pública de acompanhamento, quando o pedido está concluído, um botão "Avaliar no Google" fica visível, sem obrigar o cliente a dar nota interna antes.
+4. Nos tickets impressos pelo navegador, PDF e agente automático Windows, apenas nome do CLIENTE, nomes/quantidades dos PRODUTOS e identificação ENTREGA/RETIRADA ficam em negrito. Loja, número, horário, endereço, observações, complementos, valores e totais ficam em fonte normal. O conteúdo permanece disponível.
+5. Mantém o cadastro e filtro de categorias, importação/montagem de combos e todos os recursos de WhatsApp e avisos da etapa anterior.
+
+CONFIGURAÇÃO
+Admin > Configurações > Avaliações e Google > Link para avaliar no Google.
+Cole o LINK DIRETO de avaliações do Perfil da Empresa no Google (ex.: https://g.page/r/.../review). Salve.
+Se o campo ficar vazio, o sistema não prepara convite com link ao concluir. O pedido pode ser concluído normalmente.
+
+SEGURANÇA DO INSTALADOR
+- Versões anteriores conhecidas dos pacotes de categorias/montagem/WhatsApp são reconhecidas e atualizadas de modo cumulativo.
+- Se o arquivo possuir alterações incompatíveis com a versão examinada, a instalação é CANCELADA antes de mudar qualquer arquivo. Não sobrescreve alterações desconhecidas.
+- Faz backup dos arquivos substituídos em uma pasta ao LADO da raiz do SaborFlow, com o nome "...-backup-avaliacao-tickets-...".
+- Os arquivos de impressão são modificados de forma pontual; outros ajustes são preservados.
+- O instalador pode ser executado novamente sem reaplicar modificações.
+
+TESTES RECOMENDADOS DEPOIS DO DEPLOY
+1. Com o link Google configurado, conclua uma entrega fictícia e confira o rascunho do WhatsApp com número, cliente, pedido e link; envie apenas se quiser.
+2. Conclua uma retirada fictícia: o texto deve dizer "retirada", nunca "entrega".
+3. Confira o acompanhamento e o botão do Google somente após conclusão.
+4. Imprima ticket cozinha, ticket cliente e PDF. Confira negrito somente nos três grupos de informação solicitados.
+5. Faça um pedido novo para validar impressão AUTOMÁTICA. Se o agente Windows já estiver aberto, reinicie-o após atualizar o script.
+6. Confira categorias, montagem de combos e WhatsApp. Caso haja erro no typecheck, NÃO publique.
+
+VALIDAÇÃO DESTE PACOTE
+- Sintaxe dos arquivos TS/TSX modificados: aprovada.
+- Testes locais: link HTTPS, texto de entrega/retirada, HTML do ticket e instalação idempotente em amostra da última versão: aprovados.
+- Não houve teste com o banco de produção, impressora física ou WhatsApp real.
+- O typecheck do projeto completo deve ser executado no seu computador, pois o repositório completo não está embutido neste ZIP.

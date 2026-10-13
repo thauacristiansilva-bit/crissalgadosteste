@@ -22,3 +22,30 @@ export function orderStatusMessage(order: Pick<Order, "status" | "type">) {
 export function whatsappStatusText(order: Order, storeName: string) {
   return [`*${storeName}*`, `Olá, ${order.customer.name}!`, "", `*Pedido ${order.code}*`, orderStatusMessage(order), ...(order.status === "in-route" && order.courierName ? [`Entregador: ${order.courierName}`] : []), "", "Se precisar de algum ajuste ou informação, responda esta mensagem."].join("\n")
 }
+
+// Somente links HTTPS configurados pelo administrador da loja.
+export function googleReviewLink(value?: string | null) {
+  const candidate = String(value || "").trim()
+  try {
+    const url = new URL(candidate)
+    return url.protocol === "https:" && !!url.hostname ? url.toString() : ""
+  } catch {
+    return ""
+  }
+}
+
+// O convite abre no WhatsApp para a equipe revisar e enviar;
+// nunca envia mensagens automaticamente nem solicita nota positiva.
+export function whatsappReviewText(order: Order, storeName: string, reviewUrl?: string | null) {
+  const link = googleReviewLink(reviewUrl)
+  const completion = order.type === "delivery" ? "entrega" : "retirada"
+  return [
+    `*${storeName}*`,
+    `Olá, ${order.customer.name}!`,
+    "",
+    `A ${completion} do pedido *${order.code}* foi concluída. Obrigado por comprar conosco!`,
+    ...(link ? ["", "Sua opinião é importante. Se quiser contar como foi a sua experiência, você pode nos avaliar no Google:", link] : []),
+    "",
+    "Agradecemos sua preferência!",
+  ].join("\n")
+}
