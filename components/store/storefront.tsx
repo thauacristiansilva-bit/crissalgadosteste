@@ -17,6 +17,7 @@ import type { AiOrderItem } from "@/components/store/ai-order-assistant"
 import { ProductCustomizer, type ProductCustomization } from "@/components/catalog/product-customizer"
 import {
   modifierSelectionKey,
+  isPricedFlavorGroup,
   productHasModifiers,
   validateAndPriceModifierSelection,
 } from "@/lib/product-composition"
@@ -32,6 +33,19 @@ const compactOrderStatus: Record<Order["status"], string> = {
   "in-route": "Em rota",
   completed: "Concluído",
   cancelled: "Cancelado",
+}
+
+// sf-batch-flavor-quantities-v1
+// Fluxo rápido apenas para produto com um grupo de sabores com preço final próprio.
+// Outros grupos (combos, extras, sabores por unidade especiais) seguem no montador antigo.
+function quickFlavorGroup(product: Product) {
+  const groups = (product.modifierGroups || []).filter(
+    (group) => group.active && group.options.some((option) => option.active),
+  )
+  if (groups.length !== 1) return null
+  const group = groups[0]
+  return isPricedFlavorGroup(group) && group.required && group.minSelect === 1 && group.maxSelect === 1
+    ? group : null
 }
 
 type CartItem = {
@@ -119,6 +133,11 @@ export function Storefront({
   const cartLoadedKeyRef = useRef("")
   const [cartOpen, setCartOpen] = useState(false)
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
+  const [flavorBatchProduct, setFlavorBatchProduct] = useState<Product | null>(null)
+  const [flavorBatchQuantity, setFlavorBatchQuantity] = useState(1)
+  const [flavorQuantities, setFlavorQuantities] = useState<Record<number, number>>({})
+  const [flavorError, setFlavorError] = useState("")
+
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutStep, setCheckoutStep] = useState<1 | 2 | 3>(1)
   const [accountOpen, setAccountOpen] = useState(false)
@@ -656,9 +675,7 @@ export function Storefront({
     if (
       firstProductToCustomize
     ) {
-      setCustomizingProduct(
-        firstProductToCustomize,
-      )
+      openProductSelection(firstProductToCustomize)
     } else {
       setCartOpen(true)
     }
@@ -702,6 +719,108 @@ export function Storefront({
     })
     setCustomizingProduct(null)
   }
+
+  // Uma linha por sabor no carrinho: 2 Carne + 1 Queijo continuam como 3 unidades.
+  // Validação e preço são calculados pelo mecanismo de montagem já usado na loja.
+  function openProductSelection(product: Product) {
+    if (quickFlavorGroup(product)) {
+      setFlavorBatchProduct(product)
+      setFlavorBatchQuantity(1)
+      setFlavorQuantities({})
+      setFlavorError("")
+      setCartOpen(false)
+      return
+    }
+    setCustomizingProduct(product)
+  }
+
+  function changeFlavorBatchQuantity(delta: number) {
+    if (!flavorBatchProduct) return
+    const available = flavorBatchProduct.trackStock
+      ? Math.max(0, flavorBatchProduct.stock - totalProductQuantity(flavorBatchProduct.id))
+      : 999
+    const next = Math.min(available, Math.max(1, flavorBatchQuantity + delta))
+    if (next < 1 || next === flavorBatchQuantity) return
+    if (next < flavorBatchQuantity) {
+      // Se diminuir o total, remove primeiro as últimas quantidades marcadas.
+      const copy = { ...flavorQuantities }
+      let extra = Object.values(copy).reduce((total, count) => total + count, 0) - next
+      for (const optionId of Object.keys(copy).reverse()) {
+        if (extra <= 0) break
+        const id = Number(optionId)
+        const decrease = Math.min(extra, copy[id] || 0)
+        copy[id] = Math.max(0, (copy[id] || 0) - decrease)
+        extra -= decrease
+      }
+      setFlavorQuantities(copy)
+    }
+    setFlavorBatchQuantity(next)
+    setFlavorError("")
+  }
+
+  function changeFlavorCount(optionId: number, delta: number) {
+    setFlavorQuantities((current) => {
+      const selected = Object.values(current).reduce((total, count) => total + count, 0)
+      if (delta > 0 && selected >= flavorBatchQuantity) return current
+      const quantity = Math.max(0, (current[optionId] || 0) + delta)
+      return { ...current, [optionId]: quantity }
+    })
+    setFlavorError("")
+  }
+
+  function addFlavorBatch() {
+    const product = flavorBatchProduct
+    const group = product && quickFlavorGroup(product)
+    if (!product || !group) return
+    const total = Object.values(flavorQuantities).reduce((sum, number) => sum + number, 0)
+    if (total !== flavorBatchQuantity) {
+      setFlavorError(`Escolha ${flavorBatchQuantity} unidades distribuídas entre os sabores.`)
+      return
+    }
+    if (product.trackStock && totalProductQuantity(product.id) + total > product.stock) {
+      setFlavorError("Não há estoque disponível para essa quantidade.")
+      return
+    }
+    const selections = group.options.filter((option) => option.active && (flavorQuantities[option.id] || 0) > 0)
+    const lines = selections.map((option) => ({
+      optionIds: [option.id],
+      quantity: flavorQuantities[option.id],
+      pricing: validateCartCustomization(product, [option.id]),
+    }))
+    if (!lines.length || lines.some((line) => !line.pricing)) {
+      setFlavorError("Um sabor não está disponível na montagem atual. Atualize o cardápio.")
+      return
+    }
+    setCart((current) => {
+      const nowInCart = current.filter((item) => item.product.id === product.id)
+        .reduce((sum, item) => sum + item.quantity, 0)
+      if (product.trackStock && nowInCart + total > product.stock) return current
+      const next = [...current]
+      for (const line of lines) {
+        if (!line.pricing) continue
+        const key = modifierSelectionKey(product.id, line.optionIds)
+        const position = next.findIndex((item) => item.key === key)
+        if (position >= 0) next[position] = { ...next[position], quantity: next[position].quantity + line.quantity }
+        else next.push({ key, product, quantity: line.quantity, optionIds: line.optionIds,
+          unitPrice: line.pricing.unitPrice, modifiers: line.pricing.modifiers })
+      }
+      return next
+    })
+    setFlavorBatchProduct(null)
+    setFlavorQuantities({})
+    setCartOpen(true)
+  }
+
+  const activeFlavorGroup = flavorBatchProduct ? quickFlavorGroup(flavorBatchProduct) : null
+  const flavorOptions = activeFlavorGroup?.options.filter((option) => option.active) || []
+  const flavorSelected = Object.values(flavorQuantities).reduce((sum, count) => sum + count, 0)
+  const flavorMax = flavorBatchProduct?.trackStock
+    ? Math.max(0, flavorBatchProduct.stock - totalProductQuantity(flavorBatchProduct.id))
+    : 999
+  const priceForFlavor = (optionId: number) => flavorBatchProduct
+    ? validateCartCustomization(flavorBatchProduct, [optionId])?.unitPrice ?? null : null
+  const flavorBatchTotal = flavorOptions.reduce((total, option) =>
+    total + (priceForFlavor(option.id) || 0) * (flavorQuantities[option.id] || 0), 0)
 
   function quantityFor(productId: number) { return totalProductQuantity(productId) }
   function changeAddress(patch: Partial<Checkout>) { setCheckout((current) => ({ ...current, ...patch, latitude: null, longitude: null })); setGpsAccuracy(null); setDeliveryQuote(null); setAddressNotice("") }
@@ -1169,7 +1288,7 @@ export function Storefront({
                     {!unavailable && hasModifiers && (
                       <button
                         aria-label={`Montar ${product.name}`}
-                        onClick={() => setCustomizingProduct(product)}
+                        onClick={() => openProductSelection(product)}
                         style={{ backgroundColor: settings.primaryColor }}
                         className="absolute bottom-2 right-2 flex h-10 items-center justify-center gap-1 rounded-xl px-3 text-xs font-black text-white shadow-lg"
                       >
@@ -1206,7 +1325,7 @@ export function Storefront({
                       <span className="absolute right-2 top-2 rounded-full bg-gray-950 px-2 py-1 text-[10px] font-black text-white shadow">{quantity} no carrinho</span>
                     )}
                   </div>
-                  <button type="button" onClick={() => setCustomizingProduct(product)} disabled={unavailable} className="block w-full pt-2 text-left disabled:cursor-default">
+                  <button type="button" onClick={() => openProductSelection(product)} disabled={unavailable} className="block w-full pt-2 text-left disabled:cursor-default">
                     {product.promotion && productPromotionDisplayPrice(product) < product.price ? (
                       <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="text-xs font-bold text-gray-400 line-through">{money(product.price)}</span>
@@ -1432,6 +1551,73 @@ export function Storefront({
           </div>
         </aside>
       </div>}
+
+      {flavorBatchProduct && activeFlavorGroup && (
+        <div className="fixed inset-0 z-[85] flex items-end justify-center bg-gray-950/60 sm:items-center sm:p-4">
+          <button type="button" aria-label="Fechar escolha de sabores" className="absolute inset-0"
+            onClick={() => setFlavorBatchProduct(null)} />
+          <section role="dialog" aria-modal="true" aria-label={`Escolher sabores para ${flavorBatchProduct.name}`}
+            className="relative flex max-h-[94vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
+            <header className="flex items-center justify-between border-b border-gray-100 p-5">
+              <div><h2 className="text-xl font-black">{flavorBatchProduct.name}</h2>
+                <p className="mt-1 text-sm text-gray-500">Distribua a quantidade entre os sabores.</p></div>
+              <button type="button" onClick={() => setFlavorBatchProduct(null)} aria-label="Fechar"
+                className="rounded-xl bg-gray-100 p-2"><X className="h-5 w-5" /></button>
+            </header>
+            <div className="overflow-y-auto p-5">
+              <div className="flex items-center justify-between rounded-2xl bg-gray-50 p-4">
+                <div><p className="text-sm font-black">Quantos {flavorBatchProduct.name}?</p>
+                  <p className="text-xs text-gray-500">Escolha a quantidade total</p></div>
+                <div className="flex items-center gap-3 rounded-xl bg-white p-1 ring-1 ring-gray-200">
+                  <button type="button" aria-label="Diminuir quantidade total" disabled={flavorBatchQuantity <= 1}
+                    onClick={() => changeFlavorBatchQuantity(-1)} className="rounded-lg p-2 disabled:opacity-30"><Minus className="h-4 w-4" /></button>
+                  <strong className="min-w-7 text-center">{flavorBatchQuantity}</strong>
+                  <button type="button" aria-label="Aumentar quantidade total" disabled={flavorBatchQuantity >= flavorMax}
+                    onClick={() => changeFlavorBatchQuantity(1)} className="rounded-lg p-2 disabled:opacity-30"><Plus className="h-4 w-4" /></button>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-between">
+                <h3 className="text-sm font-black">Quantos de cada sabor?</h3>
+                <span className={flavorSelected === flavorBatchQuantity ? "text-emerald-700" : "text-orange-700"}>
+                  <strong className="text-sm">{flavorSelected} de {flavorBatchQuantity}</strong>
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {flavorOptions.map((option) => {
+                  const unit = priceForFlavor(option.id)
+                  const quantity = flavorQuantities[option.id] || 0
+                  return <div key={option.id} className="flex items-center justify-between gap-2 rounded-2xl border border-gray-100 p-3">
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{option.name}</p>
+                      <p className="text-xs text-gray-500">{unit == null ? "Indisponível" : money(unit)} cada</p></div>
+                    <div className="flex items-center gap-2 rounded-xl bg-gray-50 p-1">
+                      <button type="button" aria-label={`Diminuir ${option.name}`}
+                        disabled={quantity === 0} onClick={() => changeFlavorCount(option.id, -1)}
+                        className="rounded-lg p-2 disabled:opacity-30"><Minus className="h-4 w-4" /></button>
+                      <strong className="min-w-5 text-center text-sm">{quantity}</strong>
+                      <button type="button" aria-label={`Aumentar ${option.name}`}
+                        disabled={unit == null || flavorSelected >= flavorBatchQuantity}
+                        onClick={() => changeFlavorCount(option.id, 1)}
+                        className="rounded-lg p-2 disabled:opacity-30"><Plus className="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                })}
+              </div>
+              {flavorError && <p role="alert" className="mt-3 text-sm font-semibold text-red-600">{flavorError}</p>}
+              {flavorMax <= 0 && <p className="mt-3 text-sm text-red-600">Sem unidades em estoque para adicionar.</p>}
+            </div>
+            <footer className="flex items-center justify-between gap-3 border-t border-gray-100 p-5">
+              <div><p className="text-xs text-gray-500">Total dos sabores</p>
+                <strong className="text-xl">{money(flavorBatchTotal)}</strong></div>
+              <button type="button" onClick={addFlavorBatch}
+                disabled={flavorSelected !== flavorBatchQuantity || flavorMax < flavorBatchQuantity}
+                style={{ backgroundColor: settings.primaryColor }}
+                className="h-12 rounded-xl px-4 text-sm font-black text-white disabled:opacity-40">
+                Adicionar {flavorBatchQuantity} ao carrinho
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       <ProductCustomizer
         product={
