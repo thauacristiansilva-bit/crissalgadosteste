@@ -1,6 +1,7 @@
 "use client"
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
+import { whatsappMessageUrl } from "@/lib/order-contact"
 import { whatsappOrderText } from "@/lib/order-summary"
 import { useRouter } from "next/navigation"
 import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, PackageCheck, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
@@ -937,7 +938,7 @@ export function Storefront({
 
   function whatsappOrderUrl(order: Order) {
     const text = whatsappOrderText(order, settings.storeName, settings.timeZone)
-    return `https://wa.me/${settings.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`
+    return whatsappMessageUrl(settings.whatsapp, text)
   }
 
   async function shareStore() {
@@ -1007,7 +1008,11 @@ export function Storefront({
       }
       setUseCashback(false)
       localStorage.setItem(lastOrderStorageKey, data.order.reference); localStorage.removeItem("saborflow_last_order"); localStorage.removeItem("cris_last_order"); localStorage.removeItem("crisflow_cart_v1"); localStorage.removeItem(cartStorageKey); setCart([]); setCheckoutOpen(false); setCreatedOrder(data.order); setLastOrder(data.order)
-      if (settings.checkoutAfterSubmit === "whatsapp") router.push(`${orderPath(data.order.reference)}#whatsapp`)
+      if (settings.checkoutAfterSubmit === "whatsapp") {
+        const link = whatsappOrderUrl(data.order)
+        if (link) window.location.assign(link)
+        else router.push(`${orderPath(data.order.reference)}#whatsapp`)
+      }
       else if (settings.checkoutAfterSubmit === "site") router.push(orderPath(data.order.reference))
     } catch (err) { setError(err instanceof Error ? err.message : "Erro ao enviar pedido.") } finally { setSending(false) }
   }
@@ -1445,7 +1450,7 @@ export function Storefront({
         onApplyOrder={applyAiOrderItems}
       />
 
-      {createdOrder && settings.checkoutAfterSubmit === "ask" && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido recebido!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · seu pedido já está salvo no SaborFlow e continuará disponível para acompanhamento.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} target="_blank" rel="noreferrer" className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(orderPath(createdOrder.reference))} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar meu pedido</button></div><p className="mt-3 text-center text-[11px] text-gray-400">O WhatsApp abre separadamente; seu pedido não sai do sistema.</p></div></div>}
+      {createdOrder && (settings.checkoutAfterSubmit === "ask" || settings.checkoutAfterSubmit === "whatsapp") && <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl">✓</div><h2 className="mt-4 text-center text-2xl font-black">Pedido recebido!</h2><p className="mt-2 text-center text-sm text-gray-500">{createdOrder.code} · seu pedido já está salvo no SaborFlow e continuará disponível para acompanhamento.</p><div className="mt-5 grid gap-3"><a href={whatsappOrderUrl(createdOrder)} target="_blank" rel="noreferrer" className="flex h-12 items-center justify-center rounded-xl bg-emerald-600 text-sm font-black text-white">Enviar resumo no WhatsApp</a><button onClick={() => router.push(orderPath(createdOrder.reference))} className="h-12 rounded-xl bg-gray-950 text-sm font-black text-white">Acompanhar meu pedido</button></div><p className="mt-3 text-center text-[11px] text-gray-400">Seu pedido já está salvo. No WhatsApp, toque em Enviar para compartilhar o resumo com a loja.</p></div></div>}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Banknote,
   Bike,
@@ -20,6 +20,8 @@ import {
   XCircle,
 } from "lucide-react"
 import type { Courier, Order, OrderStatus, PaymentStatus, StoreSettings } from "@/lib/types"
+import { whatsappOrderText } from "@/lib/order-summary"
+import { whatsappMessageUrl, whatsappStatusText } from "@/lib/order-contact"
 import { printOrder } from "@/lib/print-order"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
@@ -91,6 +93,21 @@ export function OrdersPanel({
   const [busyId, setBusyId] = useState<number | null>(null)
   const [busyAll, setBusyAll] = useState(false)
   const [error, setError] = useState("")
+  const [messageOrder, setMessageOrder] = useState<Order | null>(null)
+  const [messageDraft, setMessageDraft] = useState("")
+  const messageDialog = useRef<HTMLElement>(null)
+  const messageTrigger = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!messageOrder) return
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => { document.body.style.overflow = overflow; messageTrigger.current?.focus() }
+  }, [messageOrder])
+  function prepareMessage(order: Order, kind: "summary" | "status") {
+    messageTrigger.current = document.activeElement as HTMLElement | null
+    setMessageOrder(order)
+    setMessageDraft(kind === "summary" ? whatsappOrderText(order, settings.storeName, settings.timeZone) : whatsappStatusText(order, settings.storeName))
+  }
   const pendingCount = orders.filter((order) => order.status === "pending").length
 
   const filteredOrders = useMemo(() => {
@@ -119,6 +136,7 @@ export function OrdersPanel({
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível atualizar o pedido.")
       onOrderUpdated(data.order)
+      if (patch.status === "in-route") prepareMessage(data.order, "status")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao atualizar pedido.")
     } finally {
@@ -144,6 +162,27 @@ export function OrdersPanel({
 
   return (
     <section data-tutorial="orders-root" className="space-y-4">
+      {messageOrder && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+        <section ref={messageDialog} role="dialog" aria-modal="true" aria-labelledby="order-message-title" onKeyDown={event => {
+          if (event.key === "Escape") setMessageOrder(null)
+          if (event.key === "Tab") {
+            const nodes = messageDialog.current?.querySelectorAll<HTMLElement>('textarea, a[href], button:not(:disabled)')
+            if (!nodes?.length) return
+            const first = nodes[0], last = nodes[nodes.length - 1]
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+          }
+        }} className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+          <h2 id="order-message-title" className="text-lg font-black">Mensagem para {messageOrder.customer.name}</h2>
+          <p className="mt-1 text-sm text-gray-500">Pedido {messageOrder.code}. Você pode ajustar o texto antes de abrir o WhatsApp. Editar esta mensagem não altera o pedido.</p>
+          <label className="mt-4 block text-sm font-bold">Texto da mensagem<textarea autoFocus value={messageDraft} onChange={event => setMessageDraft(event.target.value)} rows={12} className="mt-2 w-full rounded-xl border border-gray-200 p-3 text-sm font-normal" /></label>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {messageDraft.trim() && whatsappMessageUrl(messageOrder.customer.phone, messageDraft) && <a href={whatsappMessageUrl(messageOrder.customer.phone, messageDraft)} target="_blank" rel="noreferrer" className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white">Abrir WhatsApp para enviar</a>}
+            <button type="button" onClick={() => setMessageOrder(null)} className="rounded-xl border px-4 py-3 text-sm font-bold">Fechar</button>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">O envio só acontece quando você toca em Enviar no WhatsApp.</p>
+        </section>
+      </div>}
       <div data-tutorial="orders-filters" className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Pedidos</h2>
@@ -219,7 +258,7 @@ export function OrdersPanel({
                       <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Cliente</p>
                       <p className="mt-1 font-semibold text-gray-900">{order.customer.name}</p>
                       <a
-                        href={`https://wa.me/${order.customer.phone.replace(/\D/g, "")}`}
+                        href={whatsappMessageUrl(order.customer.phone, "")}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-700"
@@ -312,6 +351,9 @@ export function OrdersPanel({
                       <CheckCircle2 className="h-4 w-4" /> Marcar pago
                     </button>
                   )}
+
+                  <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "summary")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white disabled:opacity-50"><MessageCircle className="h-4 w-4" /> Enviar pedido ao cliente</button>
+                  <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "status")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 text-xs font-bold text-emerald-700 disabled:opacity-50"><MessageCircle className="h-4 w-4" /> {order.status === "in-route" ? "Avisar saída para entrega" : "Avisar status ao cliente"}</button>
 
                   <button
                     type="button"

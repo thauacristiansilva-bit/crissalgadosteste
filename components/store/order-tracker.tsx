@@ -1,7 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { CheckCircle2, ChefHat, Clock3, ExternalLink, Home, MapPin, MessageCircle, Navigation, PackageCheck, ShieldCheck, Star, Truck } from "lucide-react"
+import { whatsappOrderText } from "@/lib/order-summary"
+import { orderStatusMessage, whatsappMessageUrl } from "@/lib/order-contact"
 import type { Order, StoreSettings } from "@/lib/types"
 
 const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -49,10 +51,22 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
   const [feedbackBusy, setFeedbackBusy] = useState(false)
   const [tracking, setTracking] = useState<DeliveryTracking | null>(null)
 
+  const previousStatus = useRef({ reference: initialOrder.reference, status: initialOrder.status })
+  const [statusNotice, setStatusNotice] = useState("")
+  useEffect(() => {
+    const previous = previousStatus.current
+    if (previous.reference === order.reference && previous.status !== order.status) setStatusNotice(orderStatusMessage(order))
+    previousStatus.current = { reference: order.reference, status: order.status }
+  }, [order.reference, order.status, order.type])
+
   useEffect(() => {
     let disposed = false
+    let refreshing = false
 
     const refresh = async () => {
+      if (refreshing || disposed) return
+      refreshing = true
+      try {
       if (document.visibilityState !== "visible") return
       const response = await fetch(
         `/api/order-status/${encodeURIComponent(order.reference)}`,
@@ -64,8 +78,11 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
         order?: Order
         tracking?: DeliveryTracking
       }
+      if (disposed) return
       if (data.order) setOrder(data.order)
       if (data.tracking) setTracking(data.tracking)
+      } catch { /* Tenta novamente na próxima atualização. */ }
+      finally { refreshing = false }
     }
 
     void refresh()
@@ -76,27 +93,19 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
     const id = window.setInterval(refresh, 5000)
     const onFocus = () => void refresh()
     window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onFocus)
     return () => {
       disposed = true
       window.clearInterval(id)
       window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onFocus)
     }
   }, [order.reference, order.status])
 
   const steps = useMemo(() => { const base = [{ key: "pending", label: "Recebido", icon: Clock3 }, { key: "accepted", label: "Aceito", icon: CheckCircle2 }, { key: "preparing", label: "Preparando", icon: ChefHat }, { key: "ready", label: "Pronto", icon: PackageCheck }]; if (order.type === "delivery") base.push({ key: "in-route", label: "Em rota", icon: Truck }); base.push({ key: "completed", label: order.type === "delivery" ? "Entregue" : "Retirado", icon: CheckCircle2 }); return base }, [order.type])
   const activeIndex = steps.findIndex((step) => step.key === order.status)
   const whatsappContactMessage = encodeURIComponent(`Olá! Quero falar sobre o pedido ${order.reference} (${order.code}).`)
-  const whatsappSummaryMessage = encodeURIComponent([
-    `✅ ${order.code} · ${settings.storeName}`,
-    "",
-    ...order.items.map((item) => `${item.quantity}x ${item.name} · ${money(item.subtotal)}`),
-    "",
-    order.deliveryFee > 0 ? `Entrega: ${money(order.deliveryFee)}` : "",
-    `Total: ${money(order.total)}`,
-    `Status: ${statusLabel[order.status]}`,
-    "",
-    `Referência: ${order.reference}`,
-  ].filter(Boolean).join("\n"))
+  const whatsappSummaryMessage = encodeURIComponent(whatsappOrderText(order, settings.storeName, settings.timeZone))
 
   async function sendFeedback() {
     setFeedbackBusy(true); setFeedbackError("")
@@ -113,6 +122,8 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
             <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-3xl font-black">{order.code}</h1><p className="mt-1 text-sm text-white/80">Referência {order.reference}</p></div><span className="w-fit rounded-full bg-white/20 px-3 py-1.5 text-sm font-black">{statusLabel[order.status]}</span></div>
           </div>
           <div className="p-5 sm:p-8">
+            <div aria-live="polite" aria-atomic="true">{statusNotice && <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950"><strong>Atualização do seu pedido</strong><p className="mt-1 text-sm">{statusNotice}</p><button type="button" onClick={() => setStatusNotice("")} className="mt-2 text-xs font-bold underline">Entendi</button></div>}</div>
+            <p className="mb-4 text-xs text-gray-500">Mantenha esta página aberta para acompanhar os avisos do pedido. Ao voltar para ela, o status será atualizado.</p>
             {order.status === "cancelled" ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800"><strong>Pedido cancelado.</strong><p className="mt-1 text-sm">Fale com a loja caso precise de ajuda.</p></div> : <>{order.status === "pending" && <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950"><strong>Pedido recebido pela loja.</strong><p className="mt-1 text-sm">A empresa escolheu confirmação manual. Assim que a equipe aceitar, o status será atualizado automaticamente aqui.</p></div>}<div className="mb-3 flex items-center justify-between"><h2 className="font-black">Acompanhe seu pedido</h2><span className="text-xs text-gray-400">Atualiza automaticamente</span></div><div className={`grid gap-2 ${order.type === "delivery" ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>{steps.map((step, index) => { const Icon = step.icon; const done = activeIndex >= index || order.status === "completed"; const active = activeIndex === index; return <div key={step.key} className={`rounded-2xl border p-3 ${done ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"}`}><div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full ${active ? "text-white" : done ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-500"}`} style={active ? { backgroundColor: settings.primaryColor } : undefined}><Icon className="h-4 w-4" /></div><p className={`text-xs font-black ${done ? "text-gray-900" : "text-gray-400"}`}>{step.label}</p></div> })}</div><p className="mt-3 text-xs text-gray-500">Horário escolhido: <strong>{date(order.requestedFor)}</strong>{order.scheduled ? " · agendado" : ""}.</p></>}
 
             {order.type === "delivery" && tracking?.enabled && (
@@ -168,7 +179,7 @@ export function OrderTracker({ initialOrder, settings, storePath = "/" }: { init
             </div>
 
             {order.notes && <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900"><strong>Observação:</strong> {order.notes}</div>}
-            {settings.whatsapp && <div id="whatsapp" className="mt-5 scroll-mt-6 grid gap-2 sm:grid-cols-2"><a href={`https://wa.me/${settings.whatsapp.replace(/\D/g, "")}?text=${whatsappSummaryMessage}`} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700"><MessageCircle className="h-4 w-4" />Enviar resumo no WhatsApp</a><a href={`https://wa.me/${settings.whatsapp.replace(/\D/g, "")}?text=${whatsappContactMessage}`} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 text-sm font-black text-emerald-700 hover:bg-emerald-50"><MessageCircle className="h-4 w-4" />Falar com a loja</a></div>}
+            {settings.whatsapp && <div id="whatsapp" className="mt-5 scroll-mt-6 grid gap-2 sm:grid-cols-2"><a href={whatsappMessageUrl(settings.whatsapp, decodeURIComponent(whatsappSummaryMessage))} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700"><MessageCircle className="h-4 w-4" />Enviar resumo no WhatsApp</a><a href={whatsappMessageUrl(settings.whatsapp, decodeURIComponent(whatsappContactMessage))} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 text-sm font-black text-emerald-700 hover:bg-emerald-50"><MessageCircle className="h-4 w-4" />Falar com a loja</a></div>}
 
             {order.status === "completed" && <section className="mt-6 rounded-3xl border border-violet-100 bg-violet-50/60 p-5">
               <div className="flex items-center gap-2"><Star className="h-5 w-5 text-violet-600" /><h2 className="font-black">Como foi sua experiência?</h2></div>
