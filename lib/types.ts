@@ -256,6 +256,8 @@ export interface Order {
   total: number
   paymentStatus: PaymentStatus
   paymentMethod: PaymentMethod
+  /** Forma de cartão efetivamente recebida; dados de cartão não são armazenados. */
+  paymentCardType?: "credit" | "debit"
   changeFor?: string
   notes?: string
   customer: OrderCustomer

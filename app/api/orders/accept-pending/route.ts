@@ -33,9 +33,14 @@ export async function POST() {
         )
       }
 
-      const pending = (await getTenantOrders(session.organizationId)).filter(
-        (order) => order.status === "pending",
+      // sf-payment-before-accept-v1: aceite em lote nunca inclui pedidos não pagos.
+      const allOrders = await getTenantOrders(session.organizationId)
+      const pending = allOrders.filter(
+        (order) => order.status === "pending" && order.paymentStatus === "paid",
       )
+      const skippedUnpaidCount = allOrders.filter(
+        (order) => order.status === "pending" && order.paymentStatus !== "paid",
+      ).length
 
       const updated = []
       for (const order of pending) {
@@ -47,6 +52,7 @@ export async function POST() {
 
       return NextResponse.json({
         acceptedCount: updated.length,
+        skippedUnpaidCount,
         orders: updated,
       })
     },

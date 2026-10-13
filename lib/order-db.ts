@@ -70,6 +70,10 @@ function iso(value: Date | string) {
 }
 
 function mapOrder(row: OrderRow, itemRows: OrderItemRow[]): Order {
+  // sf-payment-before-accept-v1: subtipo do cartão é metadado interno na JSONB já existente;
+  // não exige migração nem expõe o metadado dentro dos dados do cliente.
+  const customerWithMeta = row.customer as Order["customer"] & { _sfPaymentCardType?: string }
+  const { _sfPaymentCardType, ...safeCustomer } = customerWithMeta
   return {
     id: Number(row.id),
     code: row.code,
@@ -88,9 +92,11 @@ function mapOrder(row: OrderRow, itemRows: OrderItemRow[]): Order {
     total: Number(row.total),
     paymentStatus: row.payment_status,
     paymentMethod: row.payment_method,
+    ...(row.payment_status === "paid" && row.payment_method === "card" && (_sfPaymentCardType === "credit" || _sfPaymentCardType === "debit")
+      ? { paymentCardType: _sfPaymentCardType } : {}),
     ...(row.change_for ? { changeFor: row.change_for } : {}),
     ...(row.notes ? { notes: row.notes } : {}),
-    customer: row.customer,
+    customer: safeCustomer,
     ...(row.courier_id !== null ? { courierId: Number(row.courier_id) } : {}),
     ...(row.courier_name ? { courierName: row.courier_name } : {}),
     ...(row.delivery_zone_id !== null
@@ -455,7 +461,12 @@ async function writeOrder(
       order.paymentMethod,
       order.changeFor || null,
       order.notes || null,
-      JSON.stringify(order.customer || {}),
+      JSON.stringify({
+        ...order.customer,
+        ...(order.paymentMethod === "card" && order.paymentCardType
+          ? { _sfPaymentCardType: order.paymentCardType }
+          : {}),
+      }),
       order.courierId ?? null,
       order.courierName || null,
       order.deliveryZoneId ?? null,
@@ -645,6 +656,8 @@ export async function updateTenantOrder(
       Order,
       | "status"
       | "paymentStatus"
+      | "paymentMethod"
+      | "paymentCardType"
       | "courierId"
       | "courierName"
       | "printedAt"
@@ -658,6 +671,11 @@ export async function updateTenantOrder(
     throw new Error("Pedido cancelado não pode ser reaberto automaticamente.")
   }
 
+  // sf-payment-before-accept-v1: a regra também vale para aceite em lote e demais rotas.
+  const effectivePayment = patch.paymentStatus ?? current.paymentStatus
+  if (patch.status && !["pending", "cancelled"].includes(patch.status) && effectivePayment !== "paid") {
+    throw new Error("Confirme o recebimento do pagamento antes de aceitar ou avançar este pedido.")
+  }
   const next: Order = {
     ...current,
     ...patch,
@@ -701,7 +719,8 @@ export async function getTenantUnprintedOrders(
       `
         ${orderSelect}
         WHERE organization_id = $1
-          AND status NOT IN ('completed', 'cancelled')
+          AND status IN ('accepted', 'preparing', 'ready', 'in-route')
+          AND payment_status = 'paid'
           AND printed_at IS NULL
           AND created_at >= $2
         ORDER BY created_at ASC, id ASC

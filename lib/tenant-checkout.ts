@@ -794,10 +794,8 @@ async function createTenantCheckoutOrderInScope(
       code: `#${id}`,
       reference,
       type: input.type,
-      status:
-        channel === "PDV" || settings.orderAcceptanceMode !== "manual"
-          ? "accepted"
-          : "pending",
+      // sf-payment-before-accept-v1: primeiro aguarda pagamento e aceite explícito.
+      status: "pending",
       channel,
       subtotal,
       discount:

@@ -6,7 +6,7 @@ import {
 } from "@/lib/order-db"
 import { getVerifiedTenantSession } from "@/lib/tenant-access"
 import { runWithTenantRlsScope } from "@/lib/rls-context"
-import type { OrderStatus, PaymentStatus } from "@/lib/types"
+import type { OrderStatus, PaymentStatus, PaymentMethod } from "@/lib/types"
 import { getTenantCourier, isTenantOperationsReady } from "@/lib/operations-db"
 import {
   canAssignCourier,
@@ -47,6 +47,8 @@ export async function PATCH(
     | {
         status?: OrderStatus
         paymentStatus?: PaymentStatus
+        paymentMethod?: PaymentMethod
+        paymentCardType?: "credit" | "debit"
         courierId?: number
       }
     | null
@@ -58,6 +60,8 @@ export async function PATCH(
   const hasSupportedMutation =
     body.status !== undefined ||
     body.paymentStatus !== undefined ||
+    body.paymentMethod !== undefined ||
+    body.paymentCardType !== undefined ||
     body.courierId !== undefined
 
   if (!hasSupportedMutation) {
@@ -79,6 +83,27 @@ export async function PATCH(
       { error: "Status de pagamento inválido." },
       { status: 400 },
     )
+  }
+
+  // sf-payment-before-accept-v1: confirmação manual precisa registrar a forma efetivamente recebida.
+  if (body.paymentMethod !== undefined && !["pix", "cash", "card"].includes(body.paymentMethod)) {
+    return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 })
+  }
+  if (body.paymentCardType !== undefined && !["credit", "debit"].includes(body.paymentCardType)) {
+    return NextResponse.json({ error: "Tipo de cartão inválido." }, { status: 400 })
+  }
+  if (body.paymentStatus === "paid") {
+    if (!body.paymentMethod) {
+      return NextResponse.json({ error: "Selecione Pix, dinheiro, crédito ou débito para confirmar o pagamento." }, { status: 400 })
+    }
+    if (body.paymentMethod === "card" && !body.paymentCardType) {
+      return NextResponse.json({ error: "Informe se o cartão foi crédito ou débito." }, { status: 400 })
+    }
+    if (body.paymentMethod !== "card" && body.paymentCardType) {
+      return NextResponse.json({ error: "Tipo de cartão só é permitido para pagamentos com cartão." }, { status: 400 })
+    }
+  } else if (body.paymentMethod !== undefined || body.paymentCardType !== undefined) {
+    return NextResponse.json({ error: "A forma recebida deve ser informada ao confirmar o pagamento." }, { status: 400 })
   }
 
   return runWithTenantRlsScope(
@@ -116,7 +141,7 @@ export async function PATCH(
       }
 
       if (
-        body.paymentStatus &&
+        (body.paymentStatus || body.paymentMethod || body.paymentCardType) &&
         !canUpdatePaymentStatus(session.role, session.operationalPermissions)
       ) {
         return NextResponse.json(
@@ -325,6 +350,11 @@ export async function PATCH(
           ...(body.status ? { status: body.status } : {}),
           ...(body.paymentStatus
             ? { paymentStatus: body.paymentStatus }
+            : {}),
+          ...(body.paymentMethod ? { paymentMethod: body.paymentMethod } : {}),
+          // Limpa o subtipo quando o recebimento foi Pix ou dinheiro.
+          ...(body.paymentStatus === "paid"
+            ? { paymentCardType: body.paymentMethod === "card" ? body.paymentCardType : undefined }
             : {}),
           ...(courierPatch || {}),
         }

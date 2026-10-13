@@ -97,6 +97,8 @@ export function OrdersPanel({
   const [status, setStatus] = useState<"all" | OrderStatus>("all")
   const [busyId, setBusyId] = useState<number | null>(null)
   const [busyAll, setBusyAll] = useState(false)
+  // sf-payment-before-accept-v1: a escolha precisa ser explícita antes de confirmar o dinheiro recebido.
+  const [receivedMethods, setReceivedMethods] = useState<Record<number, "" | "pix" | "cash" | "credit" | "debit">>({})
   const [error, setError] = useState("")
   const [messageOrder, setMessageOrder] = useState<Order | null>(null)
   const [messageDraft, setMessageDraft] = useState("")
@@ -113,7 +115,8 @@ export function OrdersPanel({
     setMessageOrder(order)
     setMessageDraft(kind === "summary" ? whatsappOrderText(order, settings.storeName, settings.timeZone) : kind === "review" ? whatsappReviewText(order, settings.storeName, settings.googleReviewUrl) : whatsappStatusText(order, settings.storeName))
   }
-  const pendingCount = orders.filter((order) => order.status === "pending").length
+  const pendingCount = orders.filter((order) => order.status === "pending" && order.paymentStatus === "paid").length
+  const awaitingPaymentCount = orders.filter((order) => order.status === "pending" && order.paymentStatus !== "paid").length
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("pt-BR")
@@ -129,7 +132,7 @@ export function OrdersPanel({
     }).sort((a, b) => ordersPriority[a.status] - ordersPriority[b.status])
   }, [orders, search, status])
 
-  async function patchOrder(id: number, patch: { status?: OrderStatus; paymentStatus?: PaymentStatus; courierId?: number; courierName?: string }) {
+  async function patchOrder(id: number, patch: { status?: OrderStatus; paymentStatus?: PaymentStatus; paymentMethod?: Order["paymentMethod"]; paymentCardType?: "credit" | "debit"; courierId?: number; courierName?: string }) {
     setBusyId(id)
     setError("")
     try {
@@ -148,6 +151,17 @@ export function OrdersPanel({
     } finally {
       setBusyId(null)
     }
+  }
+
+  function confirmReceivedPayment(order: Order) {
+    const choice = receivedMethods[order.id]
+    if (!choice) { setError("Selecione como o pagamento foi recebido antes de confirmar."); return }
+    const paymentMethod: Order["paymentMethod"] = choice === "credit" || choice === "debit" ? "card" : choice
+    void patchOrder(order.id, {
+      paymentStatus: "paid",
+      paymentMethod,
+      ...(choice === "credit" || choice === "debit" ? { paymentCardType: choice } : {}),
+    })
   }
 
   async function acceptAllPending() {
@@ -197,7 +211,7 @@ export function OrdersPanel({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {pendingCount > 0 && (
             <button type="button" onClick={acceptAllPending} disabled={busyAll} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white disabled:opacity-50">
-              <CheckCircle2 className="h-4 w-4" />{busyAll ? "Aceitando..." : `Aceitar pendentes (${pendingCount})`}
+              <CheckCircle2 className="h-4 w-4" />{busyAll ? "Aceitando..." : `Aceitar pagos (${pendingCount})`}
             </button>
           )}
           <label className="relative min-w-64">
@@ -226,9 +240,9 @@ export function OrdersPanel({
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      <div data-tutorial="orders-acceptance" className={`rounded-xl border px-4 py-3 text-sm ${settings.orderAcceptanceMode === "manual" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
-        <strong>{settings.orderAcceptanceMode === "manual" ? "Aceite manual ativo." : "Aceite automático ativo."}</strong>{" "}
-        {settings.orderAcceptanceMode === "manual" ? "Novos pedidos aguardam confirmação da equipe antes do preparo." : "Novos pedidos online já entram como aceitos."}
+      <div data-tutorial="orders-acceptance" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <strong>Pagamento antes do aceite.</strong> Novos pedidos ficam aguardando. Confirme o recebimento (Pix, dinheiro, crédito ou débito) antes de aceitar ou preparar.
+        {awaitingPaymentCount > 0 && <span className="ml-1 font-semibold">{awaitingPaymentCount} pedido(s) aguardando pagamento.</span>}
       </div>
 
       <div data-tutorial="orders-list" className="space-y-3">
@@ -286,7 +300,7 @@ export function OrdersPanel({
                       <p className="mt-1 text-xl font-black text-gray-950">{formatCurrency(order.total)}</p>
                       <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                         <PaymentIcon method={order.paymentMethod} />
-                        <span>{order.paymentMethod === "pix" ? "PIX" : order.paymentMethod === "cash" ? "Dinheiro" : "Cartão"}</span>
+                        <span>{order.paymentMethod === "pix" ? "Pix" : order.paymentMethod === "cash" ? "Dinheiro" : order.paymentCardType === "credit" ? "Crédito" : order.paymentCardType === "debit" ? "Débito" : "Cartão"}</span>
                         <span className={`rounded-full px-2 py-0.5 font-semibold ${order.paymentStatus === "paid" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                           {order.paymentStatus === "paid" ? "Pago" : "Não pago"}
                         </span>
@@ -338,7 +352,8 @@ export function OrdersPanel({
                   {actionableStatus && (
                     <button
                       type="button"
-                      disabled={busyId === order.id}
+                      disabled={busyId === order.id || order.paymentStatus !== "paid"}
+                      title={order.paymentStatus === "paid" ? undefined : "Confirme primeiro o pagamento recebido."}
                       onClick={() => patchOrder(order.id, { status: actionableStatus })}
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-700 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"
                     >
@@ -348,15 +363,33 @@ export function OrdersPanel({
                   )}
 
                   {order.paymentStatus === "unpaid" && order.status !== "cancelled" && (
-                    <button
-                      type="button"
-                      disabled={busyId === order.id}
-                      onClick={() => patchOrder(order.id, { paymentStatus: "paid" })}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="h-4 w-4" /> Marcar pago
-                    </button>
-                  )}
+                     <div className="w-full rounded-xl border border-amber-200 bg-amber-50 p-3">
+                       <label className="block text-xs font-semibold text-amber-900" htmlFor={`paid-method-${order.id}`}>Como foi recebido?</label>
+                       <select
+                         id={`paid-method-${order.id}`}
+                         aria-label="Forma de pagamento recebida"
+                         value={receivedMethods[order.id] || ""}
+                         onChange={(event) => setReceivedMethods(previous => ({ ...previous, [order.id]: event.target.value as "" | "pix" | "cash" | "credit" | "debit" }))}
+                         disabled={busyId === order.id}
+                         className="mt-2 h-10 w-full rounded-lg border border-amber-300 bg-white px-2 text-sm text-gray-900"
+                       >
+                         <option value="">Selecione...</option>
+                         <option value="pix">Pix</option>
+                         <option value="cash">Dinheiro</option>
+                         <option value="credit">Cartão de crédito</option>
+                         <option value="debit">Cartão de débito</option>
+                       </select>
+                       <button
+                         type="button"
+                         disabled={busyId === order.id || !receivedMethods[order.id]}
+                         onClick={() => confirmReceivedPayment(order)}
+                         className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white disabled:opacity-50"
+                       >
+                         <CheckCircle2 className="h-4 w-4" /> {busyId === order.id ? "Salvando..." : "Confirmar pagamento"}
+                       </button>
+                       <p className="mt-2 text-xs text-amber-800">Confirme apenas depois que o valor realmente for recebido.</p>
+                     </div>
+                   )}
 
                   <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "summary")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white disabled:opacity-50"><MessageCircle className="h-4 w-4" /> Enviar pedido ao cliente</button>
                   <button type="button" disabled={!whatsappMessageUrl(order.customer.phone, "")} onClick={() => prepareMessage(order, "status")} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 text-xs font-bold text-emerald-700 disabled:opacity-50"><MessageCircle className="h-4 w-4" /> {order.status === "in-route" ? "Avisar saída para entrega" : "Avisar status ao cliente"}</button>
