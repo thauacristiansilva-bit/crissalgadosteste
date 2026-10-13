@@ -1,6 +1,7 @@
 "use client"
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
+import { whatsappOrderText } from "@/lib/order-summary"
 import { useRouter } from "next/navigation"
 import { Bike, CalendarDays, Check, ChevronRight, Clock3, ExternalLink, Globe2, Home, Info, LogIn, MapPin, MessageCircle, Minus, PackageCheck, Plus, Search, ShoppingBag, Store, UserRound, X } from "lucide-react"
 import { FacebookBrandIcon, InstagramBrandIcon, YouTubeBrandIcon } from "@/components/icons/social-brand-icons"
@@ -935,11 +936,7 @@ export function Storefront({
   }
 
   function whatsappOrderUrl(order: Order) {
-    const items = order.items.map((item) => {
-      const modifiers = (item.modifiers || []).map((modifier) => `  + ${modifier.optionName}${modifier.included ? " (incluído)" : modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : ""}`).join("\n")
-      return `${item.quantity}x ${item.name} - ${money(item.subtotal)}${modifiers ? `\n${modifiers}` : ""}`
-    }).join("\n")
-    const text = `Olá! Acabei de fazer o pedido ${order.code} (${order.reference}).\n\n${items}\n\nTotal: ${money(order.total)}\nRecebimento: ${new Date(order.requestedFor).toLocaleString("pt-BR")}\nTipo: ${order.type === "delivery" ? "Delivery" : "Retirada"}`
+    const text = whatsappOrderText(order, settings.storeName, settings.timeZone)
     return `https://wa.me/${settings.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`
   }
 

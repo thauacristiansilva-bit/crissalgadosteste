@@ -23,13 +23,19 @@ type ProductDraft = {
 const emptyDraft: ProductDraft = { name: "", description: "", category: "Salgados", price: "", image: "", featured: false, trackStock: false, stock: "0", minStock: "0" }
 
 export function ProductsPanel({ products, categories, onProductsChanged }: { products: Product[]; categories: Category[]; onProductsChanged: (products: Product[]) => void }) {
-  const [draft, setDraft] = useState<ProductDraft>(emptyDraft)
+  const [draft, setDraft] = useState<ProductDraft>(() => ({ ...emptyDraft, category: categories.filter(item => item.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true }))[0]?.name || "Salgados" }))
   const [editingId, setEditingId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState("")
   const [compositionProduct, setCompositionProduct] = useState<Product | null>(null)
-  const activeCategories = useMemo(() => categories.filter((category) => category.active), [categories])
+  const activeCategories = useMemo(() => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })), [categories])
+
+  const [selectedCategory, setSelectedCategory] = useState("")
+  const categoryNames = useMemo(() => [...new Set([...categories.map(item => item.name), ...products.map(item => item.category)])].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })), [categories, products])
+  const currentCategory = selectedCategory === "__all__" ? "__all__" : categoryNames.includes(selectedCategory) ? selectedCategory : categoryNames[0] || ""
+  const visibleProducts = useMemo(() => products.filter(item => currentCategory === "__all__" || item.category === currentCategory).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })), [products, currentCategory])
+  const reusableGroups = useMemo(() => [...new Map(products.flatMap(item => item.modifierGroups || []).filter(group => group.active && group.options.length).map(group => [group.id, group])).values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })), [products])
 
   function beginEdit(product: Product) {
     setEditingId(product.id)
@@ -113,9 +119,19 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,.6fr)]">
       <div data-tutorial="products-list" className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4"><div><h2 className="text-lg font-bold text-gray-900">Produtos</h2><p className="text-sm text-gray-500">Itens exibidos no cardápio público.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{products.filter((product) => product.active).length} ativos</span></div>
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4"><div><h2 className="text-lg font-bold text-gray-900">Produtos</h2><p className="text-sm text-gray-500">Itens exibidos no cardápio público.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{visibleProducts.filter((product) => product.active).length} ativos nesta seleção</span></div>
+        <div className="border-b border-gray-100 px-5 py-4">
+          <label className="block text-sm font-bold text-gray-800">Categoria para editar
+            <select value={currentCategory} onChange={event => setSelectedCategory(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm">
+              {categoryNames.map(name => <option key={name} value={name}>{name}</option>)}
+              <option value="__all__">Todas as categorias</option>
+            </select>
+          </label>
+          <p className="mt-2 text-xs text-gray-500">{visibleProducts.length} produto(s) · em ordem alfabética</p>
+        </div>
         <div className="divide-y divide-gray-100">
-          {products.map((product) => {
+          {!visibleProducts.length && <p className="px-5 py-6 text-sm text-gray-500">Nenhum produto nesta categoria.</p>}
+          {visibleProducts.map((product) => {
             const outOfStock = product.trackStock && product.stock <= 0
             return <div key={product.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <div className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-xl ${product.active ? "bg-amber-50" : "bg-gray-100 grayscale"}`}>{product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" /> : "🥟"}</div>
@@ -148,7 +164,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
         </div>
         <button data-tutorial="product-save" disabled={busy || uploadingImage || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
       </form>
-      <ProductCompositionEditor product={compositionProduct} onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} />
+      <ProductCompositionEditor product={compositionProduct} catalogProducts={products} reusableGroups={reusableGroups} onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} />
     </section>
   )
 }
