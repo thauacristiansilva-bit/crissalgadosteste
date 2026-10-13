@@ -386,7 +386,7 @@ export function Storefront({
       .filter(
         (p) =>
           category === "Todos" ||
-          p.category === category,
+          p.category === category || p.category.startsWith(`${category} / `),
       )
       .filter(
         (p) =>
@@ -428,7 +428,7 @@ export function Storefront({
     const activeProducts = products.filter((product) => product.active)
     const counts = new Map<string, number>()
     counts.set("Todos", activeProducts.length)
-    for (const product of activeProducts) counts.set(product.category, (counts.get(product.category) || 0) + 1)
+    for (const product of activeProducts) { counts.set(product.category, (counts.get(product.category) || 0) + 1); const parent = product.category.split(" / ")[0]; if (parent !== product.category) counts.set(parent, (counts.get(parent) || 0) + 1) }
     return counts
   }, [products])
   const selectedDate = checkout.timing === "scheduled" ? checkout.scheduleDate : ""
@@ -1136,10 +1136,17 @@ export function Storefront({
         <section className="sticky top-14 z-20 -mx-4 mt-5 border-y border-black/5 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="mx-auto flex max-w-7xl items-center gap-3 overflow-x-auto">
             <label className="relative min-w-[190px] max-w-xs flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="O que você procura?" className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-orange-100"/></label>
-            <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={category === item ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`flex h-11 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm font-black ${category === item ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}><span>{item}</span><span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{categoryCounts.get(item) || 0}</span></button>)}</div>
+            <div className="flex gap-1">{["Todos", ...categories.filter((item) => item.active && !item.name.includes(" / ")).map((item) => item.name)].map((item) => <button key={item} onClick={() => setCategory(item)} style={(category === item || (item !== "Todos" && category.startsWith(`${item} / `))) ? { borderColor: settings.primaryColor, color: settings.primaryColor } : undefined} className={`flex h-11 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm font-black ${(category === item || (item !== "Todos" && category.startsWith(`${item} / `))) ? "bg-white" : "border-transparent text-gray-700 hover:bg-gray-50"}`}><span>{item}</span><span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{categoryCounts.get(item) || 0}</span></button>)}</div>
           </div>
         </section>
 
+        {/* sf-subcategory-store-nav-v1 */}
+        {category !== "Todos" && categories.some(item => item.active && item.name.startsWith(`${category.split(" / ")[0]} / `)) &&
+          <nav className="mt-3 flex flex-wrap gap-2" aria-label="Subcategorias">
+            {[{name: category.split(" / ")[0], label: "Todos"}, ...categories.filter(item => item.active && item.name.startsWith(`${category.split(" / ")[0]} / `)).map(item => ({ name: item.name, label: item.name.split(" / ")[1] }))].map(item =>
+              <button key={item.name} type="button" onClick={() => setCategory(item.name)}
+                className={`rounded-xl border px-3 py-2 text-xs font-bold ${category === item.name ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-700"}`}>{item.label}</button>)}
+          </nav>}
         <section className="mt-5">
           <div className="mb-4 flex items-end justify-between gap-3"><div><h2 className="text-2xl font-black">{category === "Todos" ? "Cardápio" : category}</h2><p className="text-sm text-gray-500">{filtered.length} produto(s) disponíveis</p></div></div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

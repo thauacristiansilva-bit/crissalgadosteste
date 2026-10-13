@@ -1,0 +1,56 @@
+SABORFLOW — SUBCATEGORIAS + PREÇOS POR SABOR NO MESMO CADASTRO
+Atualização incremental para 13/10/2026 (Next.js / PostgreSQL)
+
+INSTALAÇÃO FÁCIL (VS CODE)
+1) Extraia o ZIP e coloque a pasta inteira "saborflow-categorias-sabores" DENTRO da pasta do sistema, onde fica o package.json.
+2) Abra o terminal do VS Code na pasta raiz do SaborFlow e execute:
+
+node saborflow-categorias-sabores/INSTALAR-TUDO.cjs
+npm run typecheck
+npm run build
+
+3) SOMENTE se os dois testes passarem, faça o deploy:
+
+git add components/admin/products-panel.tsx components/admin/categories-panel.tsx components/store/storefront.tsx components/admin/settings-panel.tsx components/admin/orders-panel.tsx components/admin/product-composition-editor.tsx components/store/order-tracker.tsx lib/order-summary.ts lib/order-contact.ts lib/print-order.ts "app/api/orders/[id]/ticket-pdf/route.ts" INICIAR-IMPRESSAO-AUTOMATICA.ps1
+git commit -m "Simplifica subcategorias e cadastro de sabores com precos"
+git push origin main
+
+COMO USAR
+A) Painel > Categorias > Nome: Pastéis. Em "Dentro de qual categoria?", selecione "Nenhuma" e salve.
+B) Painel > Categorias > Nome: Pastéis secos; em "Dentro de qual categoria?", selecione "Pastéis". Salve.
+C) Painel > Produtos > Novo produto: Pastel seco. Selecione "Pastéis / Pastéis secos".
+D) Marque "Cada sabor tem um preço diferente". Adicione sabores, como:
+   Carne: R$ 9,00; Queijo: R$ 10,00; Frango: R$ 12,00.
+E) Salve o produto. O preço inicial será R$ 9,00 e cada sabor será vendido pelo preço final escolhido.
+F) Para criar outros complementos ou combos use "Montagem" ao lado do produto. O painel completo abre logo abaixo, sem redirecionar para outra tela.
+G) A loja mostrará as categorias principais e um segundo nível de navegação para subcategorias. Pastéis > Pastéis secos.
+H) Cada adição ao carrinho seleciona um sabor e sua quantidade; para misturar sabores no mesmo pedido, adicione outro sabor do mesmo produto.
+
+O QUE O INSTALADOR FAZ
+- Inclui as correções anteriores de WhatsApp, Google ao concluir pedido e tickets econômicos; se já estiverem presentes, não aplica de novo.
+- Atualiza apenas três interfaces nesta etapa nova: products-panel.tsx, categories-panel.tsx e storefront.tsx.
+- Usa os endpoints já existentes do banco e regras atuais de preço por sabor. NÃO exige SQL ou npm install.
+- Mantém dados, produtos antigos, estoque, regras de montagem, tickets, pedidos e WhatsApp; nenhum registro existente é apagado.
+- Faz backup dos arquivos antes de mudar. Em versão desconhecida ou conflito, cancela em vez de sobrepor correções.
+- Pode executar novamente, sem duplicar subcategorias, botões ou sabores.
+
+ATENÇÃO AO SALVAR SABORES
+- Ao criar/editar um produto com vários preços, ele fica temporariamente oculto até que os sabores sejam salvos, evitando vendas com valores errados.
+- Se ocorrer falha entre as duas etapas de salvamento, confira o aviso e corrija o produto antes de reativá-lo.
+- O preço base será o menor preço informado. A diferença de preço de cada sabor é gravada na montagem como adicional, de modo que o valor final do sabor seja exatamente o indicado no cadastro.
+- Se o mesmo grupo de sabores estiver compartilhado por mais produtos, o editor rápido bloqueia alterações para proteger os demais; use a montagem detalhada.
+- Existem categorias principais e apenas um nível de subcategoria.
+- Somente categorias vazias podem ser excluídas; o sistema impede remoção de categorias com produtos ou subcategorias.
+
+TESTES RECOMENDADOS
+1) Crie Pastéis > Pastéis secos; confirme a navegação da loja.
+2) Cadastre Pastel seco com Carne (R$ 9), Frango (R$ 12), Queijo (R$ 10); confira os três preços no painel de compra.
+3) Peça 2 de Carne e 1 de Frango: subtotal esperado 2x9 + 12 = R$ 30,00.
+4) Confira ticket cozinha e PDF e conclusão com convite do Google.
+5) Teste produtos antigos, combos, controle de estoque e WhatsApp.
+
+VALIDAÇÃO
+- Sintaxe JS do instalador e TSX gerados testada localmente, com instalação e repetição em um projeto de teste.
+- A compilação completa e os testes com a base Railway, impressora e WhatsApp reais PRECISAM ocorrer no seu ambiente após aplicar.
+
+Se o instalador cancelar por divergência de arquivos, não use force: envie o erro e o ZIP atualizado do seu projeto. O script foi projetado para não sobrescrever modificações desconhecidas.

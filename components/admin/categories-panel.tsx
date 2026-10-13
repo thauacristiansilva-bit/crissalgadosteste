@@ -6,6 +6,7 @@ import type { Category } from "@/lib/types"
 
 export function CategoriesPanel({ categories, onCategoriesChanged }: { categories: Category[]; onCategoriesChanged: (categories: Category[]) => void }) {
   const [name, setName] = useState("")
+  const [parent, setParent] = useState("") // sf-category-parent-ui-v1
   const [editingId, setEditingId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -18,13 +19,15 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
 
   function edit(category: Category) {
     setEditingId(category.id)
-    setName(category.name)
+    setParent(category.name.includes(" / ") ? category.name.split(" / ")[0] : "")
+    setName(category.name.includes(" / ") ? category.name.split(" / ")[1] : category.name)
     setError("")
   }
 
   function clear() {
     setEditingId(null)
     setName("")
+    setParent("")
   }
 
   async function submit(event: FormEvent) {
@@ -35,7 +38,7 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
       const response = await fetch(editingId ? `/api/categories/${editingId}` : "/api/categories", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(editingId ? { name: parent ? `${parent} / ${name.trim()}` : name.trim() } : { name: name.trim(), parent }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Não foi possível salvar a categoria.")
@@ -72,18 +75,24 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
       <div data-tutorial="categories-list" className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-100 px-5 py-4">
           <h2 className="text-lg font-bold text-gray-900">Categorias</h2>
-          <p className="text-sm text-gray-500">Organize a navegação do cardápio.</p>
+          <p className="text-sm text-gray-500">Crie categorias principais e subcategorias. Ex.: Pastéis → Pastéis secos.</p>
         </div>
         <div className="divide-y divide-gray-100">
-          {categories.map((category) => (
+          {[...categories].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })).map((category) => (
             <div key={category.id} className="flex items-center gap-3 px-5 py-4">
               <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${category.active ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-400"}`}>#</div>
               <div className="min-w-0 flex-1">
-                <p className="font-bold text-gray-900">{category.name}</p>
-                <p className="text-xs text-gray-500">Ordem {category.sortOrder} · {category.active ? "Visível" : "Oculta"}</p>
+                <p className="font-bold text-gray-900">{category.name.includes(" / ") ? `↳ ${category.name.split(" / ")[1]}` : category.name}</p>
+                <p className="text-xs text-gray-500">{category.name.includes(" / ") ? `Dentro de ${category.name.split(" / ")[0]} · ` : ""}Ordem {category.sortOrder} · {category.active ? "Visível" : "Oculta"}</p>
               </div>
               <button onClick={() => edit(category)} className="rounded-lg p-2 text-gray-500 hover:bg-blue-50 hover:text-blue-700"><Pencil className="h-4 w-4" /></button>
               <button disabled={busy} onClick={() => toggle(category)} className={`rounded-lg p-2 ${category.active ? "text-gray-500 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50"}`}><Power className="h-4 w-4" /></button>
+  <button type="button" disabled={busy} aria-label={`Excluir ${category.name}`}
+    onClick={async () => { if (!window.confirm(`Excluir ${category.name}? Só será permitido se estiver vazia.`)) return; setBusy(true); setError(""); try {
+      const response = await fetch(`/api/categories/${category.id}`, { method: "DELETE" });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível excluir."); await refresh();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Erro ao excluir categoria.") } finally { setBusy(false) } }}
+    className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" title="Excluir categoria vazia">Excluir</button>
             </div>
           ))}
         </div>
@@ -95,7 +104,15 @@ export function CategoriesPanel({ categories, onCategoriesChanged }: { categorie
           {editingId && <button type="button" onClick={clear} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100"><X className="h-4 w-4" /></button>}
         </div>
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-        <label data-tutorial="category-name" className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Nome *</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Salgados" className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
+        <label className="mb-4 block text-sm font-semibold text-gray-800">Dentro de qual categoria?
+      <select value={parent} onChange={event => setParent(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm">
+        <option value="">Nenhuma (categoria principal)</option>
+        {categories.filter(item => item.active && !item.name.includes(" / ") && item.id !== editingId).sort((a,b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })).map(item =>
+          <option key={item.id} value={item.name}>{item.name}</option>)}
+      </select>
+      <small className="mt-1 block font-normal text-gray-500">Subcategorias são opcionais, com apenas um nível.</small>
+    </label>
+    <label data-tutorial="category-name" className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">Nome *</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder={parent ? "Ex.: Pastéis secos" : "Ex.: Pastéis"} className="h-11 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label>
         <button data-tutorial="category-save" disabled={busy} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : "Salvar categoria"}</button>
       </form>
     </section>
