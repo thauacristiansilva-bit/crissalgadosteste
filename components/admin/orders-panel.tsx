@@ -45,6 +45,11 @@ const statusClasses: Record<OrderStatus, string> = {
   cancelled: "bg-red-50 text-red-700 ring-red-200",
 }
 
+// sf-orders-priority-v1: atendimento antes do histórico; sem apagar pedidos.
+const ordersPriority: Record<OrderStatus, number> = {
+  pending: 0, accepted: 1, preparing: 2, ready: 3, "in-route": 4, completed: 5, cancelled: 6,
+}
+
 const nextStatus: Partial<Record<OrderStatus, OrderStatus>> = {
   pending: "accepted",
   accepted: "preparing",
@@ -121,7 +126,7 @@ export function OrdersPanel({
         order.customer.name.toLocaleLowerCase("pt-BR").includes(query) ||
         order.customer.phone.toLowerCase().includes(query)
       return matchesStatus && matchesSearch
-    })
+    }).sort((a, b) => ordersPriority[a.status] - ordersPriority[b.status])
   }, [orders, search, status])
 
   async function patchOrder(id: number, patch: { status?: OrderStatus; paymentStatus?: PaymentStatus; courierId?: number; courierName?: string }) {

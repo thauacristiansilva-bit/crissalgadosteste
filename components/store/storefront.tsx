@@ -48,6 +48,16 @@ function quickFlavorGroup(product: Product) {
     ? group : null
 }
 
+// sf-upsell-checkout-v1: sugestões calculadas só com produtos ativos da própria loja.
+function suggestionTier(product: Product) {
+  const label = `${product.category} ${product.name}`
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR")
+  if (/bebid|refrigerant|refri|suco|agua|guarana|soda|energetic|coca.cola|pepsi/.test(label)) return 0
+  if (/combo|kit|promocional/.test(label)) return 1
+  if (/acompanhament|sobremesa|porcao|extra|adicional|molho|batata/.test(label)) return 2
+  return 3
+}
+
 type CartItem = {
   key: string
   product: Product
@@ -132,6 +142,7 @@ export function Storefront({
   const [cartHydrated, setCartHydrated] = useState(false)
   const cartLoadedKeyRef = useRef("")
   const [cartOpen, setCartOpen] = useState(false)
+  const [suggestionReturnToCart, setSuggestionReturnToCart] = useState(false)
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
   const [flavorBatchProduct, setFlavorBatchProduct] = useState<Product | null>(null)
   const [flavorBatchQuantity, setFlavorBatchQuantity] = useState(1)
@@ -558,6 +569,30 @@ export function Storefront({
     ],
   )
   const totalItems = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart])
+  // sf-upsell-checkout-v1: bebidas primeiro, depois combos e acompanhamentos.
+  // Não recomendar itens já escolhidos nem produtos sem disponibilidade.
+  const suggestedProducts = useMemo(() => {
+    if (!cart.length) return [] as Product[]
+    const inCart = new Set(cart.map((item) => item.product.id))
+    const eligible = products.filter((product) =>
+      product.active && !inCart.has(product.id) &&
+      (!product.trackStock || product.stock > 0) &&
+      product.ingredientStockAvailable !== false,
+    )
+    const order = [...eligible].sort((a, b) =>
+      suggestionTier(a) - suggestionTier(b) || a.name.localeCompare(b.name, "pt-BR"),
+    )
+    const top = order.filter((item) => suggestionTier(item) === 0).slice(0, 2)
+    const combos = order.filter((item) => suggestionTier(item) === 1).slice(0, 1)
+    const extras = order.filter((item) => suggestionTier(item) === 2).slice(0, 1)
+    const selected = [...top, ...combos, ...extras]
+    for (const item of order) {
+      if (selected.length >= 4) break
+      if (!selected.some((current) => current.id === item.id)) selected.push(item)
+    }
+    return selected
+  }, [cart, products])
+
   const deliveryFee = checkout.type === "delivery" ? deliveryQuote?.fee || 0 : 0
   const cashbackBalance = settings.loyaltyEnabled && customer
     ? Number((Math.max(0, customer.loyaltyPoints) / 100).toFixed(2))
@@ -594,6 +629,54 @@ export function Storefront({
       if (existing) return current.map((item) => item.key === key ? { ...item, quantity } : item)
       return [...current, { key, product, quantity, optionIds: [], unitPrice: pricing.unitPrice, modifiers: pricing.modifiers }]
     })
+  }
+
+  // sf-upsell-checkout-v1: reaproveita o carrinho e o montador, sem alterar preço ou regras.
+  function addSuggestedProduct(product: Product) {
+    // Um cupom anteriormente aplicado precisa ser recalculado após mudar os itens.
+    setCouponDiscount(0)
+    setCouponMessage("")
+    setCheckout((current) => ({ ...current, couponCode: "" }))
+    if (productHasModifiers(product)) {
+      setCheckoutOpen(false)
+      setCartOpen(false)
+      setSuggestionReturnToCart(true)
+      openProductSelection(product)
+      return
+    }
+    setSimpleProductQuantity(product, totalProductQuantity(product.id) + 1)
+  }
+
+  function renderSuggestions() {
+    if (!suggestedProducts.length) return null
+    return (
+      <section aria-label="Sugestões para seu pedido" className="rounded-2xl border border-orange-100 bg-orange-50/50 p-4">
+        <div className="mb-3">
+          <h3 className="text-base font-black text-gray-950">Que tal completar seu pedido?</h3>
+          <p className="mt-1 text-xs text-gray-600">Esqueceu a bebida ou quer aproveitar um combo? É opcional.</p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {suggestedProducts.map((product) => (
+            <div key={product.id} className="flex items-center gap-2 rounded-xl border border-orange-100 bg-white p-2">
+              {product.image
+                ? <img src={product.image} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                : <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-xl">🍽️</div>}
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 text-xs font-bold text-gray-900">{product.name}</p>
+                <p className="mt-1 text-xs text-gray-500">{productHasModifiers(product)
+                  ? "Escolha as opções"
+                  : money(productPriceForTiming(product, checkout.timing))}</p>
+              </div>
+              <button type="button" onClick={() => addSuggestedProduct(product)}
+                aria-label={`Adicionar ${product.name} ao pedido`}
+                className="shrink-0 rounded-lg bg-gray-950 px-2.5 py-2 text-xs font-bold text-white">
+                {productHasModifiers(product) ? "Escolher" : "+ Adicionar"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+    )
   }
 
   function applyAiOrderItems(
@@ -718,6 +801,7 @@ export function Storefront({
       }]
     })
     setCustomizingProduct(null)
+    if (suggestionReturnToCart) { setSuggestionReturnToCart(false); setCartOpen(true) }
   }
 
   // Uma linha por sabor no carrinho: 2 Carne + 1 Queijo continuam como 3 unidades.
@@ -808,6 +892,7 @@ export function Storefront({
     })
     setFlavorBatchProduct(null)
     setFlavorQuantities({})
+    setSuggestionReturnToCart(false)
     setCartOpen(true)
   }
 
@@ -1081,6 +1166,15 @@ export function Storefront({
     }
     setCheckoutOpen(true)
   }
+
+  // Recalcula a taxa caso algum item seja acrescentado na finalização.
+  useEffect(() => {
+    if (!checkoutOpen || checkout.type !== "delivery" || checkout.latitude == null || checkout.longitude == null) return
+    const timer = window.setTimeout(() => { void refreshDeliveryQuote(checkout.latitude!, checkout.longitude!) }, 150)
+    return () => window.clearTimeout(timer)
+  // A taxa só deve ser atualizada quando o subtotal muda, não quando a cotação responde.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal])
 
   function validateCheckoutStepOne() {
     setError("")
@@ -1394,6 +1488,7 @@ export function Storefront({
                 </div>
               ))}
             </div>
+            {renderSuggestions()}
             <div className="my-5 flex items-center justify-between border-t border-gray-100 pt-4"><span className="font-semibold text-gray-500">Subtotal</span><strong className="text-xl">{money(subtotal)}</strong></div>
             <button disabled={!settings.acceptingOrders} onClick={openCheckout} style={{ backgroundColor: settings.primaryColor }} className="h-12 w-full rounded-xl font-black text-white disabled:opacity-50">{!settings.acceptingOrders ? "Pedidos temporariamente pausados" : isOpen ? "Escolher recebimento" : "Agendar pedido"}</button>
           </div>
@@ -1423,6 +1518,8 @@ export function Storefront({
               </section>
 
               <section><h3 className="mb-3 font-black">Como você quer receber?</h3><div className="grid gap-3 sm:grid-cols-2">{settings.pickupEnabled && <button type="button" onClick={() => { setCheckout({ ...checkout, type: "pickup", scheduleTime: "" }); setShowDeliveryMap(false); setDeliveryQuote(null) }} className={`flex items-center gap-3 rounded-2xl border p-4 text-left ${checkout.type === "pickup" ? "border-orange-400 bg-orange-50" : "border-gray-200"}`}><Store className="h-5 w-5"/><span><strong className="block">Retirada</strong><small className="text-gray-500">Buscar no estabelecimento</small></span>{checkout.type === "pickup" && <Check className="ml-auto h-5 w-5 text-orange-600"/>}</button>}{settings.deliveryEnabled && <button type="button" onClick={() => { setCheckout({ ...checkout, type: "delivery", scheduleTime: "" }); setShowDeliveryMap(false) }} className={`flex items-center gap-3 rounded-2xl border p-4 text-left ${checkout.type === "delivery" ? "border-orange-400 bg-orange-50" : "border-gray-200"}`}><Bike className="h-5 w-5"/><span><strong className="block">Delivery</strong><small className="text-gray-500">Taxa pelo endereço</small></span>{checkout.type === "delivery" && <Check className="ml-auto h-5 w-5 text-orange-600"/>}</button>}</div></section>
+
+              {renderSuggestions()}
 
               <section><h3 className="mb-3 flex items-center gap-2 font-black"><CalendarDays className="h-5 w-5 text-orange-500" />Quando?</h3><div className="space-y-3">{!isOpen && settings.acceptingOrders && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-xs font-black uppercase text-amber-800">Loja fora do expediente</p><p className="mt-1 text-sm font-bold text-amber-950">Você pode deixar o pedido agendado para um horário disponível.</p></div>}<select value={checkout.timing} onChange={(e) => {
   const timing = e.target.value as Checkout["timing"]
@@ -1561,7 +1658,7 @@ export function Storefront({
             <header className="flex items-center justify-between border-b border-gray-100 p-5">
               <div><h2 className="text-xl font-black">{flavorBatchProduct.name}</h2>
                 <p className="mt-1 text-sm text-gray-500">Distribua a quantidade entre os sabores.</p></div>
-              <button type="button" onClick={() => setFlavorBatchProduct(null)} aria-label="Fechar"
+              <button type="button" onClick={() => { setFlavorBatchProduct(null); if (suggestionReturnToCart) { setSuggestionReturnToCart(false); setCartOpen(true) } }} aria-label="Fechar"
                 className="rounded-xl bg-gray-100 p-2"><X className="h-5 w-5" /></button>
             </header>
             <div className="overflow-y-auto p-5">
@@ -1629,7 +1726,7 @@ export function Storefront({
             : null
         }
         primaryColor={settings.primaryColor}
-        onClose={() => setCustomizingProduct(null)}
+        onClose={() => { setCustomizingProduct(null); if (suggestionReturnToCart) { setSuggestionReturnToCart(false); setCartOpen(true) } }}
         onConfirm={(customization) => {
           if (customizingProduct) addCustomizedProduct(customizingProduct, customization)
         }}
