@@ -1,0 +1,12 @@
+
+# SaborFlow Railway build - arquivos locais
+.git
+node_modules
+.next
+.env
+.env.*
+**/.env
+**/.env.*
+saborflow-railway-build
+.saborflow-build-backup-*
+*.zip
