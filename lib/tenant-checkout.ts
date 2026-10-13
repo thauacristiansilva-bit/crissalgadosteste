@@ -138,8 +138,9 @@ function normalizedItems(
       throw new Error("Quantidade de produto ou complementos inválidos.")
     }
 
-    const modifierOptionIds = [...new Set(parsedModifierOptionIds)]
-    if (modifierOptionIds.length > 50) {
+    // sf-salgados-minmax-v2: preservar repetição de sabores em pacotes.
+    const modifierOptionIds = parsedModifierOptionIds
+    if (modifierOptionIds.length > 100) {
       throw new Error("Há complementos demais em um dos itens do pedido.")
     }
 
@@ -600,6 +601,7 @@ async function createTenantCheckoutOrderInScope(
           modifierGroups: groups,
         },
         requestedItem.modifierOptionIds,
+        requestedItem.quantity,
       )
 
       if (!pricing.ok) throw new Error(pricing.error)

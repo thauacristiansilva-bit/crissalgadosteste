@@ -63,7 +63,9 @@ export function validateAndPriceModifierSelection(
 
     selected.forEach((option) => known.add(option.id))
 
-    const minimum = Math.max(group.required ? 1 : 0, group.minSelect)
+    // sf-salgados-minmax-v2: limites de salgados por pacote, multiplicados pela quantidade vendida.
+    const perUnitMinimum = Math.max(group.required ? 1 : 0, group.minSelect)
+    const minimum = group.selectionMode === "bundle" ? perUnitMinimum * quantity : perUnitMinimum
     if (group.selectionMode !== "bundle" && requested.filter((id) => options.some((option) => option.id === id)).length !== selected.length) {
       return { ok: false as const, error: `${group.name}: não repita a mesma opção neste grupo.` }
     }

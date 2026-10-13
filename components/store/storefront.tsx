@@ -347,10 +347,10 @@ export function Storefront({
             const product = products.find((item) => item.id === Number(entry.productId))
             if (!product || !product.active) return []
             const optionIds = Array.isArray(entry.optionIds) ? entry.optionIds.map(Number) : []
-            const pricing = validateCartCustomization(product, optionIds)
-            if (!pricing) return []
             let quantity = Math.max(1, Math.floor(Number(entry.quantity || 1)))
             if (product.trackStock) quantity = Math.min(quantity, product.stock)
+            const pricing = validateCartCustomization(product, optionIds, quantity)
+            if (!pricing) return []
             return quantity > 0 ? [{
               key: modifierSelectionKey(product.id, optionIds),
               product,
@@ -603,13 +603,15 @@ export function Storefront({
     : 0
   const total = Math.max(0, cashbackEligibleAmount - cashbackDiscount) + deliveryFee
 
-  function validateCartCustomization(product: Product, optionIds: number[]) {
+  // sf-salgados-minmax-v2: carrinho considera a quantidade dos kits.
+  function validateCartCustomization(product: Product, optionIds: number[], quantity = 1) {
     const result = validateAndPriceModifierSelection(
       {
         ...product,
         price: productPriceForTiming(product, checkout.timing),
       },
       optionIds,
+      quantity,
     )
     return result.ok ? result : null
   }
@@ -768,6 +770,9 @@ export function Storefront({
     setCart((current) => {
       const target = current.find((item) => item.key === key)
       if (!target) return current
+      if (target.product.modifierGroups?.some((group) => group.active && group.selectionMode === "bundle")) {
+        return quantity <= 0 ? current.filter((item) => item.key !== key) : current
+      }
       let next = quantity
       if (target.product.trackStock) {
         const otherQuantity = current
@@ -786,15 +791,25 @@ export function Storefront({
       const currentProductQuantity = current
         .filter((item) => item.product.id === product.id)
         .reduce((sum, item) => sum + item.quantity, 0)
-      if (product.trackStock && currentProductQuantity >= product.stock) return current
+      if (product.trackStock && currentProductQuantity + customization.quantity > product.stock) return current
       const existing = current.find((item) => item.key === key)
       if (existing) {
-        return current.map((item) => item.key === key ? { ...item, quantity: item.quantity + 1 } : item)
+        if (product.modifierGroups?.some((group) => group.active && group.selectionMode === "bundle")) {
+          const optionIds = [...existing.optionIds, ...customization.optionIds]
+          const quantity = existing.quantity + customization.quantity
+          const pricing = validateCartCustomization(product, optionIds, quantity)
+          if (!pricing) return current
+          return current.map((item) => item.key === key ? { ...item,
+            key: modifierSelectionKey(product.id, optionIds), optionIds, quantity,
+            unitPrice: pricing.unitPrice, modifiers: pricing.modifiers,
+          } : item)
+        }
+        return current.map((item) => item.key === key ? { ...item, quantity: item.quantity + customization.quantity } : item)
       }
       return [...current, {
         key,
         product,
-        quantity: 1,
+        quantity: customization.quantity,
         optionIds: customization.optionIds,
         unitPrice: customization.unitPrice,
         modifiers: customization.modifiers,
@@ -1469,16 +1484,20 @@ export function Storefront({
                       <p className="text-xs text-gray-500">{money(cartItemUnitPrice(item))} cada</p>
                     </div>
                     <div className="flex items-center gap-2 rounded-xl bg-gray-100 p-1">
-                      <button onClick={() => setCartItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-4 w-4" /></button>
-                      <strong className="min-w-5 text-center text-sm">{item.quantity}</strong>
-                      <button onClick={() => setCartItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-4 w-4" /></button>
+                      {item.product.modifierGroups?.some((group) => group.active && group.selectionMode === "bundle") ? (
+                        <><strong className="px-2 text-sm">{item.quantity} pacote(s)</strong><button type="button" onClick={() => setCartItemQuantity(item.key, 0)} className="px-2 py-1 text-xs font-bold text-red-700">Remover</button></>
+                      ) : (
+                        <><button onClick={() => setCartItemQuantity(item.key, item.quantity - 1)} className="p-1"><Minus className="h-4 w-4" /></button>
+                        <strong className="min-w-5 text-center text-sm">{item.quantity}</strong>
+                        <button onClick={() => setCartItemQuantity(item.key, item.quantity + 1)} className="p-1"><Plus className="h-4 w-4" /></button></>
+                      )}
                     </div>
                     <strong className="w-20 text-right text-sm">{money(cartItemUnitPrice(item) * item.quantity)}</strong>
                   </div>
                   {item.modifiers.length > 0 && (
                     <div className="ml-[60px] mt-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                      {item.modifiers.map((modifier) => (
-                        <p key={`${modifier.groupId}-${modifier.optionId}`}>
+                      {item.modifiers.map((modifier, modifierIndex) => (
+                        <p key={`${modifier.groupId}-${modifier.optionId}-${modifierIndex}`}>
                           <span className="font-bold">{modifier.groupName}:</span> {modifier.optionName}
                           {modifier.priceDelta > 0 ? ` (+${money(modifier.priceDelta)})` : modifier.included ? " (incluído)" : ""}
                         </p>
