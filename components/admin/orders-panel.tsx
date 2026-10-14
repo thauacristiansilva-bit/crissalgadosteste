@@ -23,6 +23,8 @@ import type { Courier, Order, OrderStatus, PaymentStatus, StoreSettings } from "
 import { whatsappOrderText } from "@/lib/order-summary"
 import { googleReviewLink, whatsappMessageUrl, whatsappReviewText, whatsappStatusText } from "@/lib/order-contact"
 import { printOrder } from "@/lib/print-order"
+import { OrdersCalendar } from "@/components/admin/orders-calendar"
+import { ExtraAccessPanel } from "@/components/admin/extra-access-panel"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
 
 const statusLabels: Record<OrderStatus, string> = {
@@ -93,6 +95,8 @@ export function OrdersPanel({
   onOrderUpdated: (order: Order) => void
   settings: StoreSettings
 }) {
+  // sf-calendar-extra-access-20261014
+  const [sfView, setSfView] = useState<"lista" | "calendario">("lista")
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<"all" | OrderStatus>("all")
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -203,6 +207,13 @@ export function OrdersPanel({
           <p className="mt-3 text-xs text-gray-500">O envio só acontece quando você toca em Enviar no WhatsApp.</p>
         </section>
       </div>}
+      <div className="flex flex-wrap gap-2 rounded-xl border bg-white p-3">
+        <button type="button" onClick={() => setSfView("lista")} aria-pressed={sfView === "lista"} className={sfView === "lista" ? "rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white" : "rounded-lg border px-4 py-2 text-sm font-bold"}>Lista de pedidos</button>
+        <button type="button" onClick={() => setSfView("calendario")} aria-pressed={sfView === "calendario"} className={sfView === "calendario" ? "rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white" : "rounded-lg border px-4 py-2 text-sm font-bold"}>Calendário</button>
+      </div>
+      {sfView === "calendario" && <OrdersCalendar orders={orders} timeZone={settings.timeZone || "America/Fortaleza"} />}
+      {sfView === "lista" && <ExtraAccessPanel />}
+      <div className={sfView === "calendario" ? "hidden" : "contents"}>
       <div data-tutorial="orders-filters" className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Pedidos</h2>
@@ -436,7 +447,7 @@ export function OrdersPanel({
                     <button
                       type="button"
                       disabled={busyId === order.id}
-                      onClick={() => patchOrder(order.id, { status: "cancelled" })}
+                      onClick={() => { if (window.confirm(`Deseja cancelar o pedido ${order.code}? Ele ficará no histórico.${order.paymentStatus === "paid" ? " ATENÇÃO: pagamento recebido. Reembolso não é automático." : ""}`)) patchOrder(order.id, { status: "cancelled" }) }}
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
                     >
                       <XCircle className="h-4 w-4" /> Cancelar
@@ -456,6 +467,7 @@ export function OrdersPanel({
             <p className="mt-1 text-sm text-gray-500">Altere a busca ou o filtro de status.</p>
           </div>
         )}
+      </div>
       </div>
     </section>
   )
