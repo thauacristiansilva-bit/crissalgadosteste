@@ -720,7 +720,7 @@ export async function getTenantUnprintedOrders(
       `
         ${orderSelect}
         WHERE organization_id = $1
-          AND status IN ('accepted', 'preparing', 'ready', 'in-route')
+          AND status IN ('pending', 'accepted', 'preparing', 'ready', 'in-route')
           AND printed_at IS NULL
           AND created_at >= $2
         ORDER BY created_at ASC, id ASC
