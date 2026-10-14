@@ -671,10 +671,11 @@ export async function updateTenantOrder(
     throw new Error("Pedido cancelado não pode ser reaberto automaticamente.")
   }
 
-  // sf-payment-before-accept-v1: a regra também vale para aceite em lote e demais rotas.
+  // sf-consolidated-recovery-v1: aceite e preparo independem do pagamento; liberacao exige quitacao.
   const effectivePayment = patch.paymentStatus ?? current.paymentStatus
-  if (patch.status && !["pending", "cancelled"].includes(patch.status) && effectivePayment !== "paid") {
-    throw new Error("Confirme o recebimento do pagamento antes de aceitar ou avançar este pedido.")
+  const needsPaymentForRelease = patch.status === "in-route" || patch.status === "completed"
+  if (needsPaymentForRelease && effectivePayment !== "paid") {
+    throw new Error("Confirme o pagamento antes de liberar a entrega ou concluir a retirada.")
   }
   const next: Order = {
     ...current,
@@ -720,7 +721,6 @@ export async function getTenantUnprintedOrders(
         ${orderSelect}
         WHERE organization_id = $1
           AND status IN ('accepted', 'preparing', 'ready', 'in-route')
-          AND payment_status = 'paid'
           AND printed_at IS NULL
           AND created_at >= $2
         ORDER BY created_at ASC, id ASC

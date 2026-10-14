@@ -5,6 +5,7 @@ import { Bot, FileText, MessageCircle, MonitorSmartphone } from "lucide-react"
 import type { StoreSettings } from "@/lib/types"
 import { IntegrationsDashboard } from "@/components/admin/integrations-dashboard"
 import { WhatsAppInbox } from "@/components/admin/whatsapp-inbox"
+import { PrinterConnectionCard } from "@/components/admin/printer-connection-card"
 
 type Connection = { id: string; name: string; provider: string; status: string; settings: { templateName?: string; orderNotificationsEnabled?: boolean } }
 type Overview = { connections: Connection[]; organization: { name: string }; runtime: { workerTokenConfigured: boolean; encryptionKeyConfigured: boolean } }
@@ -82,6 +83,7 @@ export function SimpleConnectionsPanel({ settings, organizationSlug, onSettingsC
     {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
 
+    <PrinterConnectionCard />
     <section className="rounded-3xl border bg-white p-5 shadow-sm"><h3 className="flex items-center gap-2 text-lg font-black"><MessageCircle className="h-5 w-5" />WhatsApp e atendimento</h3>
       <p className="mt-2 text-sm text-slate-600">{configured ? `Conexão ativa: ${whatsapp!.name}.` : "Cadastre seu número. O responsável pela plataforma fará a conexão oficial com a Meta."}</p>
       {!configured && <div className="mt-4 flex flex-wrap items-end gap-2"><label className="flex-1 text-sm font-bold">Número do WhatsApp com DDD<input type="tel" value={desiredPhone} onChange={event => setDesiredPhone(event.target.value)} placeholder="+55 11 99999-9999" className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" /></label><button type="button" disabled={busy} onClick={() => void savePhone()} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Salvar número</button></div>}

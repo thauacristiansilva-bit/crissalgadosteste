@@ -33,14 +33,10 @@ export async function POST() {
         )
       }
 
-      // sf-payment-before-accept-v1: aceite em lote nunca inclui pedidos não pagos.
+      // sf-consolidated-recovery-v1: aceite nao depende da confirmacao financeira.
       const allOrders = await getTenantOrders(session.organizationId)
-      const pending = allOrders.filter(
-        (order) => order.status === "pending" && order.paymentStatus === "paid",
-      )
-      const skippedUnpaidCount = allOrders.filter(
-        (order) => order.status === "pending" && order.paymentStatus !== "paid",
-      ).length
+      const pending = allOrders.filter((order) => order.status === "pending")
+      const skippedUnpaidCount = 0
 
       const updated = []
       for (const order of pending) {

@@ -37,14 +37,15 @@ const statusLabels: Record<OrderStatus, string> = {
   cancelled: "Cancelado",
 }
 
+// sf-consolidated-recovery-v1: cores e contadores de status, sem apagar historico.
 const statusClasses: Record<OrderStatus, string> = {
-  pending: "bg-gray-100 text-gray-700 ring-gray-200",
-  accepted: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  preparing: "bg-blue-50 text-blue-700 ring-blue-200",
-  ready: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  "in-route": "bg-violet-50 text-violet-700 ring-violet-200",
-  completed: "bg-gray-100 text-gray-700 ring-gray-200",
-  cancelled: "bg-red-50 text-red-700 ring-red-200",
+  pending: "bg-amber-50 text-amber-800 ring-amber-300",
+  accepted: "bg-sky-50 text-sky-800 ring-sky-300",
+  preparing: "bg-orange-50 text-orange-800 ring-orange-300",
+  ready: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+  "in-route": "bg-violet-50 text-violet-800 ring-violet-300",
+  completed: "bg-slate-100 text-slate-700 ring-slate-300",
+  cancelled: "bg-rose-50 text-rose-800 ring-rose-300",
 }
 
 // sf-orders-priority-v1: atendimento antes do histórico; sem apagar pedidos.
@@ -119,7 +120,7 @@ export function OrdersPanel({
     setMessageOrder(order)
     setMessageDraft(kind === "summary" ? whatsappOrderText(order, settings.storeName, settings.timeZone) : kind === "review" ? whatsappReviewText(order, settings.storeName, settings.googleReviewUrl) : whatsappStatusText(order, settings.storeName))
   }
-  const pendingCount = orders.filter((order) => order.status === "pending" && order.paymentStatus === "paid").length
+  const pendingCount = orders.filter((order) => order.status === "pending").length
   const awaitingPaymentCount = orders.filter((order) => order.status === "pending" && order.paymentStatus !== "paid").length
 
   const filteredOrders = useMemo(() => {
@@ -214,6 +215,14 @@ export function OrdersPanel({
       {sfView === "calendario" && <OrdersCalendar orders={orders} timeZone={settings.timeZone || "America/Fortaleza"} />}
       {sfView === "lista" && <ExtraAccessPanel />}
       <div className={sfView === "calendario" ? "hidden" : "contents"}>
+      <div data-sf-status-counters="v1" className="flex flex-wrap gap-2" role="group" aria-label="Filtrar pedidos por prioridade">
+        {(["pending", "accepted", "preparing", "ready", "in-route", "completed", "cancelled"] as OrderStatus[]).map((key) => (
+          <button key={key} type="button" onClick={() => setStatus(status === key ? "all" : key)} aria-pressed={status === key}
+            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold ring-1 ring-inset transition ${statusClasses[key]} ${status === key ? "outline outline-2 outline-offset-1 outline-slate-700" : ""}`}>
+            <span>{statusLabels[key]}</span><span className="rounded-full bg-white/80 px-2 py-0.5 tabular-nums">{orders.filter((order) => order.status === key).length}</span>
+          </button>
+        ))}
+      </div>
       <div data-tutorial="orders-filters" className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Pedidos</h2>
@@ -222,7 +231,7 @@ export function OrdersPanel({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {pendingCount > 0 && (
             <button type="button" onClick={acceptAllPending} disabled={busyAll} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white disabled:opacity-50">
-              <CheckCircle2 className="h-4 w-4" />{busyAll ? "Aceitando..." : `Aceitar pagos (${pendingCount})`}
+              <CheckCircle2 className="h-4 w-4" />{busyAll ? "Aceitando..." : `Aceitar pendentes (${pendingCount})`}
             </button>
           )}
           <label className="relative min-w-64">
@@ -252,7 +261,7 @@ export function OrdersPanel({
       )}
 
       <div data-tutorial="orders-acceptance" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <strong>Pagamento antes do aceite.</strong> Novos pedidos ficam aguardando. Confirme o recebimento (Pix, dinheiro, crédito ou débito) antes de aceitar ou preparar.
+        <strong>Pedido segue normalmente com pagamento pendente.</strong> Aceite e prepare normalmente; confirme Pix, dinheiro, crédito ou débito antes de liberar para entrega ou retirada.
         {awaitingPaymentCount > 0 && <span className="ml-1 font-semibold">{awaitingPaymentCount} pedido(s) aguardando pagamento.</span>}
       </div>
 
@@ -363,8 +372,8 @@ export function OrdersPanel({
                   {actionableStatus && (
                     <button
                       type="button"
-                      disabled={busyId === order.id || order.paymentStatus !== "paid"}
-                      title={order.paymentStatus === "paid" ? undefined : "Confirme primeiro o pagamento recebido."}
+                      disabled={busyId === order.id || ((actionableStatus === "in-route" || actionableStatus === "completed") && order.paymentStatus !== "paid")}
+                      title={order.paymentStatus === "paid" || (actionableStatus !== "in-route" && actionableStatus !== "completed") ? undefined : "Confirme o pagamento antes da saida ou retirada."}
                       onClick={() => patchOrder(order.id, { status: actionableStatus })}
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-700 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"
                     >

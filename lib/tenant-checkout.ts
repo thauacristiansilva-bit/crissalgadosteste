@@ -796,8 +796,8 @@ async function createTenantCheckoutOrderInScope(
       code: `#${id}`,
       reference,
       type: input.type,
-      // sf-payment-before-accept-v1: primeiro aguarda pagamento e aceite explícito.
-      status: "pending",
+      // sf-consolidated-recovery-v1: respeita aceite automatico/manual, sem exigir pagamento antecipado.
+      status: settings.orderAcceptanceMode === "manual" ? "pending" : "accepted",
       channel,
       subtotal,
       discount:
