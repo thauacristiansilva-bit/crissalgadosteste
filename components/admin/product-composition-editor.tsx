@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { ChevronDown, Plus, Save, Trash2, X } from "lucide-react"
 import type { Ingredient, Product, ProductComposition, ProductModifierGroup } from "@/lib/types"
 import { HelpLabel, HelpTip } from "@/components/admin/help-tip"
+import { isPricedFlavorGroup, PRICED_FLAVOR_DESCRIPTION } from "@/lib/product-composition"
 
 type RecipeDraft = { ingredientId: string; quantity: string }
 type OptionIngredientDraft = { ingredientId: string; quantity: string }
@@ -111,6 +112,9 @@ export function ProductCompositionEditor({
   const [selectedExistingGroup, setSelectedExistingGroup] = useState("")
   const [sourceCategory, setSourceCategory] = useState("")
   const [sourcePricing, setSourcePricing] = useState<"included" | "priced">("included")
+  // sf-composition-fullscreen-reuse-v1: reutilização de montagens prontas sem compartilhar dados entre produtos.
+  const [copySource, setCopySource] = useState("")
+  const [copyBusy, setCopyBusy] = useState(false)
 
   useEffect(() => {
     if (!product) return
@@ -166,6 +170,12 @@ export function ProductCompositionEditor({
     [recipe, ingredientMap],
   )
 
+  const readyProducts = useMemo(() => catalogProducts
+    .filter((item) => item.id !== product?.id && (item.modifierGroups || []).some((group) => !isPricedFlavorGroup(group) && group.options.length > 0))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })), [catalogProducts, product?.id])
+  const readyLists = useMemo(() => reusableGroups
+    .filter((group) => !isPricedFlavorGroup(group) && group.options.length > 0), [reusableGroups])
+
   if (!product) return null
 
   function addRecipeRow() {
@@ -199,6 +209,58 @@ export function ProductCompositionEditor({
       selectionMode: "bundle", includedQuantity: "4", active: true, options: [],
     }])
   }
+  // Copia opções e limites mínimo/máximo como dados independentes (sem existingGroupId).
+  async function copyReadyAssembly() {
+    if (!product || !copySource || copyBusy || loading || saving) return
+    const [kind, idText] = copySource.split(":")
+    const sourceId = Number(idText)
+    if (!Number.isSafeInteger(sourceId) || sourceId <= 0) return
+    const replaceAll = kind === "product"
+    if (replaceAll && groups.some((item) => item.description !== PRICED_FLAVOR_DESCRIPTION) &&
+      !window.confirm("Substituir as listas de montagem atuais pelas do produto escolhido? As alterações só serão gravadas ao clicar em Salvar.")) return
+    setCopyBusy(true)
+    setError("")
+    setMessage("")
+    try {
+      let groupsToCopy: ProductModifierGroup[] = []
+      if (kind === "product") {
+        const response = await fetch(`/api/products/${sourceId}/composition`, { cache: "no-store" })
+        const data = await response.json()
+        if (!response.ok || !data.composition) throw new Error(data.error || "Não foi possível carregar a montagem do produto.")
+        groupsToCopy = (data.composition as ProductComposition).modifierGroups
+      } else if (kind === "list") {
+        const existing = reusableGroups.find((item) => item.id === sourceId)
+        if (existing) groupsToCopy = [existing]
+      }
+      const allowed = groupsToCopy.filter((group) => !isPricedFlavorGroup(group) && group.options.length > 0)
+      if (!allowed.length) throw new Error("A opção selecionada não possui listas de montagem reutilizáveis.")
+      const drafts = fromComposition({
+        productId: product.id,
+        modifierGroups: allowed,
+        recipe: [],
+        estimatedFoodCost: 0,
+        ingredientStockAvailable: true,
+      }).groups.map((group) => ({
+        ...group,
+        key: key(),
+        existingGroupId: undefined,
+        sourceGroupId: undefined,
+        options: group.options.map((option) => ({ ...option, key: key() })),
+      }))
+      setGroups((current) => replaceAll
+        ? [...current.filter((group) => group.description === PRICED_FLAVOR_DESCRIPTION), ...drafts]
+        : [...current, ...drafts])
+      setMessage(replaceAll
+        ? "Montagem copiada! Confira os sabores e o mínimo/máximo. Clique em Salvar para aplicar."
+        : "Lista adicionada! Confira as opções e clique em Salvar para aplicar.")
+      setCopySource("")
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Não foi possível copiar a montagem.")
+    } finally {
+      setCopyBusy(false)
+    }
+  }
+
   function addExistingGroup() {
     const source = reusableGroups.find((item) => item.id === Number(selectedExistingGroup))
     if (!source || groups.some((item) => item.sourceGroupId === source.id)) return
@@ -355,7 +417,31 @@ export function ProductCompositionEditor({
           {loading ? <div className="rounded-2xl bg-white p-10 text-center text-sm text-gray-500">Carregando composição...</div> : <>
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black text-gray-900">O que o cliente pode escolher?</h3><p className="text-sm text-gray-500">Ex.: Sabores → frango, carne e pizza.</p></div><button type="button" onClick={addSnackFlavorGroup} className="mr-2 inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-black text-blue-700"><Plus className="h-4 w-4" /> Sabores com quantidades</button><button type="button" onClick={addGroup} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-black text-white"><Plus className="h-4 w-4" /> Nova escolha</button></div>
-              {(reusableGroups.length > 0 || catalogProducts.some((item) => item.active && item.id !== product.id)) && <details open className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><summary className="cursor-pointer text-sm font-bold text-blue-800">Importar sabores e bebidas <ChevronDown className="ml-1 inline h-4 w-4" /></summary>
+            {/* Ação principal: copiar uma montagem inteira ou uma lista previamente cadastrada. */}
+            {(readyProducts.length > 0 || readyLists.length > 0) && (
+              <section className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <label htmlFor="saborflow-copy-assembly" className="block text-sm font-black text-blue-950">Copiar montagem pronta</label>
+                <p className="mt-1 text-xs text-blue-800">Reaproveite sabores, complementos e limites de outro produto. A cópia pode ser editada sem alterar o original.</p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <select id="saborflow-copy-assembly" value={copySource} onChange={(event) => setCopySource(event.target.value)}
+                    aria-label="Montagem ou lista pronta para copiar" className="h-11 min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-sm">
+                    <option value="">Selecione uma montagem salva...</option>
+                    {readyProducts.length > 0 && <optgroup label="Copiar montagem completa de um produto">
+                      {readyProducts.map((item) => <option value={`product:${item.id}`} key={`product:${item.id}`}>{item.name} ({item.modifierGroups?.filter((group) => !isPricedFlavorGroup(group)).length || 0} lista(s))</option>)}
+                    </optgroup>}
+                    {readyLists.length > 0 && <optgroup label="Adicionar uma lista pronta">
+                      {readyLists.map((item) => <option value={`list:${item.id}`} key={`list:${item.id}`}>{item.name} ({item.options.length} opções)</option>)}
+                    </optgroup>}
+                  </select>
+                  <button type="button" disabled={!copySource || copyBusy || saving || loading} onClick={copyReadyAssembly}
+                    className="h-11 rounded-xl bg-blue-700 px-5 text-sm font-bold text-white disabled:opacity-40">
+                    {copyBusy ? "Copiando..." : "Copiar montagem"}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-blue-800">Montagem completa substitui as escolhas anteriores (com confirmação); lista pronta adiciona uma nova escolha. Nada é salvo automaticamente.</p>
+              </section>
+            )}
+              {(reusableGroups.length > 0 || catalogProducts.some((item) => item.active && item.id !== product.id)) && <details className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><summary className="cursor-pointer text-sm font-bold text-blue-800">Mais formas de importar sabores <ChevronDown className="ml-1 inline h-4 w-4" /></summary>
               <p className="mt-2 text-xs text-blue-800">Use um grupo de outro produto com suas opções e preços, ou copie os produtos de uma categoria.</p>
               {reusableGroups.length > 0 && <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Lista de sabores já cadastrada" value={selectedExistingGroup} onChange={(event) => setSelectedExistingGroup(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Escolher lista pronta...</option>{reusableGroups.filter((item) => !groups.some((group) => group.sourceGroupId === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.options.length} opções)</option>)}</select><button type="button" disabled={!selectedExistingGroup} onClick={addExistingGroup} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-40">Usar esta lista</button></div>}
               {catalogProducts.some((item) => item.active && item.id !== product.id) && <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Categoria de produtos para copiar sabores" value={sourceCategory} onChange={(event) => setSourceCategory(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="">Copiar sabores de uma categoria...</option>{[...new Set(catalogProducts.filter((item) => item.active && item.id !== product.id).map((item) => item.category))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })).map((name) => <option key={name} value={name}>{name}</option>)}</select><select aria-label="Cobrança das opções copiadas" value={sourcePricing} onChange={(event) => setSourcePricing(event.target.value as "priced" | "included")} className="h-10 rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="included">Sem preço extra · sabores do combo</option><option value="priced">Com preço · bebida ou extra</option></select><button type="button" disabled={!sourceCategory} onClick={addGroupFromCategory} className="rounded-lg border border-gray-300 bg-white px-3 text-sm font-bold text-gray-800 disabled:opacity-40">Copiar</button></div>}

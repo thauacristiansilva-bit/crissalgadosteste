@@ -1,6 +1,6 @@
 "use client"
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react"
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react"
 import { CircleDollarSign, Image as ImageIcon, PackagePlus, Pencil, Power, Save, Trash2, Upload, X } from "lucide-react"
 import type { Category, Product, ProductComposition, ProductModifierGroup } from "@/lib/types"
 import { isPricedFlavorGroup, PRICED_FLAVOR_DESCRIPTION } from "@/lib/product-composition"
@@ -54,6 +54,9 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
   const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState("")
   const [compositionProduct, setCompositionProduct] = useState<Product | null>(null)
+  useEffect(() => {
+    if (compositionProduct) document.getElementById("complementos-do-produto")?.scrollIntoView({ block: "start", behavior: "smooth" })
+  }, [compositionProduct])
   const [flavorMode, setFlavorMode] = useState(false)
   const [flavors, setFlavors] = useState<FlavorRow[]>([freshFlavor()])
   const [flavorComposition, setFlavorComposition] = useState<ProductComposition | null>(null)
@@ -231,8 +234,8 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
   }
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,.6fr)]">
-      <div data-tutorial="products-list" className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+    <section data-ui-patch="sf-composition-fullscreen-reuse-v1" className={`grid min-w-0 gap-5 ${compositionProduct ? "grid-cols-1" : "xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,.6fr)]"}`}>
+      <div data-tutorial="products-list" className={`${compositionProduct ? "hidden" : ""} min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm`}>
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4"><div><h2 className="text-lg font-bold text-gray-900">Produtos</h2><p className="text-sm text-gray-500">Itens exibidos no cardápio público.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{visibleProducts.filter((product) => product.active).length} ativos nesta seleção</span></div>
         <div className="border-b border-gray-100 px-5 py-4">
           <label className="block text-sm font-bold text-gray-800">Categoria para editar
@@ -256,7 +259,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
         </div>
       </div>
 
-      <form data-tutorial="products-form" onSubmit={submit} className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm xl:sticky xl:top-20">
+      <form data-tutorial="products-form" onSubmit={submit} className={`${compositionProduct ? "hidden" : ""} h-fit min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm`}>
         <div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{editingId ? <Pencil className="h-5 w-5 text-blue-700" /> : <PackagePlus className="h-5 w-5 text-blue-700" />}<h2 className="font-bold text-gray-900">{editingId ? "Editar produto" : "Novo produto"}</h2></div><p className="mt-1 text-sm text-gray-500">Cadastre produto, escolha sabores e seus preços. Para combos e extras, use a montagem detalhada no mesmo painel.</p></div>{editingId && <button type="button" onClick={clearForm} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancelar edição"><X className="h-4 w-4" /></button>}</div>
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</div>}
 
@@ -302,7 +305,7 @@ export function ProductsPanel({ products, categories, onProductsChanged }: { pro
         </div>
         <button data-tutorial="product-save" disabled={busy || uploadingImage || flavorLoading || activeCategories.length === 0} type="submit" className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar produto"}</button>
       </form>
-      {compositionProduct && <div className="xl:col-span-2">
+      {compositionProduct && <div className="w-full min-w-0 scroll-mt-24">
         <div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-bold text-gray-900">Montagem de {compositionProduct.name}</h3><button type="button" onClick={() => setCompositionProduct(null)} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-bold">Fechar montagem</button></div>
         <ProductCompositionEditor embedded product={compositionProduct} catalogProducts={products} reusableGroups={reusableGroups}
           onClose={() => setCompositionProduct(null)} onSaved={refreshProducts} />
