@@ -115,6 +115,8 @@ export function ProductCompositionEditor({
   // sf-composition-fullscreen-reuse-v1: reutilização de montagens prontas sem compartilhar dados entre produtos.
   const [copySource, setCopySource] = useState("")
   const [copyBusy, setCopyBusy] = useState(false)
+  // sf-editor-sabores-claro-v1: texto ao cliente e lista de sabores em edição rápida.
+  const [bulkFlavorTexts, setBulkFlavorTexts] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!product) return
@@ -288,6 +290,38 @@ export function ProductCompositionEditor({
     setSourceCategory("")
   }
 
+  // Cola sabores sem apagar opções já existentes nem duplicar nomes.
+  function pasteFlavorList(groupKey: string) {
+    const group = groups.find((item) => item.key === groupKey)
+    const pasted = (bulkFlavorTexts[groupKey] || "").trim()
+    if (!group || !pasted) return
+    const known = new Set(group.options.map((option) => option.name.trim().toLocaleLowerCase("pt-BR")))
+    const newNames: string[] = []
+    for (const line of pasted.split(/\r?\n|;/)) {
+      const name = line.trim()
+      if (!name || name.length > 120) continue
+      const normalized = name.toLocaleLowerCase("pt-BR")
+      if (!known.has(normalized) && group.options.length + newNames.length < 100) {
+        newNames.push(name)
+        known.add(normalized)
+      }
+    }
+    if (!newNames.length) {
+      setError("Nenhum sabor novo para importar. Verifique se já existe na lista.")
+      return
+    }
+    setGroups((current) => current.map((item) => item.key !== groupKey ? item : ({
+      ...item,
+      options: [...item.options, ...newNames.map((name) => ({
+        key: key(), name, description: "", priceDelta: "0", includedEligible: true,
+        active: true, ingredients: [] as OptionIngredientDraft[],
+      }))],
+    })))
+    setBulkFlavorTexts((current) => ({ ...current, [groupKey]: "" }))
+    setError("")
+    setMessage(`${newNames.length} sabor(es) inserido(s). Confira os preços e clique em Salvar sabores e extras.`)
+  }
+
   function addOption(groupKey: string) {
     setGroups((current) =>
       current.map((group) =>
@@ -418,8 +452,7 @@ export function ProductCompositionEditor({
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black text-gray-900">O que o cliente pode escolher?</h3><p className="text-sm text-gray-500">Ex.: Sabores → frango, carne e pizza.</p></div><button type="button" onClick={addSnackFlavorGroup} className="mr-2 inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-black text-blue-700"><Plus className="h-4 w-4" /> Sabores com quantidades</button><button type="button" onClick={addGroup} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-black text-white"><Plus className="h-4 w-4" /> Nova escolha</button></div>
             {/* Ação principal: copiar uma montagem inteira ou uma lista previamente cadastrada. */}
-            {(readyProducts.length > 0 || readyLists.length > 0) && (
-              <section className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <section className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
                 <label htmlFor="saborflow-copy-assembly" className="block text-sm font-black text-blue-950">Copiar montagem pronta</label>
                 <p className="mt-1 text-xs text-blue-800">Reaproveite sabores, complementos e limites de outro produto. A cópia pode ser editada sem alterar o original.</p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -439,8 +472,8 @@ export function ProductCompositionEditor({
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-blue-800">Montagem completa substitui as escolhas anteriores (com confirmação); lista pronta adiciona uma nova escolha. Nada é salvo automaticamente.</p>
+                {readyProducts.length === 0 && readyLists.length === 0 && <p className="mt-2 text-xs text-blue-900">Ainda não há listas prontas neste cadastro. Crie uma escolha abaixo e use “Colar vários sabores de uma vez”.</p>}
               </section>
-            )}
               {(reusableGroups.length > 0 || catalogProducts.some((item) => item.active && item.id !== product.id)) && <details className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3"><summary className="cursor-pointer text-sm font-bold text-blue-800">Mais formas de importar sabores <ChevronDown className="ml-1 inline h-4 w-4" /></summary>
               <p className="mt-2 text-xs text-blue-800">Use um grupo de outro produto com suas opções e preços, ou copie os produtos de uma categoria.</p>
               {reusableGroups.length > 0 && <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Lista de sabores já cadastrada" value={selectedExistingGroup} onChange={(event) => setSelectedExistingGroup(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2 text-sm"><option value="">Escolher lista pronta...</option>{reusableGroups.filter((item) => !groups.some((group) => group.sourceGroupId === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.options.length} opções)</option>)}</select><button type="button" disabled={!selectedExistingGroup} onClick={addExistingGroup} className="rounded-lg bg-blue-700 px-3 text-sm font-bold text-white disabled:opacity-40">Usar esta lista</button></div>}
@@ -455,6 +488,15 @@ export function ProductCompositionEditor({
                   <summary className="mb-4 cursor-pointer text-sm font-black text-gray-900">{group.name || "Novo grupo"} <span className="font-normal text-gray-500">· {group.options.length} opções</span></summary>
                   <div className="flex items-end gap-2"><label className="min-w-0 flex-1 text-xs font-bold text-gray-600">Pergunta para o cliente<input value={group.name} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, name: event.target.value } : item))} placeholder="Ex.: Escolha seus sabores" className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold"/></label><button type="button" onClick={() => setGroups((current) => current.filter((item) => item.key !== group.key))} aria-label="Excluir esta escolha" className="rounded-xl p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button></div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-xs font-bold text-gray-600">Como escolher<select value={group.selectionMode} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, selectionMode: event.target.value as GroupDraft["selectionMode"], includedQuantity: String(Math.min(Number(item.includedQuantity || 0), Math.max(1, Number(item.maxSelect) || 1))) } : item))} className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm"><option value="unique">Extras ou opções</option><option value="bundle">Sabores do combo</option></select></label><label className="text-xs font-bold text-gray-600">Mínimo por pacote<input type="number" min="0" value={group.minSelect} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, minSelect: event.target.value } : item))} className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm"/></label><label className="text-xs font-bold text-gray-600">Máximo por pacote<input type="number" min="1" value={group.maxSelect} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, maxSelect: event.target.value, includedQuantity: String(Math.min(Number(item.includedQuantity || 0), Math.max(1, Number(event.target.value) || 1))) } : item))} className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm"/></label></div>
+                  {group.description !== PRICED_FLAVOR_DESCRIPTION && <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label htmlFor={`saborflow-texto-cliente-${group.key}`} className="text-sm font-bold text-blue-950">Texto mostrado ao cliente (opcional)</label>
+                      <button type="button" onClick={() => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, description: "" } : item))} className="rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-blue-700">Limpar texto</button>
+                    </div>
+                    <input id={`saborflow-texto-cliente-${group.key}`} value={group.description} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, description: event.target.value } : item))} placeholder="Ex.: Escolha os sabores do seu pacote" className="mt-2 h-10 w-full rounded-lg border border-blue-200 bg-white px-3 text-sm" />
+                    <p className="mt-1 text-xs text-blue-800">Esta frase é só uma orientação. As regras de quantidade são o mínimo e máximo acima.</p>
+                    {/(?:25\s*(?:ou|a|até)\s*50|escolha\s+\d+\s+sabores)/i.test(group.description) && <p className="mt-2 text-xs font-semibold text-amber-800">Atenção: o texto menciona números que podem não corresponder aos limites configurados. Corrija ou clique em Limpar texto.</p>}
+                  </div>}
                   <label className="mt-3 flex items-center gap-2 text-sm font-bold text-gray-700"><input type="checkbox" checked={group.required} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, required: event.target.checked, minSelect: event.target.checked && Number(item.minSelect) < 1 ? "1" : item.minSelect } : item))}/> Cliente precisa escolher antes de comprar</label>
                   {group.selectionMode === "bundle" && <p className="mt-2 rounded-lg bg-blue-50 p-2 text-xs text-blue-800">Para 1 pacote: mínimo {group.minSelect || 0} e máximo {group.maxSelect || 1} salgados. Para 2 pacotes: mínimo {Number(group.minSelect || 0) * 2} e máximo {Number(group.maxSelect || 1) * 2}. Pode repetir os sabores.</p>}
 
@@ -471,8 +513,14 @@ export function ProductCompositionEditor({
                       </details>
                     </div>)}
                     <button type="button" onClick={() => addOption(group.key)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-black text-gray-700"><Plus className="h-4 w-4" /> Adicionar sabor ou extra</button>
+                    <details className="mt-3 rounded-xl border border-dashed border-blue-200 bg-blue-50 p-3">
+                      <summary className="cursor-pointer text-sm font-black text-blue-800">Colar vários sabores de uma vez</summary>
+                      <p className="mt-2 text-xs text-blue-900">Um sabor por linha (ou separe com ponto e vírgula). Os sabores existentes não serão apagados.</p>
+                      <textarea aria-label={`Cole os sabores de ${group.name || "nova escolha"}`} rows={4} value={bulkFlavorTexts[group.key] || ""} onChange={(event) => setBulkFlavorTexts((current) => ({ ...current, [group.key]: event.target.value }))} placeholder={"Frango\nCarne\nQueijo\nPizza"} className="mt-2 w-full resize-y rounded-lg border border-blue-200 bg-white p-3 text-sm" />
+                      <button type="button" disabled={!bulkFlavorTexts[group.key]?.trim()} onClick={() => pasteFlavorList(group.key)} className="mt-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">Adicionar sabores à lista</button>
+                    </details>
                   </div>
-                  <details className="mt-4 rounded-xl border border-gray-200 bg-white p-3"><summary className="cursor-pointer text-xs font-bold text-gray-700">Mais opções</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold text-gray-600">Texto de ajuda para o cliente<input value={group.description} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, description: event.target.value } : item))} placeholder="Opcional" className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-2 text-sm"/></label><label className="text-xs font-bold text-gray-600">Quantidade incluída no preço (máx. {group.maxSelect})<input type="number" min="0" max={group.maxSelect} value={group.includedQuantity} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, includedQuantity: event.target.value } : item))} className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-2 text-sm"/></label></div><label className="mt-3 flex items-center gap-2 text-xs font-bold text-gray-600"><input type="checkbox" checked={group.active} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, active: event.target.checked } : item))}/> Mostrar esta escolha na loja</label><p className="mt-2 text-xs text-gray-500">Escolha {groupIndex + 1} · aparece nesta ordem.</p></details>
+                  <details className="mt-4 rounded-xl border border-gray-200 bg-white p-3"><summary className="cursor-pointer text-xs font-bold text-gray-700">Mais opções</summary><div className="mt-3 grid gap-3 sm:grid-cols-1"><label className="text-xs font-bold text-gray-600">Quantidade incluída no preço (máx. {group.maxSelect})<input type="number" min="0" max={group.maxSelect} value={group.includedQuantity} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, includedQuantity: event.target.value } : item))} className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-2 text-sm"/></label></div><label className="mt-3 flex items-center gap-2 text-xs font-bold text-gray-600"><input type="checkbox" checked={group.active} onChange={(event) => setGroups((current) => current.map((item) => item.key === group.key ? { ...item, active: event.target.checked } : item))}/> Mostrar esta escolha na loja</label><p className="mt-2 text-xs text-gray-500">Escolha {groupIndex + 1} · aparece nesta ordem.</p></details>
                 </details>)}
                 {!groups.length && <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">Sem sabores ou extras. Clique em “Nova escolha” para começar.</div>}
               </div>
